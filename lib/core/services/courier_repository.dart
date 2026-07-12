@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 
 import '../models/tajgo_courier.dart';
 import '../models/tajgo_order.dart';
@@ -11,6 +12,12 @@ class CourierRepository {
 
   Stream<TajGoCourier?> courierStream(String uid) => _db
       .collection('couriers')
+      .doc(uid)
+      .snapshots()
+      .map((doc) => doc.exists ? TajGoCourier.fromDoc(doc) : null);
+
+  Stream<TajGoCourier?> publicCourierStream(String uid) => _db
+      .collection('courier_public')
       .doc(uid)
       .snapshots()
       .map((doc) => doc.exists ? TajGoCourier.fromDoc(doc) : null);
@@ -46,8 +53,8 @@ class CourierRepository {
       );
 
   Stream<List<TajGoCourier>> onlineCouriersStream() => _db
-      .collection('couriers')
-      .where('online', isEqualTo: true)
+      .collection('courier_public')
+      .where('isOnline', isEqualTo: true)
       .limit(50)
       .snapshots()
       .map(
@@ -57,18 +64,67 @@ class CourierRepository {
             .toList(),
       );
 
+  Future<void> ensureCourierProfile({
+    required String uid,
+    required String displayName,
+    String? phoneNumber,
+    String city = 'Худжанд',
+  }) => _db.runTransaction((transaction) async {
+    final ref = _db.collection('couriers').doc(uid);
+    final publicRef = _db.collection('courier_public').doc(uid);
+    final doc = await transaction.get(ref);
+    final existing = doc.data() ?? const <String, dynamic>{};
+    final online =
+        existing['isOnline'] as bool? ?? existing['online'] as bool? ?? false;
+    transaction.set(ref, {
+      'uid': uid,
+      'phoneNumber': phoneNumber ?? existing['phoneNumber'],
+      'displayName': displayName,
+      // Legacy fields keep the live v0.4.0 queries and UI working.
+      'name': displayName,
+      'city': city,
+      'isOnline': online,
+      'online': online,
+      'rating': existing['rating'] ?? 5.0,
+      'score': existing['score'] ?? 100,
+      'transport': existing['transport'] ?? 'electric_bike',
+      'earningsToday': existing['earningsToday'] ?? 0,
+      'ordersToday': existing['ordersToday'] ?? 0,
+      'activeOrderId': existing['activeOrderId'],
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+    transaction.set(publicRef, {
+      'uid': uid,
+      'displayName': displayName,
+      'name': displayName,
+      'isOnline': online,
+      'online': online,
+      'rating': existing['rating'] ?? 5.0,
+      'transport': existing['transport'] ?? 'electric_bike',
+      if (existing['location'] != null) 'location': existing['location'],
+      if (existing['locationUpdatedAt'] != null)
+        'locationUpdatedAt': existing['locationUpdatedAt'],
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  });
+
   Future<void> setOnline({
     required String uid,
     required bool online,
     required String name,
     required String city,
+    String? phoneNumber,
   }) => _db.runTransaction((transaction) async {
     final ref = _db.collection('couriers').doc(uid);
+    final publicRef = _db.collection('courier_public').doc(uid);
     final doc = await transaction.get(ref);
     final data = <String, dynamic>{
       'uid': uid,
+      'phoneNumber': phoneNumber,
+      'displayName': name,
       'name': name,
       'city': city,
+      'isOnline': online,
       'online': online,
       'updatedAt': FieldValue.serverTimestamp(),
     };
@@ -83,16 +139,40 @@ class CourierRepository {
       });
     }
     transaction.set(ref, data, SetOptions(merge: true));
+    transaction.set(publicRef, {
+      'uid': uid,
+      'displayName': name,
+      'name': name,
+      'isOnline': online,
+      'online': online,
+      'rating': doc.data()?['rating'] ?? 5.0,
+      'transport': doc.data()?['transport'] ?? 'electric_bike',
+      if (doc.data()?['location'] != null) 'location': doc.data()?['location'],
+      if (doc.data()?['locationUpdatedAt'] != null)
+        'locationUpdatedAt': doc.data()?['locationUpdatedAt'],
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
   });
 
   Future<void> updateLocation({
     required String uid,
     required double latitude,
     required double longitude,
-  }) => _db.collection('couriers').doc(uid).set({
-    'location': GeoPoint(latitude, longitude),
-    'locationUpdatedAt': FieldValue.serverTimestamp(),
-  }, SetOptions(merge: true));
+  }) async {
+    final location = GeoPoint(latitude, longitude);
+    final batch = _db.batch();
+    batch.set(_db.collection('couriers').doc(uid), {
+      'location': location,
+      'locationUpdatedAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+    batch.set(_db.collection('courier_public').doc(uid), {
+      'location': location,
+      'locationUpdatedAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+    await batch.commit();
+  }
 
   Future<void> declineOrder({
     required String orderId,
@@ -103,36 +183,40 @@ class CourierRepository {
   });
 
   /// Временный dev-reset для разблокировки курьера во время тестирования.
-  Future<void> resetActiveOrderForTesting({required String courierId}) =>
-      _db.runTransaction((transaction) async {
-        final courierRef = _db.collection('couriers').doc(courierId);
-        final courierDoc = await transaction.get(courierRef);
-        final orderId = courierDoc.data()?['activeOrderId'] as String?;
-        if (orderId == null) {
-          throw StateError('У курьера нет активного тестового заказа.');
-        }
+  Future<void> resetActiveOrderForTesting({required String courierId}) async {
+    if (!kDebugMode) {
+      throw StateError('Dev-reset доступен только в debug-сборке.');
+    }
+    await _db.runTransaction((transaction) async {
+      final courierRef = _db.collection('couriers').doc(courierId);
+      final courierDoc = await transaction.get(courierRef);
+      final orderId = courierDoc.data()?['activeOrderId'] as String?;
+      if (orderId == null) {
+        throw StateError('У курьера нет активного тестового заказа.');
+      }
 
-        final orderRef = _db.collection('orders').doc(orderId);
-        final orderDoc = await transaction.get(orderRef);
+      final orderRef = _db.collection('orders').doc(orderId);
+      final orderDoc = await transaction.get(orderRef);
 
-        transaction.update(courierRef, {
-          'activeOrderId': null,
-          'isBusy': false,
-          'currentOrderId': null,
+      transaction.update(courierRef, {
+        'activeOrderId': null,
+        'isBusy': false,
+        'currentOrderId': null,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      if (orderDoc.exists) {
+        transaction.update(orderRef, {
+          'status': 'waiting',
+          'courierId': FieldValue.delete(),
+          'courierName': FieldValue.delete(),
+          'acceptedAt': FieldValue.delete(),
+          'arrivedAtPickupAt': FieldValue.delete(),
           'updatedAt': FieldValue.serverTimestamp(),
         });
-
-        if (orderDoc.exists) {
-          transaction.update(orderRef, {
-            'status': 'waiting',
-            'courierId': FieldValue.delete(),
-            'courierName': FieldValue.delete(),
-            'acceptedAt': FieldValue.delete(),
-            'arrivedAtPickupAt': FieldValue.delete(),
-            'updatedAt': FieldValue.serverTimestamp(),
-          });
-        }
-      });
+      }
+    });
+  }
 
   Future<void> acceptOrder({
     required String orderId,

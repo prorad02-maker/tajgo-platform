@@ -2,10 +2,435 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Demo rule: anonymous Firebase Auth is still authentication.
-    // Replace with role- and ownership-based rules before public testing.
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function owns(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function isCourier() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/couriers/$(request.auth.uid));
+    }
+
+    function authPhone() {
+      return request.auth.token.get('phone_number', null);
+    }
+
+    function phoneMatchesAuth(data) {
+      return data.get('phoneNumber', null) == null
+        || data.get('phoneNumber', null) == authPhone();
+    }
+
+    match /users/{uid} {
+      allow get: if owns(uid);
+      allow list: if false;
+
+      allow create: if owns(uid)
+        && request.resource.data.uid == uid
+        && request.resource.data.role == 'customer'
+        && phoneMatchesAuth(request.resource.data)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+
+      allow update: if owns(uid)
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.createdAt == resource.data.createdAt
+        && phoneMatchesAuth(request.resource.data)
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'phoneNumber',
+          'displayName',
+          'name',
+          'city',
+          'language',
+          'updatedAt'
+        ]);
+
+      allow delete: if false;
+    }
+
+    match /couriers/{uid} {
+      function baseCourierDataIsValid() {
+        return request.resource.data.uid == uid
+          && phoneMatchesAuth(request.resource.data)
+          && request.resource.data.get('isOnline', false)
+            == request.resource.data.get('online', false);
+      }
+
+      function ownerProfileUpdateIsValid() {
+        return owns(uid)
+          && baseCourierDataIsValid()
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'phoneNumber',
+            'displayName',
+            'name',
+            'city',
+            'isOnline',
+            'online',
+            'transport',
+            'location',
+            'locationUpdatedAt',
+            'updatedAt'
+          ]);
+      }
+
+      function ownerAcceptUpdateIsValid() {
+        let orderId = request.resource.data.get('activeOrderId', null);
+        let orderAfter = getAfter(
+          /databases/$(database)/documents/orders/$(orderId)
+        );
+        return owns(uid)
+          && resource.data.get('activeOrderId', null) == null
+          && orderId is string
+          && orderAfter.data.courierId == uid
+          && orderAfter.data.status == 'accepted'
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'activeOrderId',
+            'updatedAt'
+          ]);
+      }
+
+      function completionStatsUpdateIsValid() {
+        let orderId = resource.data.get('activeOrderId', null);
+        let orderAfter = getAfter(
+          /databases/$(database)/documents/orders/$(orderId)
+        );
+        return orderId is string
+          && orderAfter.data.courierId == uid
+          && orderAfter.data.status == 'completed'
+          && request.resource.data.get('activeOrderId', null) == null
+          && request.resource.data.earningsToday
+            == resource.data.earningsToday + orderAfter.data.price
+          && request.resource.data.ordersToday == resource.data.ordersToday + 1
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'activeOrderId',
+            'earningsToday',
+            'ordersToday',
+            'updatedAt'
+          ]);
+      }
+
+      function assignedCustomerCompletesOrder() {
+        let orderId = resource.data.get('activeOrderId', null);
+        let orderAfter = getAfter(
+          /databases/$(database)/documents/orders/$(orderId)
+        );
+        return signedIn()
+          && orderId is string
+          && orderAfter.data.customerId == request.auth.uid
+          && completionStatsUpdateIsValid();
+      }
+
+      allow get: if owns(uid);
+      allow list: if false;
+
+      allow create: if owns(uid)
+        && baseCourierDataIsValid()
+        && request.resource.data.rating == 5
+        && request.resource.data.score == 100
+        && request.resource.data.earningsToday == 0
+        && request.resource.data.ordersToday == 0
+        && request.resource.data.get('activeOrderId', null) == null
+        && request.resource.data.updatedAt == request.time;
+
+      allow update: if ownerProfileUpdateIsValid()
+        || ownerAcceptUpdateIsValid()
+        || (owns(uid) && completionStatsUpdateIsValid())
+        || assignedCustomerCompletesOrder();
+
+      allow delete: if false;
+    }
+
+    // Public projection used by the live map and customer tracking. Sensitive
+    // courier fields (phone, activeOrderId and earnings) never live here.
+    match /courier_public/{uid} {
+      function assignedCustomerCanRead() {
+        let privateCourier = get(
+          /databases/$(database)/documents/couriers/$(uid)
+        );
+        let orderId = privateCourier.data.get('activeOrderId', null);
+        return signedIn()
+          && orderId is string
+          && exists(/databases/$(database)/documents/orders/$(orderId))
+          && get(/databases/$(database)/documents/orders/$(orderId)).data.customerId
+            == request.auth.uid;
+      }
+
+      function publicDataMatchesPrivate() {
+        let privateAfter = getAfter(
+          /databases/$(database)/documents/couriers/$(uid)
+        );
+        return request.resource.data.uid == uid
+          && request.resource.data.displayName == privateAfter.data.displayName
+          && request.resource.data.name == privateAfter.data.name
+          && request.resource.data.isOnline == privateAfter.data.isOnline
+          && request.resource.data.online == privateAfter.data.online
+          && request.resource.data.rating == privateAfter.data.rating
+          && request.resource.data.transport == privateAfter.data.transport
+          && request.resource.data.get('location', null)
+            == privateAfter.data.get('location', null)
+          && request.resource.data.get('locationUpdatedAt', null)
+            == privateAfter.data.get('locationUpdatedAt', null)
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.keys().hasOnly([
+            'uid',
+            'displayName',
+            'name',
+            'isOnline',
+            'online',
+            'rating',
+            'transport',
+            'location',
+            'locationUpdatedAt',
+            'updatedAt'
+          ]);
+      }
+
+      allow get: if signedIn()
+        && (owns(uid)
+          || resource.data.get('isOnline', false) == true
+          || assignedCustomerCanRead());
+      allow list: if signedIn()
+        && resource.data.get('isOnline', false) == true
+        && request.query.limit != null
+        && request.query.limit <= 50;
+
+      allow create, update: if owns(uid) && publicDataMatchesPrivate();
+      allow delete: if false;
+    }
+
+    match /orders/{orderId} {
+      function immutableOrderData() {
+        return request.resource.data.customerId == resource.data.customerId
+          && request.resource.data.customerName == resource.data.customerName
+          && request.resource.data.type == resource.data.type
+          && request.resource.data.city == resource.data.city
+          && request.resource.data.fromText == resource.data.fromText
+          && request.resource.data.toText == resource.data.toText
+          && request.resource.data.price == resource.data.price
+          && request.resource.data.currency == resource.data.currency
+          && request.resource.data.get('fromLocation', null)
+            == resource.data.get('fromLocation', null)
+          && request.resource.data.get('toLocation', null)
+            == resource.data.get('toLocation', null)
+          && request.resource.data.get('distanceKm', null)
+            == resource.data.get('distanceKm', null)
+          && request.resource.data.get('etaMinutes', null)
+            == resource.data.get('etaMinutes', null)
+          && request.resource.data.get('confirmationCode', null)
+            == resource.data.get('confirmationCode', null)
+          && request.resource.data.get('comment', null)
+            == resource.data.get('comment', null)
+          && request.resource.data.createdAt == resource.data.createdAt;
+      }
+
+      function customerCancels() {
+        return resource.data.customerId == request.auth.uid
+          && resource.data.status == 'waiting'
+          && request.resource.data.status == 'cancelled'
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'status',
+            'updatedAt'
+          ]);
+      }
+
+      function customerCompletes() {
+        let courierId = resource.data.get('courierId', null);
+        let courierBefore = get(
+          /databases/$(database)/documents/couriers/$(courierId)
+        );
+        let courierAfter = getAfter(
+          /databases/$(database)/documents/couriers/$(courierId)
+        );
+        return courierId is string
+          && resource.data.customerId == request.auth.uid
+          && resource.data.status == 'delivered'
+          && request.resource.data.status == 'completed'
+          && request.resource.data.completedAt == request.time
+          && request.resource.data.updatedAt == request.time
+          && courierBefore.data.get('activeOrderId', null) == orderId
+          && courierAfter.data.get('activeOrderId', null) == null
+          && courierAfter.data.earningsToday
+            == courierBefore.data.earningsToday + resource.data.price
+          && courierAfter.data.ordersToday
+            == courierBefore.data.ordersToday + 1
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'status',
+            'completedAt',
+            'updatedAt'
+          ]);
+      }
+
+      function customerDisputes() {
+        return resource.data.customerId == request.auth.uid
+          && resource.data.status == 'delivered'
+          && request.resource.data.status == 'disputed'
+          && request.resource.data.disputedAt == request.time
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'status',
+            'disputedAt',
+            'updatedAt'
+          ]);
+      }
+
+      function courierDeclines() {
+        return isCourier()
+          && resource.data.status == 'waiting'
+          && request.resource.data.status == 'waiting'
+          && request.auth.uid in request.resource.data.declinedBy
+          && request.resource.data.declinedBy.size()
+            <= resource.data.declinedBy.size() + 1
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'declinedBy',
+            'updatedAt'
+          ]);
+      }
+
+      function courierAccepts() {
+        let courierAfter = getAfter(
+          /databases/$(database)/documents/couriers/$(request.auth.uid)
+        );
+        return isCourier()
+          && resource.data.status == 'waiting'
+          && request.resource.data.status == 'accepted'
+          && request.resource.data.courierId == request.auth.uid
+          && courierAfter.data.get('activeOrderId', null) == orderId
+          && request.resource.data.acceptedAt == request.time
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'status',
+            'courierId',
+            'acceptedAt',
+            'updatedAt'
+          ]);
+      }
+
+      function assignedCourierUpdates() {
+        return isCourier()
+          && resource.data.courierId == request.auth.uid
+          && request.resource.data.courierId == request.auth.uid;
+      }
+
+      function courierArrives() {
+        return assignedCourierUpdates()
+          && resource.data.status == 'accepted'
+          && request.resource.data.status == 'accepted'
+          && request.resource.data.arrivedAtPickupAt == request.time
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'arrivedAtPickupAt',
+            'updatedAt'
+          ]);
+      }
+
+      function courierPicksUp() {
+        return assignedCourierUpdates()
+          && resource.data.status == 'accepted'
+          && resource.data.get('arrivedAtPickupAt', null) != null
+          && request.resource.data.status == 'pickedUp'
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'status',
+            'updatedAt'
+          ]);
+      }
+
+      function courierDelivers() {
+        return assignedCourierUpdates()
+          && resource.data.status == 'pickedUp'
+          && request.resource.data.status == 'delivered'
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'status',
+            'updatedAt'
+          ]);
+      }
+
+      function courierCompletesWithCode() {
+        let courierAfter = getAfter(
+          /databases/$(database)/documents/couriers/$(request.auth.uid)
+        );
+        return assignedCourierUpdates()
+          && resource.data.status == 'pickedUp'
+          && request.resource.data.status == 'completed'
+          && request.resource.data.completedAt == request.time
+          && request.resource.data.updatedAt == request.time
+          && courierAfter.data.get('activeOrderId', null) == null
+          && courierAfter.data.earningsToday
+            == get(/databases/$(database)/documents/couriers/$(request.auth.uid)).data.earningsToday
+              + resource.data.price
+          && courierAfter.data.ordersToday
+            == get(/databases/$(database)/documents/couriers/$(request.auth.uid)).data.ordersToday
+              + 1
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'status',
+            'completedAt',
+            'updatedAt'
+          ]);
+      }
+
+      allow create: if signedIn()
+        && request.resource.data.customerId == request.auth.uid
+        && request.resource.data.status == 'waiting'
+        && request.resource.data.price is number
+        && request.resource.data.price >= 0
+        && request.resource.data.currency == 'TJS'
+        && request.resource.data.get('courierId', null) == null
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.keys().hasOnly([
+          'customerId',
+          'customerName',
+          'status',
+          'type',
+          'city',
+          'fromText',
+          'toText',
+          'price',
+          'currency',
+          'confirmationCode',
+          'fromLocation',
+          'toLocation',
+          'distanceKm',
+          'etaMinutes',
+          'comment',
+          'declinedBy',
+          'createdAt',
+          'updatedAt'
+        ]);
+
+      allow get, list: if signedIn()
+        && (resource.data.customerId == request.auth.uid
+          || (isCourier() && resource.data.status == 'waiting')
+          || resource.data.get('courierId', null) == request.auth.uid);
+
+      allow update: if signedIn()
+        && immutableOrderData()
+        && (customerCancels()
+          || customerCompletes()
+          || customerDisputes()
+          || courierDeclines()
+          || courierAccepts()
+          || courierArrives()
+          || courierPicksUp()
+          || courierDelivers()
+          || courierCompletesWithCode());
+
+      allow delete: if false;
+    }
+
     match /{document=**} {
-      allow read, write: if request.auth != null;
+      allow read, write: if false;
     }
   }
 }

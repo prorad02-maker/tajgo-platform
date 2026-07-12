@@ -24,6 +24,8 @@ class CourierHomeScreen extends StatefulWidget {
 
 class _CourierHomeScreenState extends State<CourierHomeScreen> {
   bool _busy = false;
+  bool _profileEnsured = false;
+  bool _profileReady = false;
   bool _broadcasting = false;
   bool _locationErrorShown = false;
   bool _locationBlocked = false;
@@ -31,6 +33,30 @@ class _CourierHomeScreenState extends State<CourierHomeScreen> {
   StreamSubscription<Position>? _positionSubscription;
 
   String get _uid => TajGoScope.of(context).authService.currentUser!.uid;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_profileEnsured) {
+      return;
+    }
+    _profileEnsured = true;
+    Future<void>.microtask(_ensureCourierProfile);
+  }
+
+  Future<void> _ensureCourierProfile() async {
+    final scope = TajGoScope.of(context);
+    final user = await scope.userRepository.getUser(_uid);
+    await scope.courierRepository.ensureCourierProfile(
+      uid: _uid,
+      phoneNumber: user?.phoneNumber,
+      displayName: user?.displayName ?? 'Курьер',
+      city: user?.city ?? 'Худжанд',
+    );
+    if (mounted) {
+      setState(() => _profileReady = true);
+    }
+  }
 
   Future<void> _run(Future<void> Function() action) async {
     if (_busy) {
@@ -60,6 +86,7 @@ class _CourierHomeScreenState extends State<CourierHomeScreen> {
       online: online,
       name: user?.name ?? 'Курьер',
       city: user?.city ?? 'Худжанд',
+      phoneNumber: user?.phoneNumber,
     );
   });
 
@@ -213,7 +240,7 @@ class _CourierHomeScreenState extends State<CourierHomeScreen> {
           final online = courier?.online ?? false;
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) {
-              _syncLocationBroadcast(online);
+              _syncLocationBroadcast(online && _profileReady);
             }
           });
           return StreamBuilder<TajGoOrder?>(

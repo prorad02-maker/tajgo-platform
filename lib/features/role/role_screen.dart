@@ -1,14 +1,47 @@
 import 'package:flutter/material.dart';
 
 import '../../core/constants/tajgo_colors.dart';
+import '../../shared/widgets/tajgo_scope.dart';
+import '../auth/phone_auth_screen.dart';
 import '../courier/courier_home_screen.dart';
 import '../customer/customer_home_screen.dart';
 
-class RoleScreen extends StatelessWidget {
+class RoleScreen extends StatefulWidget {
   const RoleScreen({super.key});
 
   @override
+  State<RoleScreen> createState() => _RoleScreenState();
+}
+
+class _RoleScreenState extends State<RoleScreen> {
+  bool _phonePromptScheduled = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final user = TajGoScope.of(context).authService.currentUser;
+    if (_phonePromptScheduled || user?.isAnonymous != true) {
+      return;
+    }
+    _phonePromptScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _openPhoneAuth());
+  }
+
+  Future<void> _openPhoneAuth() async {
+    if (!mounted) {
+      return;
+    }
+    await Navigator.of(
+      context,
+    ).push<bool>(MaterialPageRoute(builder: (_) => const PhoneAuthScreen()));
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final user = TajGoScope.of(context).authService.currentUser;
     return Scaffold(
       appBar: AppBar(title: const Text('TajGo+')),
       body: ListView(
@@ -24,6 +57,44 @@ class RoleScreen extends StatelessWidget {
             style: TextStyle(color: TajGoColors.muted, fontSize: 16),
           ),
           const SizedBox(height: 24),
+          if (user?.isAnonymous == true) ...[
+            Card(
+              color: TajGoColors.mint,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.verified_user_rounded,
+                      color: TajGoColors.darkGreen,
+                      size: 30,
+                    ),
+                    const SizedBox(width: 12),
+                    const Expanded(
+                      child: Text(
+                        'Защитите профиль входом по телефону',
+                        style: TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: _openPhoneAuth,
+                      child: const Text('Войти'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+          ] else if (user?.phoneNumber != null) ...[
+            Text(
+              'Вы вошли как ${user!.phoneNumber}',
+              style: const TextStyle(
+                color: TajGoColors.darkGreen,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 14),
+          ],
           _RoleTile(
             icon: Icons.person_rounded,
             title: 'Клиент',

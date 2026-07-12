@@ -194,7 +194,9 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
             return _buildBody(order, null);
           }
           return StreamBuilder<TajGoCourier?>(
-            stream: scope.courierRepository.courierStream(order.courierId!),
+            stream: scope.courierRepository.publicCourierStream(
+              order.courierId!,
+            ),
             builder: (context, courierSnapshot) =>
                 _buildBody(order, courierSnapshot.data),
           );
