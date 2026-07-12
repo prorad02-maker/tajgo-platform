@@ -6,6 +6,7 @@ import '../../../core/constants/tajgo_colors.dart';
 import '../../../core/models/tajgo_courier.dart';
 import '../../../core/services/pricing.dart' as pricing;
 import '../../../shared/widgets/tajgo_scope.dart';
+import '../../customer/order_tracking_screen.dart';
 import '../models/tajgo_map_location.dart';
 
 enum _Stage { pickFrom, pickTo, details }
@@ -29,6 +30,7 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
   };
   final _map = MapController();
   final _price = TextEditingController();
+  final _comment = TextEditingController();
   _Stage _stage = _Stage.pickFrom;
   late String _type = widget.initialType;
   TajGoMapLocation? _from, _to;
@@ -45,7 +47,18 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
   @override
   void dispose() {
     _price.dispose();
+    _comment.dispose();
     super.dispose();
+  }
+
+  void _showSearchSoon() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Пока выберите точку на карте — поиск появится в следующей версии',
+        ),
+      ),
+    );
   }
 
   Future<void> _resolveCenter() async {
@@ -156,7 +169,7 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
       final user = scope.authService.currentUser!;
       final profile = await scope.userRepository.getUser(user.uid);
       final km = pricing.distanceKm(_from!.toLatLng(), _to!.toLatLng());
-      await scope.orderRepository.createOrder(
+      final orderId = await scope.orderRepository.createOrder(
         customerId: user.uid,
         customerName: profile?.name ?? 'Клиент',
         fromText: _from!.address,
@@ -167,9 +180,15 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
         toLocation: _to!.toGeoPoint(),
         distanceKm: km,
         etaMinutes: pricing.etaMinutes(km),
+        comment: _comment.text.trim().isEmpty ? null : _comment.text.trim(),
       );
       if (mounted) {
-        Navigator.pop(context);
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => OrderTrackingScreen(orderId: orderId),
+          ),
+        );
       }
     } catch (error) {
       if (mounted) {
@@ -343,6 +362,7 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
                         distance: km,
                         eta: pricing.etaMinutes(km),
                         price: _price,
+                        comment: _comment,
                         busy: _busy,
                         onType: (value) => setState(() => _type = value),
                         onPrice: (_) => setState(() {}),
@@ -354,6 +374,7 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
                         address: _address,
                         resolving: _resolving,
                         onConfirm: _confirmPoint,
+                        onSearchTap: _showSearchSoon,
                       ),
               ),
             ],
@@ -378,11 +399,13 @@ class _PointPanel extends StatelessWidget {
     required this.address,
     required this.resolving,
     required this.onConfirm,
+    required this.onSearchTap,
   });
   final _Stage stage;
   final String address;
   final bool resolving;
   final VoidCallback onConfirm;
+  final VoidCallback onSearchTap;
   @override
   Widget build(BuildContext context) => Material(
     color: Colors.white,
@@ -395,12 +418,52 @@ class _PointPanel extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            InkWell(
+              onTap: onSearchTap,
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 11,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF2F7F0),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(
+                      Icons.search_rounded,
+                      color: TajGoColors.muted,
+                      size: 20,
+                    ),
+                    SizedBox(width: 8),
+                    Text(
+                      'Поиск адреса — скоро',
+                      style: TextStyle(
+                        color: TajGoColors.muted,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
             Text(
               stage == _Stage.pickFrom ? 'Откуда забрать?' : 'Куда доставить?',
               style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
             ),
             const SizedBox(height: 8),
             Text(address, style: const TextStyle(color: TajGoColors.muted)),
+            if (stage == _Stage.pickFrom) ...[
+              const SizedBox(height: 6),
+              const Text(
+                'Доставка от 10 TJS',
+                style: TextStyle(color: TajGoColors.muted, fontSize: 12),
+              ),
+            ],
             const SizedBox(height: 16),
             FilledButton(
               onPressed: resolving ? null : onConfirm,
@@ -422,6 +485,7 @@ class _DetailsPanel extends StatelessWidget {
     required this.distance,
     required this.eta,
     required this.price,
+    required this.comment,
     required this.busy,
     required this.onType,
     required this.onPrice,
@@ -434,6 +498,7 @@ class _DetailsPanel extends StatelessWidget {
   final double distance;
   final int eta;
   final TextEditingController price;
+  final TextEditingController comment;
   final bool busy;
   final ValueChanged<String> onType;
   final ValueChanged<String> onPrice;
@@ -445,7 +510,7 @@ class _DetailsPanel extends StatelessWidget {
     borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
     child: SafeArea(
       top: false,
-      child: Padding(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.all(18),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -496,6 +561,29 @@ class _DetailsPanel extends StatelessWidget {
               style: const TextStyle(color: TajGoColors.muted),
             ),
             const SizedBox(height: 8),
+            TextField(
+              controller: comment,
+              maxLength: 200,
+              maxLines: 2,
+              minLines: 1,
+              decoration: const InputDecoration(
+                labelText: 'Комментарий курьеру (необязательно)',
+                hintText: 'Подъезд, этаж, «позвонить за 5 минут»',
+                counterText: '',
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              'Итоговая цена: ${price.text} TJS',
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              'Цена предложена за $distance км. Можно изменить — '
+              'курьер увидит вашу цену.',
+              style: const TextStyle(color: TajGoColors.muted, fontSize: 12),
+            ),
+            const SizedBox(height: 6),
             TextField(
               controller: price,
               onChanged: onPrice,

@@ -18,6 +18,7 @@ class OrderRepository {
     GeoPoint? toLocation,
     num? distanceKm,
     int? etaMinutes,
+    String? comment,
   }) async {
     final ref = _db.collection('orders').doc();
     final order = TajGoOrder(
@@ -36,6 +37,7 @@ class OrderRepository {
       distanceKm: distanceKm,
       etaMinutes: etaMinutes,
       confirmationCode: generateConfirmationCode(),
+      comment: comment,
     );
     await ref.set(order.toCreateMap());
     return ref.id;
@@ -62,6 +64,35 @@ class OrderRepository {
         }
         return null;
       });
+
+  /// Один заказ по id — для экрана отслеживания.
+  Stream<TajGoOrder?> orderStream(String orderId) => _db
+      .collection('orders')
+      .doc(orderId)
+      .snapshots()
+      .map((doc) => doc.exists ? TajGoOrder.fromDoc(doc) : null);
+
+  /// Последние завершённые заказы клиента для секции «Мои заказы».
+  /// Тот же запрос, что у activeOrderStream, — составной индекс не нужен.
+  Stream<List<TajGoOrder>> recentOrdersStream(String customerId) => _db
+      .collection('orders')
+      .where('customerId', isEqualTo: customerId)
+      .orderBy('createdAt', descending: true)
+      .limit(10)
+      .snapshots()
+      .map(
+        (snapshot) => snapshot.docs
+            .map(TajGoOrder.fromDoc)
+            .where(
+              (order) => const {
+                OrderStatus.completed,
+                OrderStatus.cancelled,
+                OrderStatus.disputed,
+              }.contains(order.status),
+            )
+            .take(5)
+            .toList(),
+      );
 
   Future<void> cancelOrder(String orderId) =>
       _db.runTransaction((transaction) async {

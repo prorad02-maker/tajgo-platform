@@ -4,8 +4,10 @@ import '../../core/constants/tajgo_colors.dart';
 import '../../core/models/tajgo_order.dart';
 import '../../shared/widgets/tajgo_scope.dart';
 import '../../shared/widgets/tajgo_badge.dart';
+import '../../shared/widgets/tajgo_order_history_tile.dart';
 import '../courier/courier_home_screen.dart';
 import '../map/screens/new_order_map_screen.dart';
+import 'order_tracking_screen.dart';
 
 class CustomerHomeScreen extends StatelessWidget {
   const CustomerHomeScreen({super.key});
@@ -117,6 +119,34 @@ class CustomerHomeScreen extends StatelessWidget {
                     ],
                   ),
                 ),
+                StreamBuilder<List<TajGoOrder>>(
+                  stream: scope.orderRepository.recentOrdersStream(uid),
+                  builder: (context, snapshot) {
+                    final orders = snapshot.data ?? const <TajGoOrder>[];
+                    if (orders.isEmpty) {
+                      return const SizedBox.shrink();
+                    }
+                    return Padding(
+                      padding: const EdgeInsets.only(top: 16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          const Text(
+                            'Мои заказы',
+                            style: TextStyle(
+                              fontSize: 19,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          ...orders.map(
+                            (order) => TajGoOrderHistoryTile(order: order),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
                 const SizedBox(height: 16),
                 Row(
                   children: [
@@ -204,25 +234,44 @@ class _PlatformHeader extends StatelessWidget {
       ),
       borderRadius: BorderRadius.vertical(bottom: Radius.circular(24)),
     ),
-    child: const Column(
+    child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
+        const Text(
           '📍 Худжанд',
           style: TextStyle(color: Colors.white70, fontWeight: FontWeight.w700),
         ),
-        SizedBox(height: 10),
+        const SizedBox(height: 10),
         Text(
-          'TajGo — платформа вашего города 💚',
-          style: TextStyle(
+          _greeting(),
+          style: const TextStyle(
             color: Colors.white,
             fontSize: 28,
             fontWeight: FontWeight.w900,
           ),
         ),
+        const SizedBox(height: 6),
+        const Text(
+          'TajGo — платформа вашего города',
+          style: TextStyle(color: Colors.white70, fontSize: 14),
+        ),
       ],
     ),
   );
+
+  String _greeting() {
+    final hour = DateTime.now().hour;
+    if (hour >= 5 && hour < 12) {
+      return 'Доброе утро 💚';
+    }
+    if (hour >= 12 && hour < 17) {
+      return 'Добрый день 💚';
+    }
+    if (hour >= 17 && hour < 23) {
+      return 'Добрый вечер 💚';
+    }
+    return 'Доброй ночи 💚';
+  }
 }
 
 class _ActiveOrder extends StatelessWidget {
@@ -283,16 +332,33 @@ class _ActiveOrder extends StatelessWidget {
     };
     return Card(
       color: TajGoColors.mint,
-      child: Padding(
-        padding: const EdgeInsets.all(18),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            TajGoBadge(
-              text: title,
-              background: TajGoColors.darkGreen,
-              foreground: Colors.white,
-            ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => OrderTrackingScreen(orderId: order.id),
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(18),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  TajGoBadge(
+                    text: title,
+                    background: TajGoColors.darkGreen,
+                    foreground: Colors.white,
+                  ),
+                  const Icon(
+                    Icons.chevron_right_rounded,
+                    color: TajGoColors.darkGreen,
+                  ),
+                ],
+              ),
             const SizedBox(height: 12),
             Text(
               '${order.fromText} → ${order.toText}',
@@ -369,7 +435,8 @@ class _ActiveOrder extends StatelessWidget {
                 },
                 child: const Text('Отменить'),
               ),
-          ],
+            ],
+          ),
         ),
       ),
     );

@@ -74,6 +74,18 @@ class TajGoOrderCard extends StatelessWidget {
                 meta,
                 style: const TextStyle(color: TajGoColors.muted, fontSize: 13),
               ),
+              if ((order.comment ?? '').isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(
+                  '💬 ${order.comment}',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: TajGoColors.muted,
+                    fontSize: 13,
+                  ),
+                ),
+              ],
               if (actions != null) ...[const SizedBox(height: 14), actions!],
             ],
           ),

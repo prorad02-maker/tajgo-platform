@@ -57,6 +57,7 @@ class TajGoOrder {
     this.arrivedAtPickupAt,
     this.completedAt,
     this.disputedAt,
+    this.comment,
   });
 
   final String id,
@@ -77,6 +78,7 @@ class TajGoOrder {
   final DateTime? createdAt, acceptedAt, updatedAt;
   final String? confirmationCode;
   final DateTime? arrivedAtPickupAt, completedAt, disputedAt;
+  final String? comment;
 
   factory TajGoOrder.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data() ?? const <String, dynamic>{};
@@ -105,6 +107,7 @@ class TajGoOrder {
       arrivedAtPickupAt: date('arrivedAtPickupAt'),
       completedAt: date('completedAt'),
       disputedAt: date('disputedAt'),
+      comment: data['comment'] as String?,
     );
   }
 
@@ -123,6 +126,7 @@ class TajGoOrder {
     if (toLocation != null) 'toLocation': toLocation,
     if (distanceKm != null) 'distanceKm': distanceKm,
     if (etaMinutes != null) 'etaMinutes': etaMinutes,
+    if (comment != null && comment!.isNotEmpty) 'comment': comment,
     'declinedBy': <String>[],
     'createdAt': FieldValue.serverTimestamp(),
     'updatedAt': FieldValue.serverTimestamp(),

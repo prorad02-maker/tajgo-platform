@@ -22,6 +22,37 @@ void main() {
     expect(suggestedPrice(2.5), 20);
   });
 
+  test('комментарий попадает в данные заказа только когда он не пустой', () {
+    const withComment = TajGoOrder(
+      id: '1',
+      customerId: 'c1',
+      customerName: 'Клиент',
+      status: OrderStatus.waiting,
+      type: 'package',
+      city: 'Худжанд',
+      fromText: 'A',
+      toText: 'B',
+      price: 15,
+      currency: 'TJS',
+      comment: 'Подъезд 2, этаж 3',
+    );
+    expect(withComment.toCreateMap()['comment'], 'Подъезд 2, этаж 3');
+
+    const withoutComment = TajGoOrder(
+      id: '2',
+      customerId: 'c1',
+      customerName: 'Клиент',
+      status: OrderStatus.waiting,
+      type: 'package',
+      city: 'Худжанд',
+      fromText: 'A',
+      toText: 'B',
+      price: 15,
+      currency: 'TJS',
+    );
+    expect(withoutComment.toCreateMap().containsKey('comment'), isFalse);
+  });
+
   test('код подтверждения и гео-гейт', () {
     final code = generateConfirmationCode(Random(7));
     expect(code, hasLength(4));

@@ -473,6 +473,13 @@ class _OrderPanel extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               Text(address, style: const TextStyle(color: TajGoColors.muted)),
+              if ((order.comment ?? '').isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  '💬 ${order.comment}',
+                  style: const TextStyle(color: TajGoColors.muted),
+                ),
+              ],
               if (distance != null) ...[
                 const SizedBox(height: 7),
                 Text(
