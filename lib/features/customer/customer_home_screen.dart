@@ -29,13 +29,13 @@ class CustomerHomeScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final scope = TajGoScope.of(context);
     final uid = scope.authService.currentUser!.uid;
-    const services = {
-      'package': '📦\nПосылка',
-      'food': '🍔\nЕда',
-      'shops': '🛒\nМагазины',
-      'pharmacy': '💊\nАптеки',
-      'flowers': '🌸\nЦветы',
-      'docs': '📄\nДокументы',
+    const services = <String, (IconData, String)>{
+      'package': (Icons.inventory_2_rounded, 'Посылка'),
+      'food': (Icons.fastfood_rounded, 'Еда'),
+      'shops': (Icons.shopping_cart_rounded, 'Магазины'),
+      'pharmacy': (Icons.local_pharmacy_rounded, 'Аптеки'),
+      'flowers': (Icons.local_florist_rounded, 'Цветы'),
+      'docs': (Icons.description_rounded, 'Документы'),
     };
 
     return Scaffold(
@@ -89,28 +89,25 @@ class CustomerHomeScreen extends StatelessWidget {
                         style: TextStyle(color: TajGoColors.muted),
                       ),
                       const SizedBox(height: 14),
-                      GridView.count(
+                      GridView.builder(
                         shrinkWrap: true,
                         physics: const NeverScrollableScrollPhysics(),
-                        crossAxisCount: 3,
-                        childAspectRatio: 1.15,
-                        children: services.entries
-                            .map(
-                              (entry) => InkWell(
-                                borderRadius: BorderRadius.circular(12),
-                                onTap: () => _openOrder(context, entry.key),
-                                child: Center(
-                                  child: Text(
-                                    entry.value,
-                                    textAlign: TextAlign.center,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            )
-                            .toList(),
+                        itemCount: services.length,
+                        gridDelegate:
+                            const SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: 3,
+                              mainAxisExtent: 112,
+                              mainAxisSpacing: 10,
+                              crossAxisSpacing: 10,
+                            ),
+                        itemBuilder: (context, index) {
+                          final entry = services.entries.elementAt(index);
+                          return _ServiceTile(
+                            icon: entry.value.$1,
+                            label: entry.value.$2,
+                            onTap: () => _openOrder(context, entry.key),
+                          );
+                        },
                       ),
                       FilledButton(
                         onPressed: () => _openOrder(context),
@@ -152,7 +149,7 @@ class CustomerHomeScreen extends StatelessWidget {
                   children: [
                     Expanded(
                       child: _SoonCard(
-                        icon: '🚕',
+                        icon: Icons.local_taxi_rounded,
                         title: 'Такси',
                         subtitle: 'Поездки по городу',
                         onTap: () => _showSoon(context),
@@ -161,7 +158,7 @@ class CustomerHomeScreen extends StatelessWidget {
                     const SizedBox(width: 12),
                     Expanded(
                       child: _SoonCard(
-                        icon: '💳',
+                        icon: Icons.account_balance_wallet_rounded,
                         title: 'Кошелёк',
                         subtitle: 'Оплата и бонусы',
                         onTap: () => _showSoon(context),
@@ -183,7 +180,11 @@ class CustomerHomeScreen extends StatelessWidget {
                       padding: EdgeInsets.all(18),
                       child: Row(
                         children: [
-                          Text('🚴', style: TextStyle(fontSize: 32)),
+                          _IconBubble(
+                            icon: Icons.delivery_dining_rounded,
+                            size: 56,
+                            iconSize: 34,
+                          ),
                           SizedBox(width: 14),
                           Expanded(
                             child: Column(
@@ -359,82 +360,82 @@ class _ActiveOrder extends StatelessWidget {
                   ),
                 ],
               ),
-            const SizedBox(height: 12),
-            Text(
-              '${order.fromText} → ${order.toText}',
-              style: const TextStyle(fontWeight: FontWeight.w700),
-            ),
-            Text('${order.price} ${order.currency}'),
-            if (order.status == OrderStatus.pickedUp &&
-                order.confirmationCode != null) ...[
-              const SizedBox(height: 14),
-              Text(
-                'Код получения: ${order.confirmationCode}',
-                style: const TextStyle(
-                  color: TajGoColors.darkGreen,
-                  fontSize: 22,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 2,
-                ),
-              ),
-              const Text(
-                'Назовите его курьеру при получении',
-                style: TextStyle(color: TajGoColors.muted),
-              ),
-            ],
-            if (order.status == OrderStatus.delivered) ...[
-              const SizedBox(height: 14),
-              const Text(
-                'Курьер передал заказ?',
-                style: TextStyle(fontWeight: FontWeight.w800),
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: FilledButton(
-                      onPressed: () => _run(
-                        context,
-                        () => TajGoScope.of(
-                          context,
-                        ).orderRepository.confirmReceived(order.id),
-                      ),
-                      child: const Text('✅ Получил'),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  TextButton(
-                    onPressed: () =>
-                        _run(context, () => _reportNotReceived(context)),
-                    child: const Text('Не получил'),
-                  ),
-                ],
-              ),
-            ],
-            if (order.status == OrderStatus.disputed) ...[
               const SizedBox(height: 12),
-              const Text(
-                'Мы разбираемся с вашей доставкой.',
-                style: TextStyle(color: TajGoColors.error),
+              Text(
+                '${order.fromText} → ${order.toText}',
+                style: const TextStyle(fontWeight: FontWeight.w700),
               ),
-            ],
-            if (order.status == OrderStatus.waiting)
-              TextButton(
-                onPressed: () async {
-                  try {
-                    await TajGoScope.of(
-                      context,
-                    ).orderRepository.cancelOrder(order.id);
-                  } catch (error) {
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(
+              Text('${order.price} ${order.currency}'),
+              if (order.status == OrderStatus.pickedUp &&
+                  order.confirmationCode != null) ...[
+                const SizedBox(height: 14),
+                Text(
+                  'Код получения: ${order.confirmationCode}',
+                  style: const TextStyle(
+                    color: TajGoColors.darkGreen,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 2,
+                  ),
+                ),
+                const Text(
+                  'Назовите его курьеру при получении',
+                  style: TextStyle(color: TajGoColors.muted),
+                ),
+              ],
+              if (order.status == OrderStatus.delivered) ...[
+                const SizedBox(height: 14),
+                const Text(
+                  'Курьер передал заказ?',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: () => _run(
+                          context,
+                          () => TajGoScope.of(
+                            context,
+                          ).orderRepository.confirmReceived(order.id),
+                        ),
+                        child: const Text('✅ Получил'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    TextButton(
+                      onPressed: () =>
+                          _run(context, () => _reportNotReceived(context)),
+                      child: const Text('Не получил'),
+                    ),
+                  ],
+                ),
+              ],
+              if (order.status == OrderStatus.disputed) ...[
+                const SizedBox(height: 12),
+                const Text(
+                  'Мы разбираемся с вашей доставкой.',
+                  style: TextStyle(color: TajGoColors.error),
+                ),
+              ],
+              if (order.status == OrderStatus.waiting)
+                TextButton(
+                  onPressed: () async {
+                    try {
+                      await TajGoScope.of(
                         context,
-                      ).showSnackBar(SnackBar(content: Text('$error')));
+                      ).orderRepository.cancelOrder(order.id);
+                    } catch (error) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(
+                          context,
+                        ).showSnackBar(SnackBar(content: Text('$error')));
+                      }
                     }
-                  }
-                },
-                child: const Text('Отменить'),
-              ),
+                  },
+                  child: const Text('Отменить'),
+                ),
             ],
           ),
         ),
@@ -450,7 +451,8 @@ class _SoonCard extends StatelessWidget {
     required this.subtitle,
     required this.onTap,
   });
-  final String icon, title, subtitle;
+  final IconData icon;
+  final String title, subtitle;
   final VoidCallback onTap;
   @override
   Widget build(BuildContext context) => Opacity(
@@ -467,7 +469,7 @@ class _SoonCard extends StatelessWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(icon, style: const TextStyle(fontSize: 25)),
+                  _IconBubble(icon: icon, size: 50, iconSize: 30),
                   const TajGoBadge(
                     text: 'скоро',
                     background: TajGoColors.soonBg,
@@ -486,5 +488,64 @@ class _SoonCard extends StatelessWidget {
         ),
       ),
     ),
+  );
+}
+
+class _ServiceTile extends StatelessWidget {
+  const _ServiceTile({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+    borderRadius: BorderRadius.circular(16),
+    onTap: onTap,
+    child: Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          _IconBubble(icon: icon),
+          const SizedBox(height: 8),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              label,
+              maxLines: 1,
+              style: const TextStyle(
+                color: TajGoColors.ink,
+                fontSize: 15,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class _IconBubble extends StatelessWidget {
+  const _IconBubble({required this.icon, this.size = 56, this.iconSize = 32});
+
+  final IconData icon;
+  final double size;
+  final double iconSize;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: size,
+    height: size,
+    decoration: BoxDecoration(
+      color: TajGoColors.secondaryBtn,
+      borderRadius: BorderRadius.circular(size * 0.34),
+    ),
+    child: Icon(icon, size: iconSize, color: TajGoColors.darkGreen),
   );
 }

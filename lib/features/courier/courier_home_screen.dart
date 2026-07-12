@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../../core/constants/tajgo_colors.dart';
@@ -92,6 +93,41 @@ class _CourierHomeScreenState extends State<CourierHomeScreen> {
         setState(() => _busy = false);
       }
     }
+  }
+
+  Future<void> _resetTestOrder() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Сбросить тестовый заказ?'),
+        content: const Text(
+          'Заказ вернётся в ленту со статусом waiting. Курьер останется на линии.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Сбросить'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) {
+      return;
+    }
+    await _run(() async {
+      await TajGoScope.of(
+        context,
+      ).courierRepository.resetActiveOrderForTesting(courierId: _uid);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Тестовый заказ возвращён в ленту.')),
+        );
+      }
+    });
   }
 
   Future<void> _syncLocationBroadcast(bool online) async {
@@ -257,6 +293,17 @@ class _CourierHomeScreenState extends State<CourierHomeScreen> {
                               ],
                             ),
                           ),
+                          if (kDebugMode)
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: TextButton.icon(
+                                onPressed: _busy ? null : _resetTestOrder,
+                                icon: const Icon(Icons.restart_alt_rounded),
+                                label: const Text(
+                                  'Тест · Сбросить тестовый заказ',
+                                ),
+                              ),
+                            ),
                           const Padding(
                             padding: EdgeInsets.symmetric(vertical: 12),
                             child: Center(
@@ -268,6 +315,19 @@ class _CourierHomeScreenState extends State<CourierHomeScreen> {
                             ),
                           ),
                         ] else ...[
+                          if (kDebugMode && courier?.activeOrderId != null) ...[
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: TextButton.icon(
+                                onPressed: _busy ? null : _resetTestOrder,
+                                icon: const Icon(Icons.restart_alt_rounded),
+                                label: const Text(
+                                  'Тест · Сбросить тестовый заказ',
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                          ],
                           const Text(
                             'Ожидающие заказы',
                             style: TextStyle(
@@ -464,14 +524,9 @@ class _StatsGrid extends StatelessWidget {
   final TajGoCourier? courier;
 
   @override
-  Widget build(BuildContext context) => GridView.count(
-    shrinkWrap: true,
-    physics: const NeverScrollableScrollPhysics(),
-    crossAxisCount: MediaQuery.sizeOf(context).width < 390 ? 2 : 4,
-    childAspectRatio: 1.05,
-    mainAxisSpacing: 8,
-    crossAxisSpacing: 8,
-    children: [
+  Widget build(BuildContext context) {
+    final wideLayout = MediaQuery.sizeOf(context).width >= 700;
+    final cards = <Widget>[
       TajGoStatCard(
         icon: '💰',
         value: '${courier?.earningsToday ?? 0} TJS',
@@ -492,8 +547,20 @@ class _StatsGrid extends StatelessWidget {
         value: '${courier?.score ?? 100}',
         label: 'TajGo Score',
       ),
-    ],
-  );
+    ];
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: cards.length,
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: wideLayout ? 4 : 2,
+        mainAxisExtent: 126,
+        mainAxisSpacing: 8,
+        crossAxisSpacing: 8,
+      ),
+      itemBuilder: (context, index) => cards[index],
+    );
+  }
 }
 
 class _EmptyFeed extends StatelessWidget {

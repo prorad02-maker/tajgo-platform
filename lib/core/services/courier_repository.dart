@@ -102,6 +102,38 @@ class CourierRepository {
     'updatedAt': FieldValue.serverTimestamp(),
   });
 
+  /// Временный dev-reset для разблокировки курьера во время тестирования.
+  Future<void> resetActiveOrderForTesting({required String courierId}) =>
+      _db.runTransaction((transaction) async {
+        final courierRef = _db.collection('couriers').doc(courierId);
+        final courierDoc = await transaction.get(courierRef);
+        final orderId = courierDoc.data()?['activeOrderId'] as String?;
+        if (orderId == null) {
+          throw StateError('У курьера нет активного тестового заказа.');
+        }
+
+        final orderRef = _db.collection('orders').doc(orderId);
+        final orderDoc = await transaction.get(orderRef);
+
+        transaction.update(courierRef, {
+          'activeOrderId': null,
+          'isBusy': false,
+          'currentOrderId': null,
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+
+        if (orderDoc.exists) {
+          transaction.update(orderRef, {
+            'status': 'waiting',
+            'courierId': FieldValue.delete(),
+            'courierName': FieldValue.delete(),
+            'acceptedAt': FieldValue.delete(),
+            'arrivedAtPickupAt': FieldValue.delete(),
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+        }
+      });
+
   Future<void> acceptOrder({
     required String orderId,
     required String courierId,

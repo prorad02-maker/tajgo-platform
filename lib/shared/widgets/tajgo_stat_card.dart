@@ -18,23 +18,37 @@ class TajGoStatCard extends StatelessWidget {
   Widget build(BuildContext context) => Card(
     margin: EdgeInsets.zero,
     child: Padding(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(10),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(icon, style: const TextStyle(fontSize: 20)),
-          const SizedBox(height: 7),
+          Text(icon, style: const TextStyle(fontSize: 19, height: 1)),
+          const SizedBox(height: 4),
+          Expanded(
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  value,
+                  maxLines: 1,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 2),
           FittedBox(
             fit: BoxFit.scaleDown,
             alignment: Alignment.centerLeft,
             child: Text(
-              value,
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+              label,
+              maxLines: 1,
+              style: const TextStyle(color: TajGoColors.muted, fontSize: 12),
             ),
-          ),
-          Text(
-            label,
-            style: const TextStyle(color: TajGoColors.muted, fontSize: 11),
           ),
         ],
       ),
