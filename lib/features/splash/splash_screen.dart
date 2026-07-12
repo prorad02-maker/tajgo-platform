@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/constants/tajgo_colors.dart';
-import '../../features/customer/customer_home_screen.dart';
+import '../../features/role/role_screen.dart';
 import '../../shared/widgets/tajgo_logo.dart';
 import '../../shared/widgets/tajgo_scope.dart';
 
@@ -37,7 +37,7 @@ class _SplashScreenState extends State<SplashScreen> {
         return;
       }
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const CustomerHomeScreen()),
+        MaterialPageRoute<void>(builder: (_) => const RoleScreen()),
       );
     } catch (error) {
       if (!mounted) {
