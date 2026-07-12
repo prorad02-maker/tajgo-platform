@@ -6,10 +6,17 @@ import 'package:geolocator/geolocator.dart';
 import '../../core/constants/tajgo_colors.dart';
 import '../../core/models/tajgo_courier.dart';
 import '../../core/models/tajgo_order.dart';
+import '../../shared/widgets/tajgo_action_button.dart';
+import '../../shared/widgets/tajgo_order_card.dart';
+import '../../shared/widgets/tajgo_order_progress.dart';
 import '../../shared/widgets/tajgo_scope.dart';
+import '../../shared/widgets/tajgo_stat_card.dart';
+import '../../shared/widgets/tajgo_status_pill.dart';
+import 'courier_order_screen.dart';
 
 class CourierHomeScreen extends StatefulWidget {
   const CourierHomeScreen({super.key});
+
   @override
   State<CourierHomeScreen> createState() => _CourierHomeScreenState();
 }
@@ -21,6 +28,7 @@ class _CourierHomeScreenState extends State<CourierHomeScreen> {
   bool _locationBlocked = false;
   bool _locationStarting = false;
   StreamSubscription<Position>? _positionSubscription;
+
   String get _uid => TajGoScope.of(context).authService.currentUser!.uid;
 
   Future<void> _run(Future<void> Function() action) async {
@@ -53,6 +61,38 @@ class _CourierHomeScreenState extends State<CourierHomeScreen> {
       city: user?.city ?? 'Худжанд',
     );
   });
+
+  void _openOrder(String orderId) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => CourierOrderScreen(orderId: orderId)),
+    );
+  }
+
+  Future<void> _acceptOrder(TajGoOrder order) async {
+    if (_busy) {
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      await TajGoScope.of(
+        context,
+      ).courierRepository.acceptOrder(orderId: order.id, courierId: _uid);
+      if (mounted) {
+        _openOrder(order.id);
+      }
+    } on StateError catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(error.message)));
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _busy = false);
+      }
+    }
+  }
 
   Future<void> _syncLocationBroadcast(bool online) async {
     if (!online) {
@@ -128,10 +168,10 @@ class _CourierHomeScreenState extends State<CourierHomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final repo = TajGoScope.of(context).courierRepository;
+    final repository = TajGoScope.of(context).courierRepository;
     return Scaffold(
       body: StreamBuilder<TajGoCourier?>(
-        stream: repo.courierStream(_uid),
+        stream: repository.courierStream(_uid),
         builder: (context, courierSnapshot) {
           final courier = courierSnapshot.data;
           final online = courier?.online ?? false;
@@ -140,120 +180,187 @@ class _CourierHomeScreenState extends State<CourierHomeScreen> {
               _syncLocationBroadcast(online);
             }
           });
-          return ListView(
-            padding: EdgeInsets.zero,
-            children: [
-              _CourierHeader(
-                online: online,
-                earnings: courier?.earningsToday ?? 0,
-                busy: _busy,
-                broadcasting: _broadcasting,
-                onToggle: () => _setOnline(!online),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Мой активный заказ',
-                      style: TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    StreamBuilder<List<TajGoOrder>>(
-                      stream: repo.activeCourierOrdersStream(_uid),
-                      builder: (context, snapshot) {
-                        final orders = snapshot.data ?? [];
-                        if (orders.isEmpty) {
-                          return const Text('Активного заказа нет.');
-                        }
-                        return Container(
-                          padding: const EdgeInsets.all(4),
-                          decoration: BoxDecoration(
-                            color: TajGoColors.mint,
-                            borderRadius: BorderRadius.circular(18),
+          return StreamBuilder<TajGoOrder?>(
+            stream: courier?.activeOrderId == null
+                ? Stream<TajGoOrder?>.value(null)
+                : repository.orderStream(courier!.activeOrderId!),
+            builder: (context, activeSnapshot) {
+              final activeOrder = activeSnapshot.data;
+              return ListView(
+                padding: EdgeInsets.zero,
+                children: [
+                  _CourierHeader(
+                    online: online,
+                    broadcasting: _broadcasting,
+                    busy: _busy,
+                    onToggle: () => _setOnline(!online),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 18, 16, 28),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _StatsGrid(courier: courier),
+                        const SizedBox(height: 24),
+                        if (activeOrder != null) ...[
+                          const Text(
+                            'Мой активный заказ',
+                            style: TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w900,
+                            ),
                           ),
-                          child: Column(
-                            children: orders
-                                .map(
-                                  (order) => _OrderCard(
-                                    order: order,
-                                    action: order.status == OrderStatus.accepted
-                                        ? 'Забрал посылку'
-                                        : 'Доставил',
-                                    onAction: () => _run(
-                                      () => order.status == OrderStatus.accepted
-                                          ? repo.markPickedUp(
-                                              orderId: order.id,
-                                              courierId: _uid,
-                                            )
-                                          : repo.markDelivered(
-                                              orderId: order.id,
-                                              courierId: _uid,
-                                            ),
-                                    ),
+                          const SizedBox(height: 10),
+                          TajGoOrderCard(
+                            order: activeOrder,
+                            backgroundColor: TajGoColors.mint,
+                            onTap: () => _openOrder(activeOrder.id),
+                            actions: Column(
+                              children: [
+                                TajGoOrderProgress(
+                                  currentStep: switch (activeOrder.status) {
+                                    OrderStatus.accepted
+                                        when activeOrder.arrivedAtPickupAt !=
+                                            null =>
+                                      1,
+                                    OrderStatus.accepted => 0,
+                                    OrderStatus.pickedUp => 3,
+                                    OrderStatus.delivered ||
+                                    OrderStatus.completed ||
+                                    OrderStatus.disputed => 4,
+                                    _ => 0,
+                                  },
+                                ),
+                                const SizedBox(height: 10),
+                                Text(
+                                  switch (activeOrder.status) {
+                                    OrderStatus.accepted
+                                        when activeOrder.arrivedAtPickupAt !=
+                                            null =>
+                                      'Курьер на месте',
+                                    OrderStatus.accepted =>
+                                      'Едем к точке забора',
+                                    OrderStatus.pickedUp =>
+                                      'Доставляем клиенту',
+                                    OrderStatus.delivered =>
+                                      'Ждём подтверждения клиента',
+                                    OrderStatus.disputed =>
+                                      'Доставка на проверке',
+                                    OrderStatus.completed => 'Заказ завершён',
+                                    _ => 'Активный заказ',
+                                  },
+                                  style: const TextStyle(
+                                    color: TajGoColors.darkGreen,
+                                    fontWeight: FontWeight.w800,
                                   ),
-                                )
-                                .toList(),
+                                ),
+                              ],
+                            ),
                           ),
-                        );
-                      },
+                          const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 12),
+                            child: Center(
+                              child: Text(
+                                'Завершите текущий заказ, чтобы принять следующий',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(color: TajGoColors.muted),
+                              ),
+                            ),
+                          ),
+                        ] else ...[
+                          const Text(
+                            'Ожидающие заказы',
+                            style: TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          if (!online)
+                            const _EmptyFeed(
+                              icon: '🛵',
+                              text: 'Выйдите на линию, чтобы видеть заказы',
+                            )
+                          else
+                            StreamBuilder<List<TajGoOrder>>(
+                              stream: repository.waitingOrdersStream(),
+                              builder: (context, snapshot) {
+                                final orders =
+                                    (snapshot.data ?? const <TajGoOrder>[])
+                                        .where(
+                                          (order) =>
+                                              !order.declinedBy.contains(_uid),
+                                        )
+                                        .toList();
+                                if (orders.isEmpty) {
+                                  return const _EmptyFeed(
+                                    icon: '📭',
+                                    text: 'Пока заказов нет',
+                                  );
+                                }
+                                return Column(
+                                  children: orders
+                                      .map(
+                                        (order) => TajGoOrderCard(
+                                          order: order,
+                                          actions: Row(
+                                            children: [
+                                              Expanded(
+                                                flex: 2,
+                                                child: SizedBox(
+                                                  height: 52,
+                                                  child: FilledButton(
+                                                    style:
+                                                        FilledButton.styleFrom(
+                                                          backgroundColor:
+                                                              TajGoColors
+                                                                  .secondaryBtn,
+                                                          foregroundColor:
+                                                              TajGoColors
+                                                                  .darkGreen,
+                                                        ),
+                                                    onPressed: _busy
+                                                        ? null
+                                                        : () => _run(
+                                                            () => repository
+                                                                .declineOrder(
+                                                                  orderId:
+                                                                      order.id,
+                                                                  courierId:
+                                                                      _uid,
+                                                                ),
+                                                          ),
+                                                    child: const Text(
+                                                      'Отказаться',
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Expanded(
+                                                flex: 3,
+                                                child: TajGoActionButton(
+                                                  label: 'Принять ✓',
+                                                  busy: _busy,
+                                                  onPressed: () =>
+                                                      _acceptOrder(order),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      )
+                                      .toList(),
+                                );
+                              },
+                            ),
+                        ],
+                      ],
                     ),
-                    const SizedBox(height: 22),
-                    const Text(
-                      'Ожидающие заказы',
-                      style: TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    if (!online)
-                      const Text('Выйдите на линию, чтобы видеть заказы')
-                    else
-                      StreamBuilder<List<TajGoOrder>>(
-                        stream: repo.waitingOrdersStream(),
-                        builder: (context, snapshot) {
-                          final orders = (snapshot.data ?? [])
-                              .where(
-                                (order) => !order.declinedBy.contains(_uid),
-                              )
-                              .toList();
-                          if (orders.isEmpty) {
-                            return const Text('Пока заказов нет.');
-                          }
-                          return Column(
-                            children: orders
-                                .map(
-                                  (order) => _OrderCard(
-                                    order: order,
-                                    action: 'Принять',
-                                    secondary: 'Отказаться',
-                                    onAction: () => _run(
-                                      () => repo.acceptOrder(
-                                        orderId: order.id,
-                                        courierId: _uid,
-                                      ),
-                                    ),
-                                    onSecondary: () => _run(
-                                      () => repo.declineOrder(
-                                        orderId: order.id,
-                                        courierId: _uid,
-                                      ),
-                                    ),
-                                  ),
-                                )
-                                .toList(),
-                          );
-                        },
-                      ),
-                  ],
-                ),
-              ),
-            ],
+                  ),
+                ],
+              );
+            },
           );
         },
       ),
@@ -264,20 +371,22 @@ class _CourierHomeScreenState extends State<CourierHomeScreen> {
 class _CourierHeader extends StatelessWidget {
   const _CourierHeader({
     required this.online,
-    required this.earnings,
-    required this.busy,
     required this.broadcasting,
+    required this.busy,
     required this.onToggle,
   });
-  final bool online, busy, broadcasting;
-  final num earnings;
+
+  final bool online;
+  final bool broadcasting;
+  final bool busy;
   final VoidCallback onToggle;
+
   @override
   Widget build(BuildContext context) => Container(
     padding: EdgeInsets.fromLTRB(
-      16,
-      MediaQuery.paddingOf(context).top + 8,
-      20,
+      12,
+      MediaQuery.paddingOf(context).top + 6,
+      18,
       24,
     ),
     decoration: const BoxDecoration(
@@ -289,13 +398,23 @@ class _CourierHeader extends StatelessWidget {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        IconButton(
-          onPressed: () => Navigator.pop(context),
-          color: Colors.white,
-          icon: const Icon(Icons.arrow_back_rounded),
+        Row(
+          children: [
+            IconButton(
+              onPressed: () => Navigator.maybePop(context),
+              color: Colors.white,
+              icon: const Icon(Icons.arrow_back_rounded),
+            ),
+            const Expanded(
+              child: Text(
+                'TajGo Курьер · 📍 Худжанд',
+                style: TextStyle(color: Colors.white70, fontSize: 13),
+              ),
+            ),
+            TajGoStatusPill(online: online),
+          ],
         ),
-        const Text('📍 Худжанд', style: TextStyle(color: Colors.white70)),
-        const SizedBox(height: 8),
+        const SizedBox(height: 12),
         Text(
           online ? 'Вы на линии 🟢' : 'Готовы выйти на линию?',
           style: const TextStyle(
@@ -303,11 +422,6 @@ class _CourierHeader extends StatelessWidget {
             fontSize: 28,
             fontWeight: FontWeight.w900,
           ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          'Сегодня заработано — $earnings TJS',
-          style: const TextStyle(color: Colors.white),
         ),
         if (broadcasting)
           const Padding(
@@ -318,72 +432,92 @@ class _CourierHeader extends StatelessWidget {
             ),
           ),
         const SizedBox(height: 16),
-        FilledButton(
-          style: FilledButton.styleFrom(
-            backgroundColor: Colors.white,
-            foregroundColor: TajGoColors.darkGreen,
-          ),
-          onPressed: busy ? null : onToggle,
-          child: Text(online ? 'Уйти с линии' : 'Выйти на линию'),
+        SizedBox(
+          height: 48,
+          width: double.infinity,
+          child: online
+              ? OutlinedButton(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    side: const BorderSide(color: Colors.white, width: 1.5),
+                  ),
+                  onPressed: busy ? null : onToggle,
+                  child: const Text('Уйти с линии'),
+                )
+              : FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    foregroundColor: TajGoColors.darkGreen,
+                  ),
+                  onPressed: busy ? null : onToggle,
+                  child: const Text('Выйти на линию'),
+                ),
         ),
       ],
     ),
   );
 }
 
-class _OrderCard extends StatelessWidget {
-  const _OrderCard({
-    required this.order,
-    required this.action,
-    required this.onAction,
-    this.secondary,
-    this.onSecondary,
-  });
-  final TajGoOrder order;
-  final String action;
-  final VoidCallback onAction;
-  final String? secondary;
-  final VoidCallback? onSecondary;
+class _StatsGrid extends StatelessWidget {
+  const _StatsGrid({required this.courier});
+
+  final TajGoCourier? courier;
+
   @override
-  Widget build(BuildContext context) => Card(
-    child: Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '${order.fromText} → ${order.toText}',
-            style: const TextStyle(fontWeight: FontWeight.w800),
-          ),
-          Text('${order.price} ${order.currency}'),
-          if (order.distanceKm != null && order.etaMinutes != null)
-            Text(
-              '~${order.distanceKm} км · ~${order.etaMinutes} мин',
-              style: const TextStyle(color: TajGoColors.muted),
-            ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: FilledButton(onPressed: onAction, child: Text(action)),
-              ),
-              if (secondary != null) ...[
-                const SizedBox(width: 8),
-                Expanded(
-                  child: FilledButton(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: TajGoColors.secondaryBtn,
-                      foregroundColor: TajGoColors.darkGreen,
-                    ),
-                    onPressed: onSecondary,
-                    child: Text(secondary!),
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ],
+  Widget build(BuildContext context) => GridView.count(
+    shrinkWrap: true,
+    physics: const NeverScrollableScrollPhysics(),
+    crossAxisCount: MediaQuery.sizeOf(context).width < 390 ? 2 : 4,
+    childAspectRatio: 1.05,
+    mainAxisSpacing: 8,
+    crossAxisSpacing: 8,
+    children: [
+      TajGoStatCard(
+        icon: '💰',
+        value: '${courier?.earningsToday ?? 0} TJS',
+        label: 'Сегодня',
       ),
+      TajGoStatCard(
+        icon: '📦',
+        value: '${courier?.ordersToday ?? 0}',
+        label: 'Заказов',
+      ),
+      TajGoStatCard(
+        icon: '⭐',
+        value: (courier?.rating ?? 5).toStringAsFixed(1),
+        label: 'Рейтинг',
+      ),
+      TajGoStatCard(
+        icon: '🏆',
+        value: '${courier?.score ?? 100}',
+        label: 'TajGo Score',
+      ),
+    ],
+  );
+}
+
+class _EmptyFeed extends StatelessWidget {
+  const _EmptyFeed({required this.icon, required this.text});
+
+  final String icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 34, horizontal: 20),
+    child: Column(
+      children: [
+        Text(icon, style: const TextStyle(fontSize: 42)),
+        const SizedBox(height: 12),
+        Text(
+          text,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            color: TajGoColors.muted,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ],
     ),
   );
 }

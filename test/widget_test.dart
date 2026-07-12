@@ -1,6 +1,8 @@
+import 'dart:math';
+
 import 'package:flutter_test/flutter_test.dart';
-import 'package:tajgo/core/models/tajgo_order.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:tajgo/core/models/tajgo_order.dart';
 import 'package:tajgo/core/services/pricing.dart';
 
 void main() {
@@ -18,5 +20,13 @@ void main() {
     expect(etaMinutes(2.5), 14);
     expect(suggestedPrice(0), 10);
     expect(suggestedPrice(2.5), 20);
+  });
+
+  test('код подтверждения и гео-гейт', () {
+    final code = generateConfirmationCode(Random(7));
+    expect(code, hasLength(4));
+    expect(int.tryParse(code), isNotNull);
+    expect(withinActionRadius(2), isTrue);
+    expect(withinActionRadius(2.01), isFalse);
   });
 }

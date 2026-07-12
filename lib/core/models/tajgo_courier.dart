@@ -11,6 +11,9 @@ class TajGoCourier {
     required this.earningsToday,
     this.location,
     this.locationUpdatedAt,
+    this.activeOrderId,
+    this.ordersToday = 0,
+    this.score = 100,
   });
   final String uid, name, city, transport;
   final bool online;
@@ -18,6 +21,9 @@ class TajGoCourier {
   final num earningsToday;
   final GeoPoint? location;
   final DateTime? locationUpdatedAt;
+  final String? activeOrderId;
+  final int ordersToday;
+  final int score;
 
   factory TajGoCourier.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data() ?? const <String, dynamic>{};
@@ -31,6 +37,9 @@ class TajGoCourier {
       earningsToday: data['earningsToday'] as num? ?? 0,
       location: data['location'] as GeoPoint?,
       locationUpdatedAt: (data['locationUpdatedAt'] as Timestamp?)?.toDate(),
+      activeOrderId: data['activeOrderId'] as String?,
+      ordersToday: (data['ordersToday'] as num? ?? 0).toInt(),
+      score: (data['score'] as num? ?? 100).toInt(),
     );
   }
 }

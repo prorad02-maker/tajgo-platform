@@ -1,12 +1,22 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-enum OrderStatus { waiting, accepted, pickedUp, delivered, cancelled }
+enum OrderStatus {
+  waiting,
+  accepted,
+  pickedUp,
+  delivered,
+  completed,
+  disputed,
+  cancelled,
+}
 
 OrderStatus orderStatusFromString(String? value) {
   return switch (value) {
     'accepted' => OrderStatus.accepted,
     'pickedUp' => OrderStatus.pickedUp,
     'delivered' => OrderStatus.delivered,
+    'completed' => OrderStatus.completed,
+    'disputed' => OrderStatus.disputed,
     'cancelled' => OrderStatus.cancelled,
     _ => OrderStatus.waiting,
   };
@@ -17,6 +27,8 @@ String orderStatusToString(OrderStatus status) => switch (status) {
   OrderStatus.accepted => 'accepted',
   OrderStatus.pickedUp => 'pickedUp',
   OrderStatus.delivered => 'delivered',
+  OrderStatus.completed => 'completed',
+  OrderStatus.disputed => 'disputed',
   OrderStatus.cancelled => 'cancelled',
 };
 
@@ -41,6 +53,10 @@ class TajGoOrder {
     this.createdAt,
     this.acceptedAt,
     this.updatedAt,
+    this.confirmationCode,
+    this.arrivedAtPickupAt,
+    this.completedAt,
+    this.disputedAt,
   });
 
   final String id,
@@ -59,6 +75,8 @@ class TajGoOrder {
   final GeoPoint? fromLocation, toLocation;
   final List<String> declinedBy;
   final DateTime? createdAt, acceptedAt, updatedAt;
+  final String? confirmationCode;
+  final DateTime? arrivedAtPickupAt, completedAt, disputedAt;
 
   factory TajGoOrder.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data() ?? const <String, dynamic>{};
@@ -83,6 +101,10 @@ class TajGoOrder {
       createdAt: date('createdAt'),
       acceptedAt: date('acceptedAt'),
       updatedAt: date('updatedAt'),
+      confirmationCode: data['confirmationCode'] as String?,
+      arrivedAtPickupAt: date('arrivedAtPickupAt'),
+      completedAt: date('completedAt'),
+      disputedAt: date('disputedAt'),
     );
   }
 
@@ -96,6 +118,7 @@ class TajGoOrder {
     'toText': toText,
     'price': price,
     'currency': currency,
+    if (confirmationCode != null) 'confirmationCode': confirmationCode,
     if (fromLocation != null) 'fromLocation': fromLocation,
     if (toLocation != null) 'toLocation': toLocation,
     if (distanceKm != null) 'distanceKm': distanceKm,

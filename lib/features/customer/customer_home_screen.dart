@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/constants/tajgo_colors.dart';
 import '../../core/models/tajgo_order.dart';
 import '../../shared/widgets/tajgo_scope.dart';
+import '../../shared/widgets/tajgo_badge.dart';
 import '../courier/courier_home_screen.dart';
 import '../map/screens/new_order_map_screen.dart';
 
@@ -73,7 +74,7 @@ class CustomerHomeScreen extends StatelessWidget {
                               fontWeight: FontWeight.w800,
                             ),
                           ),
-                          _Badge(
+                          TajGoBadge(
                             text: 'Активно',
                             background: TajGoColors.mint,
                             foreground: TajGoColors.darkGreen,
@@ -227,13 +228,57 @@ class _PlatformHeader extends StatelessWidget {
 class _ActiveOrder extends StatelessWidget {
   const _ActiveOrder({required this.order});
   final TajGoOrder order;
+
+  Future<void> _reportNotReceived(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Вы уверены?'),
+        content: const Text(
+          'Сообщить, что заказ не был получен? Курьер останется заблокирован до проверки.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Не получил'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && context.mounted) {
+      await TajGoScope.of(context).orderRepository.reportNotReceived(order.id);
+    }
+  }
+
+  Future<void> _run(
+    BuildContext context,
+    Future<void> Function() action,
+  ) async {
+    try {
+      await action();
+    } catch (error) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('$error')));
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final title = switch (order.status) {
       OrderStatus.waiting => '🔎 Ищем курьера...',
+      OrderStatus.accepted when order.arrivedAtPickupAt != null =>
+        '📍 Курьер на месте',
       OrderStatus.accepted => '🚴 Курьер принял заказ',
-      OrderStatus.pickedUp => '📦 Курьер забрал посылку',
-      OrderStatus.delivered => '✅ Доставлено',
+      OrderStatus.pickedUp => '📦 Везём заказ',
+      OrderStatus.delivered => 'Подтвердите получение',
+      OrderStatus.disputed => '⚠️ Разбираемся',
       _ => '',
     };
     return Card(
@@ -243,7 +288,7 @@ class _ActiveOrder extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _Badge(
+            TajGoBadge(
               text: title,
               background: TajGoColors.darkGreen,
               foreground: Colors.white,
@@ -254,6 +299,59 @@ class _ActiveOrder extends StatelessWidget {
               style: const TextStyle(fontWeight: FontWeight.w700),
             ),
             Text('${order.price} ${order.currency}'),
+            if (order.status == OrderStatus.pickedUp &&
+                order.confirmationCode != null) ...[
+              const SizedBox(height: 14),
+              Text(
+                'Код получения: ${order.confirmationCode}',
+                style: const TextStyle(
+                  color: TajGoColors.darkGreen,
+                  fontSize: 22,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 2,
+                ),
+              ),
+              const Text(
+                'Назовите его курьеру при получении',
+                style: TextStyle(color: TajGoColors.muted),
+              ),
+            ],
+            if (order.status == OrderStatus.delivered) ...[
+              const SizedBox(height: 14),
+              const Text(
+                'Курьер передал заказ?',
+                style: TextStyle(fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: () => _run(
+                        context,
+                        () => TajGoScope.of(
+                          context,
+                        ).orderRepository.confirmReceived(order.id),
+                      ),
+                      child: const Text('✅ Получил'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  TextButton(
+                    onPressed: () =>
+                        _run(context, () => _reportNotReceived(context)),
+                    child: const Text('Не получил'),
+                  ),
+                ],
+              ),
+            ],
+            if (order.status == OrderStatus.disputed) ...[
+              const SizedBox(height: 12),
+              const Text(
+                'Мы разбираемся с вашей доставкой.',
+                style: TextStyle(color: TajGoColors.error),
+              ),
+            ],
             if (order.status == OrderStatus.waiting)
               TextButton(
                 onPressed: () async {
@@ -303,7 +401,7 @@ class _SoonCard extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(icon, style: const TextStyle(fontSize: 25)),
-                  const _Badge(
+                  const TajGoBadge(
                     text: 'скоро',
                     background: TajGoColors.soonBg,
                     foreground: TajGoColors.soonText,
@@ -319,32 +417,6 @@ class _SoonCard extends StatelessWidget {
             ],
           ),
         ),
-      ),
-    ),
-  );
-}
-
-class _Badge extends StatelessWidget {
-  const _Badge({
-    required this.text,
-    required this.background,
-    required this.foreground,
-  });
-  final String text;
-  final Color background, foreground;
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-    decoration: BoxDecoration(
-      color: background,
-      borderRadius: BorderRadius.circular(99),
-    ),
-    child: Text(
-      text,
-      style: TextStyle(
-        color: foreground,
-        fontSize: 12,
-        fontWeight: FontWeight.w800,
       ),
     ),
   );

@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../models/tajgo_order.dart';
+import 'pricing.dart';
 
 class OrderRepository {
   OrderRepository(this._db);
@@ -34,6 +35,7 @@ class OrderRepository {
       toLocation: toLocation,
       distanceKm: distanceKm,
       etaMinutes: etaMinutes,
+      confirmationCode: generateConfirmationCode(),
     );
     await ref.set(order.toCreateMap());
     return ref.id;
@@ -53,6 +55,7 @@ class OrderRepository {
             OrderStatus.accepted,
             OrderStatus.pickedUp,
             OrderStatus.delivered,
+            OrderStatus.disputed,
           }.contains(order.status)) {
             return order;
           }
@@ -69,6 +72,45 @@ class OrderRepository {
         }
         transaction.update(ref, {
           'status': 'cancelled',
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      });
+
+  Future<void> confirmReceived(String orderId) =>
+      _db.runTransaction((transaction) async {
+        final orderRef = _db.collection('orders').doc(orderId);
+        final orderDoc = await transaction.get(orderRef);
+        final data = orderDoc.data();
+        if (data?['status'] != 'delivered') {
+          throw StateError('Заказ ещё не ожидает подтверждения получения.');
+        }
+        final courierId = data?['courierId'] as String?;
+        if (courierId == null) {
+          throw StateError('У заказа не указан курьер.');
+        }
+        transaction.update(orderRef, {
+          'status': 'completed',
+          'completedAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+        transaction.update(_db.collection('couriers').doc(courierId), {
+          'activeOrderId': null,
+          'earningsToday': FieldValue.increment((data?['price'] ?? 0) as num),
+          'ordersToday': FieldValue.increment(1),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      });
+
+  Future<void> reportNotReceived(String orderId) =>
+      _db.runTransaction((transaction) async {
+        final orderRef = _db.collection('orders').doc(orderId);
+        final orderDoc = await transaction.get(orderRef);
+        if (orderDoc.data()?['status'] != 'delivered') {
+          throw StateError('Заказ ещё не ожидает подтверждения получения.');
+        }
+        transaction.update(orderRef, {
+          'status': 'disputed',
+          'disputedAt': FieldValue.serverTimestamp(),
           'updatedAt': FieldValue.serverTimestamp(),
         });
       });
