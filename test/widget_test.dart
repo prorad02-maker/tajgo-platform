@@ -1,30 +1,22 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-
-import 'package:tajgo/main.dart';
+import 'package:tajgo/core/models/tajgo_order.dart';
+import 'package:latlong2/latlong.dart';
+import 'package:tajgo/core/services/pricing.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  test('неизвестный статус заказа считается ожидающим', () {
+    expect(orderStatusFromString('legacy'), OrderStatus.waiting);
+    expect(orderStatusToString(OrderStatus.pickedUp), 'pickedUp');
+  });
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
-
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
-
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+  test('расчёт расстояния, времени и цены', () {
+    final distance = distanceKm(
+      const LatLng(40.2833, 69.6222),
+      const LatLng(40.2833, 69.6322),
+    );
+    expect(distance, closeTo(0.8, 0.2));
+    expect(etaMinutes(2.5), 14);
+    expect(suggestedPrice(0), 10);
+    expect(suggestedPrice(2.5), 20);
   });
 }
