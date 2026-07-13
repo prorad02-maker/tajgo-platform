@@ -13,6 +13,8 @@ import '../../shared/widgets/tajgo_courier_banner.dart';
 import '../../shared/widgets/tajgo_order_progress.dart';
 import '../../shared/widgets/tajgo_scope.dart';
 import '../../shared/widgets/tajgo_status_header.dart';
+import '../map/services/tajgo_map_camera.dart';
+import '../map/widgets/tajgo_location_widgets.dart';
 
 /// Экран отслеживания заказа клиентом: карта с точками A/B, живой маркер
 /// курьера и статусная панель со всеми шагами доставки.
@@ -28,8 +30,11 @@ class OrderTrackingScreen extends StatefulWidget {
 class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
   static const _khujand = LatLng(40.2833, 69.6222);
   final _mapController = MapController();
+  final _camera = TajGoMapCamera();
+  LatLng? _currentPosition;
   bool _fitted = false;
   bool _busy = false;
+  bool _locating = false;
   bool _showBanner = false;
   bool _popScheduled = false;
   OrderStatus? _lastStatus;
@@ -37,7 +42,67 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
   Timer? _completedTimer;
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _restoreLocation());
+  }
+
+  Future<void> _restoreLocation() async {
+    final position = await TajGoScope.of(
+      context,
+    ).locationService.currentPositionIfAuthorized();
+    if (mounted && position != null) {
+      setState(
+        () => _currentPosition = LatLng(position.latitude, position.longitude),
+      );
+    }
+  }
+
+  Future<void> _locate() async {
+    if (_locating) {
+      return;
+    }
+    setState(() => _locating = true);
+    final service = TajGoScope.of(context).locationService;
+    try {
+      final position = await service.determineCurrentPosition();
+      final point = LatLng(position.latitude, position.longitude);
+      if (!mounted) {
+        return;
+      }
+      setState(() => _currentPosition = point);
+      await _camera.animateTo(
+        controller: _mapController,
+        target: point,
+        zoom: TajGoMapCamera.cityZoom,
+      );
+    } catch (error) {
+      if (mounted) {
+        final issue = service.userFacingException(error);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(issue.message),
+            action: issue.requiresSettings
+                ? SnackBarAction(
+                    label: 'Настройки',
+                    onPressed: () async {
+                      await service.openSettingsFor(issue.issue);
+                    },
+                  )
+                : null,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _locating = false);
+      }
+    }
+  }
+
+  @override
   void dispose() {
+    _camera.stop();
     _bannerTimer?.cancel();
     _completedTimer?.cancel();
     super.dispose();
@@ -278,6 +343,13 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
                           height: 22,
                           child: const _CourierDot(),
                         ),
+                      if (_currentPosition != null)
+                        Marker(
+                          point: _currentPosition!,
+                          width: 44,
+                          height: 44,
+                          child: const TajGoCurrentLocationMarker(),
+                        ),
                     ],
                   ),
                   RichAttributionWidget(
@@ -318,6 +390,15 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
                     ),
                   ),
                 ),
+              Positioned(
+                right: 12,
+                bottom: 12,
+                child: TajGoLocateButton(
+                  heroTag: 'trackingLocate',
+                  loading: _locating,
+                  onPressed: _locate,
+                ),
+              ),
             ],
           ),
         ),

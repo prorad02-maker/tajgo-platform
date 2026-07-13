@@ -8,6 +8,8 @@ import '../../../core/services/pricing.dart' as pricing;
 import '../../../shared/widgets/tajgo_scope.dart';
 import '../../customer/order_tracking_screen.dart';
 import '../models/tajgo_map_location.dart';
+import '../services/tajgo_map_camera.dart';
+import '../widgets/tajgo_location_widgets.dart';
 
 enum _Stage { pickFrom, pickTo, details }
 
@@ -29,6 +31,7 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
     'docs': 'Документы',
   };
   final _map = MapController();
+  final _camera = TajGoMapCamera();
   final _price = TextEditingController();
   final _comment = TextEditingController();
   _Stage _stage = _Stage.pickFrom;
@@ -37,15 +40,66 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
   LatLng? _current;
   String _address = 'Определяем адрес...';
   bool _resolving = false, _locating = false, _busy = false;
+  bool _cameraMoving = false;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _resolveCenter());
+    WidgetsBinding.instance.addPostFrameCallback((_) => _prepareMap());
+  }
+
+  Future<void> _prepareMap() async {
+    final position = await TajGoScope.of(
+      context,
+    ).locationService.currentPositionIfAuthorized();
+    if (!mounted) {
+      return;
+    }
+    if (position == null) {
+      await _resolveCenter();
+      return;
+    }
+    final point = LatLng(position.latitude, position.longitude);
+    setState(() => _current = point);
+    await _moveToCurrent(point);
+    await _resolveCenter();
+  }
+
+  Future<void> _moveToCurrent(LatLng point) async {
+    if (mounted) {
+      setState(() => _cameraMoving = true);
+    }
+    await _camera.animateTo(
+      controller: _map,
+      target: point,
+      zoom: TajGoMapCamera.cityZoom,
+    );
+    if (mounted) {
+      setState(() => _cameraMoving = false);
+    }
+  }
+
+  Future<void> _showLocationError(Object error) async {
+    final service = TajGoScope.of(context).locationService;
+    final issue = service.userFacingException(error);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(issue.message),
+        action: issue.requiresSettings
+            ? SnackBarAction(
+                label: 'Настройки',
+                onPressed: () async {
+                  await service.openSettingsFor(issue.issue);
+                },
+              )
+            : null,
+      ),
+    );
   }
 
   @override
   void dispose() {
+    _camera.stop();
     _price.dispose();
     _comment.dispose();
     super.dispose();
@@ -96,13 +150,20 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
         return;
       }
       setState(() => _current = point);
-      _map.move(point, 16);
+      await _moveToCurrent(point);
       await _resolveCenter();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Вы здесь. Точки «Откуда» и «Куда» выберите на карте отдельно.',
+            ),
+          ),
+        );
+      }
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('$error')));
+        await _showLocationError(error);
       }
     } finally {
       if (mounted) {
@@ -224,7 +285,9 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
                   minZoom: 3,
                   maxZoom: 19,
                   onMapEvent: (event) {
-                    if (event is MapEventMoveEnd && _stage != _Stage.details) {
+                    if (event is MapEventMoveEnd &&
+                        !_cameraMoving &&
+                        _stage != _Stage.details) {
                       _resolveCenter();
                     }
                   },
@@ -262,9 +325,9 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
                       if (_current != null)
                         Marker(
                           point: _current!,
-                          width: 36,
-                          height: 36,
-                          child: const _CurrentDot(),
+                          width: 44,
+                          height: 44,
+                          child: const TajGoCurrentLocationMarker(),
                         ),
                       if (_from != null && _stage != _Stage.pickFrom)
                         Marker(
@@ -346,8 +409,9 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
               Positioned(
                 right: 16,
                 bottom: _stage == _Stage.details ? 330 : 220,
-                child: _RoundButton(
-                  icon: _locating ? Icons.hourglass_top : Icons.my_location,
+                child: TajGoLocateButton(
+                  heroTag: 'newOrderLocate',
+                  loading: _locating,
                   onPressed: _locating ? null : _locate,
                 ),
               ),
@@ -631,18 +695,6 @@ class _CourierDot extends StatelessWidget {
       color: TajGoColors.green,
       shape: BoxShape.circle,
       border: Border.all(color: Colors.white, width: 3),
-    ),
-  );
-}
-
-class _CurrentDot extends StatelessWidget {
-  const _CurrentDot();
-  @override
-  Widget build(BuildContext context) => Container(
-    decoration: BoxDecoration(
-      color: Colors.blue,
-      shape: BoxShape.circle,
-      border: Border.all(color: Colors.white, width: 4),
     ),
   );
 }

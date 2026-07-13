@@ -6,6 +6,8 @@ import '../../core/constants/tajgo_colors.dart';
 import '../../core/models/tajgo_courier.dart';
 import '../../core/models/tajgo_order.dart';
 import '../../shared/widgets/tajgo_scope.dart';
+import '../map/services/tajgo_map_camera.dart';
+import '../map/widgets/tajgo_location_widgets.dart';
 import 'admin_couriers_screen.dart';
 import 'admin_order_details_screen.dart';
 import 'admin_orders_screen.dart';
@@ -22,8 +24,76 @@ class DispatchMapScreen extends StatefulWidget {
 class _DispatchMapScreenState extends State<DispatchMapScreen> {
   static const _khujand = LatLng(40.2833, 69.6222);
   final _map = MapController();
+  final _camera = TajGoMapCamera();
   Object? _selected;
+  LatLng? _currentPosition;
+  bool _locating = false;
   bool _focused = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _restoreLocation());
+  }
+
+  Future<void> _restoreLocation() async {
+    final position = await TajGoScope.of(
+      context,
+    ).locationService.currentPositionIfAuthorized();
+    if (mounted && position != null) {
+      setState(
+        () => _currentPosition = LatLng(position.latitude, position.longitude),
+      );
+    }
+  }
+
+  Future<void> _locate() async {
+    if (_locating) {
+      return;
+    }
+    setState(() => _locating = true);
+    final service = TajGoScope.of(context).locationService;
+    try {
+      final position = await service.determineCurrentPosition();
+      final point = LatLng(position.latitude, position.longitude);
+      if (!mounted) {
+        return;
+      }
+      setState(() => _currentPosition = point);
+      await _camera.animateTo(
+        controller: _map,
+        target: point,
+        zoom: TajGoMapCamera.cityZoom,
+      );
+    } catch (error) {
+      if (mounted) {
+        final issue = service.userFacingException(error);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(issue.message),
+            action: issue.requiresSettings
+                ? SnackBarAction(
+                    label: 'Настройки',
+                    onPressed: () async {
+                      await service.openSettingsFor(issue.issue);
+                    },
+                  )
+                : null,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _locating = false);
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _camera.stop();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) => AdminAccessGate(
@@ -60,12 +130,13 @@ class _DispatchMapScreenState extends State<DispatchMapScreen> {
               if (focused != null) {
                 _focused = true;
                 WidgetsBinding.instance.addPostFrameCallback((_) {
-                  _map.move(
-                    LatLng(
+                  _camera.animateTo(
+                    controller: _map,
+                    target: LatLng(
                       focused.location!.latitude,
                       focused.location!.longitude,
                     ),
-                    16,
+                    zoom: TajGoMapCamera.cityZoom,
                   );
                   setState(() => _selected = focused);
                 });
@@ -182,6 +253,13 @@ class _DispatchMapScreenState extends State<DispatchMapScreen> {
                             );
                           }
                         }),
+                        if (_currentPosition != null)
+                          Marker(
+                            point: _currentPosition!,
+                            width: 44,
+                            height: 44,
+                            child: const TajGoCurrentLocationMarker(),
+                          ),
                       ],
                     ),
                   ],
@@ -221,6 +299,15 @@ class _DispatchMapScreenState extends State<DispatchMapScreen> {
                         ),
                       ],
                     ),
+                  ),
+                ),
+                Positioned(
+                  right: 12,
+                  bottom: _selected == null ? 16 : 124,
+                  child: TajGoLocateButton(
+                    heroTag: 'dispatchLocate',
+                    loading: _locating,
+                    onPressed: _locate,
                   ),
                 ),
                 if (_selected != null)

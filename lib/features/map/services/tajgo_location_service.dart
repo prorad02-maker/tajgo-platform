@@ -5,7 +5,7 @@ import 'package:geolocator/geolocator.dart';
 
 import '../models/tajgo_map_location.dart';
 
-enum TajGoLocationIssue { serviceDisabled, denied, deniedForever }
+enum TajGoLocationIssue { serviceDisabled, denied, deniedForever, unavailable }
 
 class TajGoLocationException implements Exception {
   const TajGoLocationException(this.issue, this.message);
@@ -51,8 +51,49 @@ class TajGoLocationService {
       );
     }
 
-    return Geolocator.getCurrentPosition(
-      locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+    return _readCurrentPosition();
+  }
+
+  /// Возвращает позицию без показа системного запроса. Используется при
+  /// открытии карты, если пользователь уже давал разрешение раньше.
+  Future<Position?> currentPositionIfAuthorized() async {
+    try {
+      if (!await Geolocator.isLocationServiceEnabled()) {
+        return null;
+      }
+      final permission = await Geolocator.checkPermission();
+      if (permission != LocationPermission.always &&
+          permission != LocationPermission.whileInUse) {
+        return null;
+      }
+      return await _readCurrentPosition();
+    } catch (_) {
+      // Пассивная проверка не должна мешать открытию карты. Полная ошибка с
+      // подсказкой будет показана, когда пользователь нажмёт кнопку GPS.
+      return null;
+    }
+  }
+
+  Future<Position> _readCurrentPosition() async {
+    try {
+      return await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 15),
+        ),
+      );
+    } catch (error) {
+      throw userFacingException(error);
+    }
+  }
+
+  TajGoLocationException userFacingException(Object error) {
+    if (error is TajGoLocationException) {
+      return error;
+    }
+    return const TajGoLocationException(
+      TajGoLocationIssue.unavailable,
+      'Не удалось определить местоположение. Проверьте GPS и интернет, затем попробуйте ещё раз.',
     );
   }
 
@@ -60,7 +101,10 @@ class TajGoLocationService {
     if (issue == TajGoLocationIssue.serviceDisabled) {
       return Geolocator.openLocationSettings();
     }
-    return Geolocator.openAppSettings();
+    if (issue == TajGoLocationIssue.deniedForever) {
+      return Geolocator.openAppSettings();
+    }
+    return Future<bool>.value(false);
   }
 
   Future<TajGoMapLocation> reverseGeocode({
@@ -112,12 +156,17 @@ class TajGoLocationService {
     if (_nativePositionSubscription != null) {
       return;
     }
-    _nativePositionSubscription = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.bestForNavigation,
-        distanceFilter: 5,
-      ),
-    ).listen(controller.add, onError: controller.addError);
+    _nativePositionSubscription =
+        Geolocator.getPositionStream(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.bestForNavigation,
+            distanceFilter: 5,
+          ),
+        ).listen(
+          controller.add,
+          onError: (Object error) =>
+              controller.addError(userFacingException(error)),
+        );
   }
 
   Future<void> _stopNativePositionStream() async {

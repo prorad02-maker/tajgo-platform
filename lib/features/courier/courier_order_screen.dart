@@ -14,6 +14,8 @@ import '../../shared/widgets/tajgo_action_button.dart';
 import '../../shared/widgets/tajgo_order_progress.dart';
 import '../../shared/widgets/tajgo_scope.dart';
 import '../map/services/tajgo_location_service.dart';
+import '../map/services/tajgo_map_camera.dart';
+import '../map/widgets/tajgo_location_widgets.dart';
 
 class CourierOrderScreen extends StatefulWidget {
   const CourierOrderScreen({super.key, required this.orderId});
@@ -28,6 +30,7 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
     with WidgetsBindingObserver {
   static const _khujand = LatLng(40.2833, 69.6222);
   final _mapController = MapController();
+  final _camera = TajGoMapCamera();
   StreamSubscription<Position>? _positionSubscription;
   LatLng? _position;
   double? _heading;
@@ -89,7 +92,14 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
               _geoError = null;
             });
             if (_followCourier) {
-              _mapController.move(_position!, 16.5);
+              unawaited(
+                _camera.animateTo(
+                  controller: _mapController,
+                  target: _position!,
+                  zoom: TajGoMapCamera.navigationZoom,
+                  duration: const Duration(milliseconds: 300),
+                ),
+              );
             }
           }
           await _publishPosition(position);
@@ -162,12 +172,19 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
       return;
     }
     setState(() => _followCourier = true);
-    _mapController.move(position, 16.5);
+    unawaited(
+      _camera.animateTo(
+        controller: _mapController,
+        target: position,
+        zoom: TajGoMapCamera.navigationZoom,
+      ),
+    );
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _camera.stop();
     _positionSubscription?.cancel();
     super.dispose();
   }
@@ -486,17 +503,11 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
                             child: const Icon(Icons.route_rounded),
                           ),
                           const SizedBox(height: 8),
-                          FloatingActionButton.small(
+                          TajGoLocateButton(
                             heroTag: 'centerCourier',
                             onPressed: _centerOnCourier,
-                            backgroundColor: Colors.white,
-                            foregroundColor: TajGoColors.darkGreen,
-                            tooltip: 'Моё местоположение',
-                            child: Icon(
-                              _followCourier
-                                  ? Icons.gps_fixed_rounded
-                                  : Icons.my_location_rounded,
-                            ),
+                            loading: _locationStarting,
+                            following: _followCourier && _position != null,
                           ),
                         ],
                       ),
