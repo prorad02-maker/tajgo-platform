@@ -108,84 +108,75 @@ class _SplashScreenState extends State<SplashScreen>
       backgroundColor: isDark
           ? const Color(0xFF071009)
           : const Color(0xFFF8FAF7),
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          Image.asset(
-            splashAsset,
-            fit: BoxFit.cover,
-            alignment: Alignment.center,
-            gaplessPlayback: true,
-            errorBuilder: (_, _, _) => ColoredBox(
-              color: isDark ? const Color(0xFF071009) : const Color(0xFFF8FAF7),
-            ),
-          ),
-          const DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                stops: [0, 0.55, 1],
-                colors: [
-                  Color(0x10000000),
-                  Color(0x00000000),
-                  Color(0x70000000),
-                ],
-              ),
-            ),
-          ),
-          SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
-              child: Column(
-                children: [
-                  Center(
-                    child: Image.asset(
-                      'assets/brand/tajgo_logo.png',
-                      width: 128,
-                      height: 128,
-                      fit: BoxFit.contain,
-                      errorBuilder: (_, _, _) =>
-                          const SizedBox(width: 128, height: 128),
-                    ),
-                  ),
-                  const Spacer(),
-                  AnimatedBuilder(
-                    animation: Listenable.merge([
-                      _progressController,
-                      _pulseController,
-                    ]),
-                    builder: (context, _) => _SplashProgressBar(
-                      progress: _progressController.value,
-                      opacity: _waiting ? _pulseController.value : 1,
-                      failed: _failed,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    _status,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: _failed ? const Color(0xFFFFB4AB) : Colors.white,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      shadows: const [
-                        Shadow(
-                          color: Color(0x99000000),
-                          blurRadius: 8,
-                          offset: Offset(0, 1),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
+      body: SizedBox.expand(
+        child: Image.asset(
+          splashAsset,
+          fit: BoxFit.cover,
+          alignment: Alignment.center,
+          gaplessPlayback: true,
+          filterQuality: FilterQuality.high,
+          errorBuilder: (_, _, _) => _buildFallback(isDark),
+        ),
       ),
     );
   }
+
+  Widget _buildFallback(bool isDark) => ColoredBox(
+    color: isDark ? const Color(0xFF071009) : const Color(0xFFF8FAF7),
+    child: SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Image.asset(
+              'assets/brand/tajgo_logo.png',
+              width: 128,
+              height: 128,
+              fit: BoxFit.contain,
+              errorBuilder: (_, _, _) =>
+                  const SizedBox(width: 128, height: 128),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              'TajGo',
+              style: TextStyle(
+                color: isDark ? Colors.white : const Color(0xFF173B2A),
+                fontSize: 40,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 32),
+            AnimatedBuilder(
+              animation: Listenable.merge([
+                _progressController,
+                _pulseController,
+              ]),
+              builder: (context, _) => _SplashProgressBar(
+                progress: _progressController.value,
+                opacity: _waiting ? _pulseController.value : 1,
+                failed: _failed,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              _status,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: _failed
+                    ? TajGoColors.error
+                    : isDark
+                    ? Colors.white70
+                    : const Color(0xFF53685D),
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
 }
 
 class _SplashProgressBar extends StatelessWidget {
