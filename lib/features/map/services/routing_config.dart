@@ -13,6 +13,7 @@ class RoutingConfig {
     required this.timeout,
     required this.mode,
     required this.debugLogging,
+    this.profileOverride = '',
   });
 
   final bool enabled;
@@ -22,6 +23,7 @@ class RoutingConfig {
   final Duration timeout;
   final RouteMode mode;
   final bool debugLogging;
+  final String profileOverride;
 
   factory RoutingConfig.fromEnvironment() {
     const preferredProvider = String.fromEnvironment('ROUTING_PROVIDER');
@@ -74,6 +76,7 @@ class RoutingConfig {
         _ => RouteMode.bicycle,
       },
       debugLogging: kDebugMode,
+      profileOverride: const String.fromEnvironment('ROUTING_PROFILE'),
     );
   }
 

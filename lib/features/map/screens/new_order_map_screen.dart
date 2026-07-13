@@ -427,8 +427,15 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
                           points:
                               _route?.points ??
                               [_from!.toLatLng(), _to!.toLatLng()],
-                          color: TajGoColors.green,
-                          strokeWidth: 4,
+                          color: _route?.routeQuality == RouteQuality.road
+                              ? TajGoColors.green
+                              : TajGoColors.warning,
+                          strokeWidth: _route?.routeQuality == RouteQuality.road
+                              ? 4
+                              : 3,
+                          pattern: _route?.routeQuality == RouteQuality.road
+                              ? const StrokePattern.solid()
+                              : StrokePattern.dashed(segments: const [8, 8]),
                         ),
                       ],
                     ),

@@ -13,6 +13,7 @@ import 'package:tajgo/features/map/services/route_cache.dart';
 import 'package:tajgo/features/map/services/road_route_provider.dart';
 import 'package:tajgo/features/map/services/route_progress_service.dart';
 import 'package:tajgo/features/map/services/routing_config.dart';
+import 'package:tajgo/features/map/utils/route_display_formatter.dart';
 import 'package:tajgo/features/map/services/route_service.dart';
 import 'package:tajgo/features/map/services/routing_health_monitor.dart';
 import 'package:tajgo/features/map/services/map_performance_monitor.dart';
@@ -206,6 +207,7 @@ void main() {
         timeout: Duration(seconds: 2),
         mode: RouteMode.bicycle,
         debugLogging: false,
+        profileOverride: 'driving',
       ),
     );
     final route = provider.parseResponse({
@@ -314,6 +316,7 @@ void main() {
         timeout: Duration(seconds: 7),
         mode: RouteMode.bicycle,
         debugLogging: false,
+        profileOverride: 'driving',
       ),
     );
     final uri = provider.buildRequestUri(
@@ -323,7 +326,7 @@ void main() {
     );
     expect(
       uri.path,
-      contains('/route/v1/bike/69.6222,40.2833;69.6322,40.2933'),
+      contains('/route/v1/driving/69.6222,40.2833;69.6322,40.2933'),
     );
     expect(uri.queryParameters['geometries'], 'geojson');
     expect(uri.queryParameters['steps'], 'true');
@@ -414,5 +417,46 @@ void main() {
     final dropoffInfo = service.forOrder(dropoffInfoOrder);
     expect(dropoffInfo.targetLabel, 'B · Доставить');
     expect(dropoffInfo.showConfirmationCode, isTrue);
+  });
+
+  test('distance formatter не показывает 0.0 км', () {
+    expect(formatRouteDistance(0.03), '30 м');
+    expect(formatRouteDistance(0.4), '400 м');
+    expect(formatRouteDistance(1.2), '1.2 км');
+  });
+
+  test('route display quality честно отличает road от fallback', () {
+    final road = TajGoRoute(
+      points: const [LatLng(40.28, 69.62), LatLng(40.29, 69.63)],
+      distanceKm: 1.2,
+      etaMinutes: 6,
+      isRoadRouteApproximation: false,
+      providerName: 'osrm',
+      routeQuality: RouteQuality.road,
+      createdAt: DateTime.now().toUtc(),
+    );
+    final fallback = TajGoRoute(
+      points: const [LatLng(40.28, 69.62), LatLng(40.29, 69.63)],
+      distanceKm: 1,
+      etaMinutes: 5,
+      isRoadRouteApproximation: true,
+      providerName: 'direct',
+      routeQuality: RouteQuality.directFallback,
+      createdAt: DateTime.now().toUtc(),
+    );
+    final providerError = TajGoRoute(
+      points: const [LatLng(40.28, 69.62), LatLng(40.29, 69.63)],
+      distanceKm: 1,
+      etaMinutes: 5,
+      isRoadRouteApproximation: true,
+      providerName: 'direct',
+      routeQuality: RouteQuality.providerError,
+      errorMessage: 'technical detail',
+      createdAt: DateTime.now().toUtc(),
+    );
+    expect(formatRouteQuality(road), 'Маршрут построен');
+    expect(formatRouteQuality(fallback), 'Маршрут предварительный');
+    expect(formatRouteQuality(providerError), 'Маршрут предварительный');
+    expect(formatRouteQuality(null), 'Маршрут предварительный');
   });
 }

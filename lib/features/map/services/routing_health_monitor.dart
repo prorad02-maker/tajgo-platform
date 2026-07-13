@@ -17,6 +17,13 @@ class RoutingHealthMonitor extends ChangeNotifier {
   Duration? _lastLatency;
   String? _lastError;
   RouteQuality? _lastQuality;
+  String? _lastRequestUrl;
+  int? _lastHttpStatus;
+  bool? _lastParseSuccess;
+  int? _lastPointsCount;
+  double? _lastDistanceKm;
+  int? _lastEtaMinutes;
+  String? _fallbackReason;
 
   void recordCacheHit(TajGoRoute route) {
     _cacheHits++;
@@ -24,7 +31,13 @@ class RoutingHealthMonitor extends ChangeNotifier {
     notifyListeners();
   }
 
-  void recordSuccess(TajGoRoute route, Duration latency) {
+  void recordSuccess(
+    TajGoRoute route,
+    Duration latency, {
+    String? requestUrl,
+    int? httpStatus,
+    bool? parseSuccess,
+  }) {
     _requests++;
     _successes++;
     _lastAttemptAt = DateTime.now().toUtc();
@@ -32,22 +45,47 @@ class RoutingHealthMonitor extends ChangeNotifier {
     _lastLatency = latency;
     _lastError = null;
     _lastQuality = route.routeQuality;
+    _lastRequestUrl = requestUrl;
+    _lastHttpStatus = httpStatus;
+    _lastParseSuccess = parseSuccess;
+    _lastPointsCount = route.points.length;
+    _lastDistanceKm = route.distanceKm;
+    _lastEtaMinutes = route.etaMinutes;
+    _fallbackReason = null;
     notifyListeners();
   }
 
-  void recordFallback(String reason, Duration latency) {
+  void recordFallback(
+    String reason,
+    Duration latency, {
+    String? requestUrl,
+    int? httpStatus,
+    bool? parseSuccess,
+    TajGoRoute? route,
+  }) {
     _requests++;
     _fallbacks++;
     _lastAttemptAt = DateTime.now().toUtc();
     _lastLatency = latency;
     _lastError = reason;
     _lastQuality = RouteQuality.providerError;
+    _lastRequestUrl = requestUrl;
+    _lastHttpStatus = httpStatus;
+    _lastParseSuccess = parseSuccess;
+    _lastPointsCount = route?.points.length;
+    _lastDistanceKm = route?.distanceKm;
+    _lastEtaMinutes = route?.etaMinutes;
+    _fallbackReason = reason;
     notifyListeners();
   }
 
-  void recordDisabledFallback() {
+  void recordDisabledFallback(TajGoRoute route) {
     _fallbacks++;
     _lastQuality = RouteQuality.directFallback;
+    _lastPointsCount = route.points.length;
+    _lastDistanceKm = route.distanceKm;
+    _lastEtaMinutes = route.etaMinutes;
+    _fallbackReason = 'Routing provider выключен или не настроен';
     notifyListeners();
   }
 
@@ -55,6 +93,7 @@ class RoutingHealthMonitor extends ChangeNotifier {
     providerName: config.providerType.name,
     enabled: config.enabled,
     configured: config.isConfigured && config.validationIssues.isEmpty,
+    baseUrlSet: config.baseUrl.trim().isNotEmpty,
     requests: _requests,
     successes: _successes,
     fallbacks: _fallbacks,
@@ -64,5 +103,12 @@ class RoutingHealthMonitor extends ChangeNotifier {
     lastLatency: _lastLatency,
     lastError: _lastError,
     lastQuality: _lastQuality,
+    lastRequestUrl: _lastRequestUrl,
+    lastHttpStatus: _lastHttpStatus,
+    lastParseSuccess: _lastParseSuccess,
+    lastPointsCount: _lastPointsCount,
+    lastDistanceKm: _lastDistanceKm,
+    lastEtaMinutes: _lastEtaMinutes,
+    fallbackReason: _fallbackReason,
   );
 }

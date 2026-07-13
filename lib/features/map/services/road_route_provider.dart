@@ -22,6 +22,21 @@ class RoadRouteProvider implements RouteProvider {
   final RoutingConfig config;
   final http.Client _client;
   final NavigationInstructionFormatter _formatter;
+  Uri? _lastRequestUri;
+  int? _lastHttpStatus;
+  bool? _lastParseSuccess;
+  String? _lastFailure;
+
+  String? get lastRequestUrl {
+    final uri = _lastRequestUri;
+    if (uri == null) return null;
+    final query = Map<String, String>.from(uri.queryParameters)..remove('key');
+    return uri.replace(queryParameters: query).toString();
+  }
+
+  int? get lastHttpStatus => _lastHttpStatus;
+  bool? get lastParseSuccess => _lastParseSuccess;
+  String? get lastFailure => _lastFailure;
 
   bool get configured => config.isConfigured && config.validationIssues.isEmpty;
 
@@ -38,13 +53,37 @@ class RoadRouteProvider implements RouteProvider {
     if (!configured) {
       throw StateError('Road route provider is disabled.');
     }
-    final uri = buildRequestUri(from: from, to: to, mode: mode);
+    final effectiveMode = config.mode;
+    final uri = buildRequestUri(from: from, to: to, mode: effectiveMode);
+    _lastRequestUri = uri;
+    _lastHttpStatus = null;
+    _lastParseSuccess = null;
+    _lastFailure = null;
     if (config.debugLogging) debugPrint('TajGo routing request: $name');
-    final response = await _client.get(uri).timeout(config.timeout);
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw StateError('Route provider returned ${response.statusCode}.');
+    try {
+      final response = await _client
+          .get(
+            uri,
+            headers: const {
+              'Accept': 'application/json',
+              'User-Agent': 'TajGo-Pilot/1.0.1 (routing field test)',
+            },
+          )
+          .timeout(config.timeout);
+      _lastHttpStatus = response.statusCode;
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw StateError('Route provider returned ${response.statusCode}.');
+      }
+      final route = parseResponse(
+        jsonDecode(response.body) as Map<String, dynamic>,
+      );
+      _lastParseSuccess = true;
+      return route;
+    } catch (error) {
+      _lastParseSuccess = false;
+      _lastFailure = error.toString();
+      rethrow;
     }
-    return parseResponse(jsonDecode(response.body) as Map<String, dynamic>);
   }
 
   TajGoRoute parseResponse(Map<String, dynamic> json) =>
@@ -61,11 +100,14 @@ class RoadRouteProvider implements RouteProvider {
       : _graphHopperUri(from, to, mode);
 
   Uri _osrmUri(LatLng from, LatLng to, RouteMode mode) {
-    final profile = switch (mode) {
+    final modeProfile = switch (mode) {
       RouteMode.walking => 'foot',
-      RouteMode.bicycle => 'bike',
-      RouteMode.scooter || RouteMode.car => 'driving',
+      RouteMode.bicycle || RouteMode.scooter => 'bike',
+      RouteMode.car => 'driving',
     };
+    final profile = config.profileOverride.trim().isEmpty
+        ? modeProfile
+        : config.profileOverride.trim();
     final base = config.baseUrl.replaceAll(RegExp(r'/+$'), '');
     return Uri.parse(
       '$base/route/v1/$profile/${from.longitude},${from.latitude};${to.longitude},${to.latitude}',
@@ -84,7 +126,7 @@ class RoadRouteProvider implements RouteProvider {
     final profile = switch (mode) {
       RouteMode.walking => 'foot',
       RouteMode.bicycle => 'bike',
-      RouteMode.scooter => 'scooter',
+      RouteMode.scooter => 'bike',
       RouteMode.car => 'car',
     };
     final base = Uri.parse(config.baseUrl);

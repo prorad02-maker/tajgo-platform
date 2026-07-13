@@ -18,6 +18,7 @@ import '../map/services/tajgo_map_camera.dart';
 import '../map/models/navigation_state.dart';
 import '../map/models/tajgo_route.dart';
 import '../map/models/tajgo_route_progress.dart';
+import '../map/utils/route_display_formatter.dart';
 import '../map/services/navigation_camera_controller.dart';
 import '../map/services/navigation_instruction_formatter.dart';
 import '../map/services/route_progress_service.dart';
@@ -552,8 +553,23 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
                             if (_navigationRoute != null)
                               Polyline(
                                 points: _navigationRoute!.points,
-                                color: TajGoColors.green,
-                                strokeWidth: 5,
+                                color:
+                                    _navigationRoute!.routeQuality ==
+                                        RouteQuality.road
+                                    ? TajGoColors.green
+                                    : TajGoColors.warning,
+                                strokeWidth:
+                                    _navigationRoute!.routeQuality ==
+                                        RouteQuality.road
+                                    ? 5
+                                    : 3,
+                                pattern:
+                                    _navigationRoute!.routeQuality ==
+                                        RouteQuality.road
+                                    ? const StrokePattern.solid()
+                                    : StrokePattern.dashed(
+                                        segments: const [8, 8],
+                                      ),
                               ),
                             if (_navigationRoute == null &&
                                 _position != null &&
@@ -845,9 +861,7 @@ class _OrderPanel extends StatelessWidget {
                 Text(
                   routeLoading
                       ? 'Перестраиваем маршрут…'
-                      : route?.isFallback == true
-                      ? 'Маршрут предварительный'
-                      : 'Маршрут построен',
+                      : formatRouteQuality(route),
                   style: TextStyle(
                     color: route?.isFallback == false
                         ? TajGoColors.darkGreen
@@ -1145,8 +1159,8 @@ class _NavigationInstruction extends StatelessWidget {
                   ),
                   Text(
                     '$_targetLabel'
-                    '${distanceKm == null ? '' : ' · ${distanceKm!.toStringAsFixed(1)} км'}'
-                    '${etaMinutes == null ? '' : ' · ≈ $etaMinutes мин'}',
+                    '${distanceKm == null ? '' : ' · ${formatRouteDistance(distanceKm!)}'}'
+                    '${etaMinutes == null ? '' : ' · ${formatRouteEta(etaMinutes!)}'}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(color: Colors.white70, fontSize: 12),
@@ -1160,9 +1174,7 @@ class _NavigationInstruction extends StatelessWidget {
                         ? 'Маршрут обновлён'
                         : gpsWeak
                         ? 'GPS слабый — точка может быть неточной'
-                        : route?.isFallback == true
-                        ? 'Маршрут предварительный'
-                        : 'Маршрут построен',
+                        : formatRouteQuality(route),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(

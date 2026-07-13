@@ -50,7 +50,7 @@ class _SplashScreenState extends State<SplashScreen>
   Future<void> _bootstrap() async {
     final scope = TajGoScope.of(context);
     final minimumSplashTime = Future<void>.delayed(
-      const Duration(milliseconds: 700),
+      const Duration(milliseconds: 1400),
     );
     try {
       setState(() => _status = 'Входим в TajGo…');
@@ -70,7 +70,7 @@ class _SplashScreenState extends State<SplashScreen>
       setState(() => _waiting = false);
       await _progressController.animateTo(
         1,
-        duration: const Duration(milliseconds: 200),
+        duration: const Duration(milliseconds: 300),
         curve: Curves.easeOut,
       );
       if (!mounted) return;
@@ -108,20 +108,89 @@ class _SplashScreenState extends State<SplashScreen>
       backgroundColor: isDark
           ? const Color(0xFF071009)
           : const Color(0xFFF8FAF7),
-      body: SizedBox.expand(
-        child: Image.asset(
-          splashAsset,
-          fit: BoxFit.cover,
-          alignment: Alignment.center,
-          gaplessPlayback: true,
-          filterQuality: FilterQuality.high,
-          errorBuilder: (_, _, _) => _buildFallback(isDark),
-        ),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.asset(
+            splashAsset,
+            fit: BoxFit.cover,
+            alignment: Alignment.center,
+            gaplessPlayback: true,
+            filterQuality: FilterQuality.high,
+            errorBuilder: (_, _, _) => _buildFallbackBackground(isDark),
+          ),
+          _buildProgressOverlay(isDark),
+        ],
       ),
     );
   }
 
-  Widget _buildFallback(bool isDark) => ColoredBox(
+  Widget _buildProgressOverlay(bool isDark) => Align(
+    alignment: Alignment.bottomCenter,
+    child: Container(
+      width: double.infinity,
+      height: 230,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Colors.transparent,
+            (isDark ? const Color(0xFF071009) : const Color(0xFFF8FAF7))
+                .withValues(alpha: 0.98),
+            isDark ? const Color(0xFF071009) : const Color(0xFFF8FAF7),
+          ],
+          stops: const [0, 0.28, 1],
+        ),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(28, 92, 28, 26),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              AnimatedBuilder(
+                animation: Listenable.merge([
+                  _progressController,
+                  _pulseController,
+                ]),
+                builder: (context, _) => Semantics(
+                  label: 'Загрузка TajGo',
+                  value: '${(_progressController.value * 100).round()}%',
+                  child: _SplashProgressBar(
+                    progress: _progressController.value,
+                    opacity: _waiting ? _pulseController.value : 1,
+                    failed: _failed,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                height: 38,
+                child: Text(
+                  _status,
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  style: TextStyle(
+                    color: _failed
+                        ? TajGoColors.error
+                        : isDark
+                        ? Colors.white70
+                        : const Color(0xFF53685D),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+
+  Widget _buildFallbackBackground(bool isDark) => ColoredBox(
     color: isDark ? const Color(0xFF071009) : const Color(0xFFF8FAF7),
     child: SafeArea(
       child: Padding(
@@ -144,32 +213,6 @@ class _SplashScreenState extends State<SplashScreen>
                 color: isDark ? Colors.white : const Color(0xFF173B2A),
                 fontSize: 40,
                 fontWeight: FontWeight.w900,
-              ),
-            ),
-            const SizedBox(height: 32),
-            AnimatedBuilder(
-              animation: Listenable.merge([
-                _progressController,
-                _pulseController,
-              ]),
-              builder: (context, _) => _SplashProgressBar(
-                progress: _progressController.value,
-                opacity: _waiting ? _pulseController.value : 1,
-                failed: _failed,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              _status,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: _failed
-                    ? TajGoColors.error
-                    : isDark
-                    ? Colors.white70
-                    : const Color(0xFF53685D),
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
               ),
             ),
           ],

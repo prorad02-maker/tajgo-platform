@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/constants/tajgo_colors.dart';
 import '../models/tajgo_route.dart';
+import '../utils/route_display_formatter.dart';
 
 class TajGoRouteSummaryCard extends StatelessWidget {
   const TajGoRouteSummaryCard({
@@ -53,20 +54,21 @@ class TajGoRouteSummaryCard extends StatelessWidget {
                       ? 'Строим маршрут…'
                       : value == null
                       ? 'Маршрут недоступен'
-                      : '${value.distanceKm.toStringAsFixed(1)} км · ≈ ${value.etaMinutes} мин',
+                      : '${formatRouteDistance(value.distanceKm)} · '
+                            '${formatRouteEta(value.etaMinutes)}',
                   style: const TextStyle(fontWeight: FontWeight.w800),
                 ),
                 if (!loading && value?.isFallback == true)
                   Text(
-                    value!.qualityLabel,
+                    formatRouteQuality(value),
                     style: const TextStyle(
                       color: TajGoColors.warning,
                       fontSize: 12,
                     ),
                   )
                 else if (!loading && value != null)
-                  const Text(
-                    'Маршрут построен',
+                  Text(
+                    formatRouteQuality(value),
                     style: TextStyle(
                       color: TajGoColors.darkGreen,
                       fontSize: 12,

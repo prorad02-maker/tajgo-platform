@@ -80,7 +80,13 @@ class RouteService {
     if (_road.configured) {
       try {
         route = await _road.buildRoute(from: from, to: to, mode: mode);
-        health.recordSuccess(route, stopwatch.elapsed);
+        health.recordSuccess(
+          route,
+          stopwatch.elapsed,
+          requestUrl: _road.lastRequestUrl,
+          httpStatus: _road.lastHttpStatus,
+          parseSuccess: _road.lastParseSuccess,
+        );
       } catch (error) {
         route = _direct.buildSync(
           from: from,
@@ -89,7 +95,14 @@ class RouteService {
           errorMessage: error.toString(),
           quality: RouteQuality.providerError,
         );
-        health.recordFallback(error.toString(), stopwatch.elapsed);
+        health.recordFallback(
+          error.toString(),
+          stopwatch.elapsed,
+          requestUrl: _road.lastRequestUrl,
+          httpStatus: _road.lastHttpStatus,
+          parseSuccess: _road.lastParseSuccess,
+          route: route,
+        );
       }
     } else {
       route = _direct.buildSync(
@@ -98,7 +111,7 @@ class RouteService {
         mode: mode,
         errorMessage: 'Road route endpoint is disabled.',
       );
-      health.recordDisabledFallback();
+      health.recordDisabledFallback(route);
     }
     stopwatch.stop();
     performance.recordRoute(stopwatch.elapsed);

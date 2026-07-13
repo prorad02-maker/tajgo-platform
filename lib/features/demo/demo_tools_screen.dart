@@ -210,7 +210,15 @@ class _DemoToolsScreenState extends State<DemoToolsScreen> {
                               ),
                               const SizedBox(height: 8),
                               Text('Статус: ${health.statusLabel}'),
+                              Text(
+                                'Enabled: ${health.enabled} · configured: '
+                                '${health.configured}',
+                              ),
                               Text('Provider: ${health.providerName}'),
+                              Text(
+                                'Base URL: '
+                                '${health.baseUrlSet ? 'задан' : 'не задан'}',
+                              ),
                               Text(
                                 'Запросы: ${health.requests} · успех: '
                                 '${health.successes} · fallback: ${health.fallbacks}',
@@ -228,6 +236,30 @@ class _DemoToolsScreenState extends State<DemoToolsScreen> {
                                 Text(
                                   'Последний ответ: '
                                   '${health.lastLatency!.inMilliseconds} мс',
+                                ),
+                              if (health.lastRequestUrl != null)
+                                SelectableText(
+                                  'Request: ${health.lastRequestUrl}',
+                                ),
+                              Text(
+                                'HTTP: ${health.lastHttpStatus ?? '—'} · '
+                                'parse: ${health.lastParseSuccess ?? '—'}',
+                              ),
+                              Text(
+                                'Точек: ${health.lastPointsCount ?? '—'} · '
+                                'distance: '
+                                '${health.lastDistanceKm?.toStringAsFixed(3) ?? '—'} км · '
+                                'ETA: ${health.lastEtaMinutes ?? '—'} мин',
+                              ),
+                              Text(
+                                'Quality: ${health.lastQuality?.name ?? '—'}',
+                              ),
+                              if (health.fallbackReason != null)
+                                SelectableText(
+                                  'Fallback: ${health.fallbackReason}',
+                                  style: const TextStyle(
+                                    color: TajGoColors.warning,
+                                  ),
                                 ),
                               if (_routingProbeResult != null) ...[
                                 const SizedBox(height: 6),
