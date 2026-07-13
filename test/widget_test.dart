@@ -18,6 +18,7 @@ void main() {
     );
     expect(distance, closeTo(0.8, 0.2));
     expect(etaMinutes(2.5), 14);
+    expect(courierNavigationEtaMinutes(3), 10);
     expect(suggestedPrice(0), 10);
     expect(suggestedPrice(2.5), 20);
   });

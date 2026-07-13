@@ -2,12 +2,18 @@ import 'dart:math' as math;
 
 import 'package:latlong2/latlong.dart';
 
+double haversineDistanceKm(LatLng from, LatLng to) =>
+    const Distance().as(LengthUnit.Kilometer, from, to);
+
 double distanceKm(LatLng from, LatLng to) {
-  final kilometers = const Distance().as(LengthUnit.Kilometer, from, to);
+  final kilometers = haversineDistanceKm(from, to);
   return (kilometers * 10).round() / 10;
 }
 
 int etaMinutes(double kilometers) => (kilometers / 18 * 60).ceil() + 5;
+
+int courierNavigationEtaMinutes(double kilometers) =>
+    ((kilometers / 18) * 60).ceil().clamp(1, 999);
 
 num suggestedPrice(double kilometers) =>
     math.max(10, (10 + 4 * kilometers).ceil());

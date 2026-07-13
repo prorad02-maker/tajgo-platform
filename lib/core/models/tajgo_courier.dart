@@ -43,11 +43,31 @@ class TajGoCourier {
       rating: (data['rating'] as num? ?? 5).toDouble(),
       transport: data['transport'] as String? ?? 'electric_bike',
       earningsToday: data['earningsToday'] as num? ?? 0,
-      location: data['location'] as GeoPoint?,
+      location: _locationFrom(data),
       locationUpdatedAt: (data['locationUpdatedAt'] as Timestamp?)?.toDate(),
       activeOrderId: data['activeOrderId'] as String?,
       ordersToday: (data['ordersToday'] as num? ?? 0).toInt(),
       score: (data['score'] as num? ?? 100).toInt(),
     );
+  }
+
+  static GeoPoint? _locationFrom(Map<String, dynamic> data) {
+    final location = data['location'];
+    if (location is GeoPoint) {
+      return location;
+    }
+    if (location is Map) {
+      final latitude = location['latitude'] ?? location['lat'];
+      final longitude = location['longitude'] ?? location['lng'];
+      if (latitude is num && longitude is num) {
+        return GeoPoint(latitude.toDouble(), longitude.toDouble());
+      }
+    }
+    final latitude = data['latitude'] ?? data['lat'];
+    final longitude = data['longitude'] ?? data['lng'];
+    if (latitude is num && longitude is num) {
+      return GeoPoint(latitude.toDouble(), longitude.toDouble());
+    }
+    return null;
   }
 }

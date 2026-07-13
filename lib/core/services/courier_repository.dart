@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
@@ -9,6 +11,11 @@ class CourierRepository {
   CourierRepository(this._db);
 
   final FirebaseFirestore _db;
+  final Map<String, _PublishedLocation> _lastPublishedLocations = {};
+  final Map<String, Future<void>> _locationWrites = {};
+
+  static const _locationWriteInterval = Duration(seconds: 7);
+  static const _significantMovementMeters = 15.0;
 
   Stream<TajGoCourier?> courierStream(String uid) => _db
       .collection('couriers')
@@ -161,6 +168,56 @@ class CourierRepository {
     double? heading,
     double? speed,
     double? accuracy,
+    bool force = false,
+  }) async {
+    final pendingWrite = _locationWrites[uid];
+    if (pendingWrite != null) {
+      return pendingWrite;
+    }
+    final now = DateTime.now();
+    final previous = _lastPublishedLocations[uid];
+    if (!force && previous != null) {
+      final elapsed = now.difference(previous.writtenAt);
+      final moved = _distanceMeters(
+        previous.latitude,
+        previous.longitude,
+        latitude,
+        longitude,
+      );
+      if (elapsed < _locationWriteInterval &&
+          moved < _significantMovementMeters) {
+        return;
+      }
+    }
+
+    final write = _writeLocation(
+      uid: uid,
+      latitude: latitude,
+      longitude: longitude,
+      heading: heading,
+      speed: speed,
+      accuracy: accuracy,
+    );
+    _locationWrites[uid] = write;
+    try {
+      await write;
+      _lastPublishedLocations[uid] = _PublishedLocation(
+        latitude: latitude,
+        longitude: longitude,
+        writtenAt: now,
+      );
+    } finally {
+      _locationWrites.remove(uid);
+    }
+  }
+
+  Future<void> _writeLocation({
+    required String uid,
+    required double latitude,
+    required double longitude,
+    double? heading,
+    double? speed,
+    double? accuracy,
   }) async {
     final location = GeoPoint(latitude, longitude);
     final privateRef = _db.collection('couriers').doc(uid);
@@ -172,9 +229,11 @@ class CourierRepository {
     };
     final telemetryData = <String, dynamic>{
       ...coreData,
-      if (heading != null && heading.isFinite) 'heading': heading,
-      if (speed != null && speed.isFinite) 'speed': speed,
-      if (accuracy != null && accuracy.isFinite) 'locationAccuracy': accuracy,
+      if (heading != null && heading.isFinite && heading >= 0)
+        'heading': heading,
+      if (speed != null && speed.isFinite && speed >= 0) 'speed': speed,
+      if (accuracy != null && accuracy.isFinite && accuracy >= 0)
+        'locationAccuracy': accuracy,
     };
 
     Future<void> commit(Map<String, dynamic> data) async {
@@ -193,6 +252,26 @@ class CourierRepository {
       if (error.code != 'permission-denied') rethrow;
       await commit(coreData);
     }
+  }
+
+  double _distanceMeters(
+    double fromLatitude,
+    double fromLongitude,
+    double toLatitude,
+    double toLongitude,
+  ) {
+    const earthRadiusMeters = 6371000.0;
+    final lat1 = fromLatitude * math.pi / 180;
+    final lat2 = toLatitude * math.pi / 180;
+    final deltaLat = (toLatitude - fromLatitude) * math.pi / 180;
+    final deltaLng = (toLongitude - fromLongitude) * math.pi / 180;
+    final a =
+        math.sin(deltaLat / 2) * math.sin(deltaLat / 2) +
+        math.cos(lat1) *
+            math.cos(lat2) *
+            math.sin(deltaLng / 2) *
+            math.sin(deltaLng / 2);
+    return earthRadiusMeters * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
   }
 
   Future<void> declineOrder({
@@ -268,18 +347,22 @@ class CourierRepository {
   Future<void> markArrived({
     required String orderId,
     required String courierId,
-  }) => _db.runTransaction((transaction) async {
-    final ref = _db.collection('orders').doc(orderId);
-    final doc = await transaction.get(ref);
-    final data = doc.data();
-    if (data?['status'] != 'accepted' || data?['courierId'] != courierId) {
-      throw StateError('Отметить прибытие для этого заказа нельзя.');
-    }
-    transaction.update(ref, {
-      'arrivedAtPickupAt': FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
+    double? distanceToPointKm,
+  }) async {
+    _checkDistance(distanceToPointKm, 'точки забора');
+    await _db.runTransaction((transaction) async {
+      final ref = _db.collection('orders').doc(orderId);
+      final doc = await transaction.get(ref);
+      final data = doc.data();
+      if (data?['status'] != 'accepted' || data?['courierId'] != courierId) {
+        throw StateError('Отметить прибытие для этого заказа нельзя.');
+      }
+      transaction.update(ref, {
+        'arrivedAtPickupAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
     });
-  });
+  }
 
   Future<void> markPickedUp({
     required String orderId,
@@ -361,7 +444,12 @@ class CourierRepository {
   });
 
   void _checkDistance(double? kilometers, String pointName) {
-    if (kilometers == null || withinActionRadius(kilometers)) {
+    if (kilometers == null) {
+      throw StateError(
+        'Не удалось определить GPS. Разрешите геолокацию и повторите.',
+      );
+    }
+    if (withinActionRadius(kilometers)) {
       return;
     }
     throw StateError(
@@ -369,4 +457,16 @@ class CourierRepository {
       'Подойдите ближе.',
     );
   }
+}
+
+class _PublishedLocation {
+  const _PublishedLocation({
+    required this.latitude,
+    required this.longitude,
+    required this.writtenAt,
+  });
+
+  final double latitude;
+  final double longitude;
+  final DateTime writtenAt;
 }

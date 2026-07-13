@@ -7,6 +7,7 @@ import 'package:geolocator/geolocator.dart';
 import '../../core/constants/tajgo_colors.dart';
 import '../../core/models/tajgo_courier.dart';
 import '../../core/models/tajgo_order.dart';
+import '../map/services/tajgo_location_service.dart';
 import '../../shared/widgets/tajgo_action_button.dart';
 import '../../shared/widgets/tajgo_order_card.dart';
 import '../../shared/widgets/tajgo_order_progress.dart';
@@ -22,7 +23,8 @@ class CourierHomeScreen extends StatefulWidget {
   State<CourierHomeScreen> createState() => _CourierHomeScreenState();
 }
 
-class _CourierHomeScreenState extends State<CourierHomeScreen> {
+class _CourierHomeScreenState extends State<CourierHomeScreen>
+    with WidgetsBindingObserver {
   bool _busy = false;
   bool _profileEnsured = false;
   bool _profileReady = false;
@@ -30,9 +32,27 @@ class _CourierHomeScreenState extends State<CourierHomeScreen> {
   bool _locationErrorShown = false;
   bool _locationBlocked = false;
   bool _locationStarting = false;
+  bool _lastOnline = false;
+  TajGoLocationException? _locationIssue;
+  String? _locationWriteError;
   StreamSubscription<Position>? _positionSubscription;
 
   String get _uid => TajGoScope.of(context).authService.currentUser!.uid;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed &&
+        _lastOnline &&
+        _positionSubscription == null) {
+      _retryLocation();
+    }
+  }
 
   @override
   void didChangeDependencies() {
@@ -71,6 +91,19 @@ class _CourierHomeScreenState extends State<CourierHomeScreen> {
           context,
         ).showSnackBar(SnackBar(content: Text(error.message)));
       }
+    } on TajGoLocationException catch (error) {
+      if (mounted) {
+        setState(() => _locationIssue = error);
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(error.message)));
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('$error')));
+      }
     } finally {
       if (mounted) {
         setState(() => _busy = false);
@@ -80,6 +113,18 @@ class _CourierHomeScreenState extends State<CourierHomeScreen> {
 
   Future<void> _setOnline(bool online) => _run(() async {
     final scope = TajGoScope.of(context);
+    if (online) {
+      final initial = await scope.locationService.determineCurrentPosition();
+      await scope.courierRepository.updateLocation(
+        uid: _uid,
+        latitude: initial.latitude,
+        longitude: initial.longitude,
+        heading: initial.heading,
+        speed: initial.speed,
+        accuracy: initial.accuracy,
+        force: true,
+      );
+    }
     final user = await scope.userRepository.getUser(_uid);
     await scope.courierRepository.setOnline(
       uid: _uid,
@@ -88,6 +133,13 @@ class _CourierHomeScreenState extends State<CourierHomeScreen> {
       city: user?.city ?? 'Худжанд',
       phoneNumber: user?.phoneNumber,
     );
+    if (mounted) {
+      setState(() {
+        _locationIssue = null;
+        _locationWriteError = null;
+        _locationBlocked = false;
+      });
+    }
   });
 
   void _openOrder(String orderId) {
@@ -187,20 +239,20 @@ class _CourierHomeScreenState extends State<CourierHomeScreen> {
         accuracy: initial.accuracy,
       );
       _positionSubscription = scope.locationService.positionStream().listen(
-        (position) => scope.courierRepository.updateLocation(
-          uid: _uid,
-          latitude: position.latitude,
-          longitude: position.longitude,
-          heading: position.heading,
-          speed: position.speed,
-          accuracy: position.accuracy,
-        ),
+        (position) => unawaited(_publishPosition(position)),
         onError: (Object error) async {
           await _positionSubscription?.cancel();
           _positionSubscription = null;
           _locationBlocked = true;
           if (mounted) {
-            setState(() => _broadcasting = false);
+            setState(() {
+              _broadcasting = false;
+              if (error is TajGoLocationException) {
+                _locationIssue = error;
+              } else {
+                _locationWriteError = '$error';
+              }
+            });
             if (!_locationErrorShown) {
               _locationErrorShown = true;
               ScaffoldMessenger.of(
@@ -215,11 +267,22 @@ class _CourierHomeScreenState extends State<CourierHomeScreen> {
           _broadcasting = true;
           _locationStarting = false;
           _locationErrorShown = false;
+          _locationIssue = null;
+          _locationWriteError = null;
         });
       }
     } catch (error) {
       _locationBlocked = true;
       _locationStarting = false;
+      if (mounted) {
+        setState(() {
+          if (error is TajGoLocationException) {
+            _locationIssue = error;
+          } else {
+            _locationWriteError = '$error';
+          }
+        });
+      }
       if (mounted && !_locationErrorShown) {
         _locationErrorShown = true;
         ScaffoldMessenger.of(
@@ -229,8 +292,50 @@ class _CourierHomeScreenState extends State<CourierHomeScreen> {
     }
   }
 
+  Future<void> _publishPosition(Position position) async {
+    try {
+      await TajGoScope.of(context).courierRepository.updateLocation(
+        uid: _uid,
+        latitude: position.latitude,
+        longitude: position.longitude,
+        heading: position.heading,
+        speed: position.speed,
+        accuracy: position.accuracy,
+      );
+      if (mounted && _locationWriteError != null) {
+        setState(() => _locationWriteError = null);
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() => _locationWriteError = '$error');
+      }
+    }
+  }
+
+  void _retryLocation() {
+    if (!_lastOnline || _locationStarting) {
+      return;
+    }
+    setState(() {
+      _locationBlocked = false;
+      _locationIssue = null;
+      _locationWriteError = null;
+    });
+    unawaited(_syncLocationBroadcast(true));
+  }
+
+  Future<void> _openLocationSettings() async {
+    final issue = _locationIssue;
+    if (issue == null) {
+      _retryLocation();
+      return;
+    }
+    await TajGoScope.of(context).locationService.openSettingsFor(issue.issue);
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _positionSubscription?.cancel();
     super.dispose();
   }
@@ -244,6 +349,7 @@ class _CourierHomeScreenState extends State<CourierHomeScreen> {
         builder: (context, courierSnapshot) {
           final courier = courierSnapshot.data;
           final online = courier?.online ?? false;
+          _lastOnline = online && _profileReady;
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) {
               _syncLocationBroadcast(online && _profileReady);
@@ -261,7 +367,7 @@ class _CourierHomeScreenState extends State<CourierHomeScreen> {
                   _CourierHeader(
                     online: online,
                     broadcasting: _broadcasting,
-                    busy: _busy,
+                    busy: _busy || !_profileReady,
                     onToggle: () => _setOnline(!online),
                   ),
                   Padding(
@@ -269,6 +375,21 @@ class _CourierHomeScreenState extends State<CourierHomeScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        if (_locationIssue != null ||
+                            _locationWriteError != null) ...[
+                          _LocationIssueCard(
+                            message:
+                                _locationIssue?.message ??
+                                'GPS определён, но позиция не отправлена: $_locationWriteError',
+                            settingsRequired:
+                                _locationIssue?.requiresSettings ?? false,
+                            onRetry: online
+                                ? _retryLocation
+                                : () => _setOnline(true),
+                            onSettings: _openLocationSettings,
+                          ),
+                          const SizedBox(height: 14),
+                        ],
                         _StatsGrid(courier: courier),
                         const SizedBox(height: 24),
                         if (activeOrder != null) ...[
@@ -459,6 +580,57 @@ class _CourierHomeScreenState extends State<CourierHomeScreen> {
       ),
     );
   }
+}
+
+class _LocationIssueCard extends StatelessWidget {
+  const _LocationIssueCard({
+    required this.message,
+    required this.settingsRequired,
+    required this.onRetry,
+    required this.onSettings,
+  });
+
+  final String message;
+  final bool settingsRequired;
+  final VoidCallback onRetry;
+  final VoidCallback onSettings;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+      color: const Color(0xFFFFF7E6),
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(color: TajGoColors.warning),
+    ),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Icon(Icons.location_off_rounded, color: TajGoColors.warning),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Геолокация недоступна',
+                style: TextStyle(fontWeight: FontWeight.w900),
+              ),
+              const SizedBox(height: 3),
+              Text(message, style: const TextStyle(fontSize: 13)),
+              const SizedBox(height: 6),
+              TextButton(
+                onPressed: settingsRequired ? onSettings : onRetry,
+                child: Text(
+                  settingsRequired ? 'Открыть настройки' : 'Повторить',
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
 }
 
 class _CourierHeader extends StatelessWidget {

@@ -13,6 +13,7 @@ import '../../core/services/pricing.dart' as pricing;
 import '../../shared/widgets/tajgo_action_button.dart';
 import '../../shared/widgets/tajgo_order_progress.dart';
 import '../../shared/widgets/tajgo_scope.dart';
+import '../map/services/tajgo_location_service.dart';
 
 class CourierOrderScreen extends StatefulWidget {
   const CourierOrderScreen({super.key, required this.orderId});
@@ -23,17 +24,20 @@ class CourierOrderScreen extends StatefulWidget {
   State<CourierOrderScreen> createState() => _CourierOrderScreenState();
 }
 
-class _CourierOrderScreenState extends State<CourierOrderScreen> {
+class _CourierOrderScreenState extends State<CourierOrderScreen>
+    with WidgetsBindingObserver {
   static const _khujand = LatLng(40.2833, 69.6222);
   final _mapController = MapController();
   StreamSubscription<Position>? _positionSubscription;
   LatLng? _position;
   double? _heading;
-  double? _speedMetersPerSecond;
   double? _accuracy;
   bool _followCourier = true;
+  bool _locationStarting = false;
   bool _busy = false;
   bool _fitted = false;
+  OrderStatus? _lastNavigationStatus;
+  TajGoLocationException? _locationIssue;
   String? _geoError;
 
   String get _uid => TajGoScope.of(context).authService.currentUser!.uid;
@@ -41,10 +45,25 @@ class _CourierOrderScreenState extends State<CourierOrderScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) => _startLocation());
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _positionSubscription == null) {
+      _startLocation();
+    }
+  }
+
   Future<void> _startLocation() async {
+    if (_locationStarting || _positionSubscription != null) {
+      return;
+    }
+    setState(() {
+      _locationStarting = true;
+      _geoError = null;
+    });
     try {
       final service = TajGoScope.of(context).locationService;
       final initial = await service.determineCurrentPosition();
@@ -54,19 +73,19 @@ class _CourierOrderScreenState extends State<CourierOrderScreen> {
       setState(() {
         _position = LatLng(initial.latitude, initial.longitude);
         _heading = initial.heading;
-        _speedMetersPerSecond = initial.speed;
         _accuracy = initial.accuracy;
+        _locationIssue = null;
         _geoError = null;
       });
-      await _publishPosition(initial);
+      await _publishPosition(initial, force: true);
       _positionSubscription = service.positionStream().listen(
         (position) async {
           if (mounted) {
             setState(() {
               _position = LatLng(position.latitude, position.longitude);
               _heading = position.heading;
-              _speedMetersPerSecond = position.speed;
               _accuracy = position.accuracy;
+              _locationIssue = null;
               _geoError = null;
             });
             if (_followCourier) {
@@ -75,23 +94,39 @@ class _CourierOrderScreenState extends State<CourierOrderScreen> {
           }
           await _publishPosition(position);
         },
-        onError: (Object error) {
+        onError: (Object error) async {
+          await _positionSubscription?.cancel();
+          _positionSubscription = null;
           if (mounted) {
-            setState(() => _geoError = '$error');
+            setState(() {
+              if (error is TajGoLocationException) {
+                _locationIssue = error;
+              }
+              _geoError = '$error';
+            });
           }
         },
       );
     } catch (error) {
       if (mounted) {
-        setState(() => _geoError = '$error');
+        setState(() {
+          if (error is TajGoLocationException) {
+            _locationIssue = error;
+          }
+          _geoError = '$error';
+        });
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('$error')));
       }
+    } finally {
+      if (mounted) {
+        setState(() => _locationStarting = false);
+      }
     }
   }
 
-  Future<void> _publishPosition(Position position) async {
+  Future<void> _publishPosition(Position position, {bool force = false}) async {
     try {
       await TajGoScope.of(context).courierRepository.updateLocation(
         uid: _uid,
@@ -100,6 +135,7 @@ class _CourierOrderScreenState extends State<CourierOrderScreen> {
         heading: position.heading,
         speed: position.speed,
         accuracy: position.accuracy,
+        force: force,
       );
     } catch (error) {
       if (mounted) {
@@ -108,6 +144,15 @@ class _CourierOrderScreenState extends State<CourierOrderScreen> {
         );
       }
     }
+  }
+
+  Future<void> _openLocationSettings() async {
+    final issue = _locationIssue;
+    if (issue == null) {
+      await _startLocation();
+      return;
+    }
+    await TajGoScope.of(context).locationService.openSettingsFor(issue.issue);
   }
 
   void _centerOnCourier() {
@@ -122,6 +167,7 @@ class _CourierOrderScreenState extends State<CourierOrderScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _positionSubscription?.cancel();
     super.dispose();
   }
@@ -156,15 +202,12 @@ class _CourierOrderScreenState extends State<CourierOrderScreen> {
     if (_position == null || target == null) {
       return null;
     }
-    return pricing.distanceKm(_position!, target);
+    return pricing.haversineDistanceKm(_position!, target);
   }
 
-  int? _etaMinutes(double? distanceKm) {
-    if (distanceKm == null) return null;
-    final measuredKmh = (_speedMetersPerSecond ?? 0) * 3.6;
-    final assumedKmh = measuredKmh >= 4 ? measuredKmh : 18.0;
-    return ((distanceKm / assumedKmh) * 60).ceil().clamp(1, 999);
-  }
+  int? _etaMinutes(double? distanceKm) => distanceKm == null
+      ? null
+      : pricing.courierNavigationEtaMinutes(distanceKm);
 
   double? _bearingTo(LatLng? target) {
     final position = _position;
@@ -268,14 +311,26 @@ class _CourierOrderScreenState extends State<CourierOrderScreen> {
     _fitted = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
-        _mapController.fitCamera(
-          CameraFit.coordinates(
-            coordinates: points,
-            padding: const EdgeInsets.fromLTRB(50, 70, 50, 50),
-          ),
-        );
+        _centerRoute(points);
       }
     });
+  }
+
+  void _centerRoute(List<LatLng> points) {
+    if (points.isEmpty) {
+      return;
+    }
+    setState(() => _followCourier = false);
+    if (points.length == 1) {
+      _mapController.move(points.single, 16);
+      return;
+    }
+    _mapController.fitCamera(
+      CameraFit.coordinates(
+        coordinates: points,
+        padding: const EdgeInsets.fromLTRB(48, 90, 48, 48),
+      ),
+    );
   }
 
   @override
@@ -298,11 +353,19 @@ class _CourierOrderScreenState extends State<CourierOrderScreen> {
           final to = order.toLocation == null
               ? null
               : LatLng(order.toLocation!.latitude, order.toLocation!.longitude);
-          final target = order.status == OrderStatus.accepted ? from : to;
+          final target = switch (order.status) {
+            OrderStatus.accepted => from,
+            OrderStatus.pickedUp => to,
+            _ => null,
+          };
           final targetDistance = _distanceTo(target);
           final etaMinutes = _etaMinutes(targetDistance);
           final targetBearing = _bearingTo(target);
           final fitPoints = <LatLng>[?_position, ?from, ?to];
+          if (_lastNavigationStatus != order.status) {
+            _lastNavigationStatus = order.status;
+            _fitted = false;
+          }
           _fitMap(fitPoints);
           return Column(
             children: [
@@ -406,17 +469,31 @@ class _CourierOrderScreenState extends State<CourierOrderScreen> {
                     Positioned(
                       right: 12,
                       bottom: 12,
-                      child: FloatingActionButton.small(
-                        heroTag: 'centerCourier',
-                        onPressed: _centerOnCourier,
-                        backgroundColor: Colors.white,
-                        foregroundColor: TajGoColors.darkGreen,
-                        tooltip: 'Моё местоположение',
-                        child: Icon(
-                          _followCourier
-                              ? Icons.gps_fixed_rounded
-                              : Icons.my_location_rounded,
-                        ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          FloatingActionButton.small(
+                            heroTag: 'centerRoute',
+                            onPressed: () => _centerRoute(fitPoints),
+                            backgroundColor: Colors.white,
+                            foregroundColor: TajGoColors.darkGreen,
+                            tooltip: 'Центрировать маршрут',
+                            child: const Icon(Icons.route_rounded),
+                          ),
+                          const SizedBox(height: 8),
+                          FloatingActionButton.small(
+                            heroTag: 'centerCourier',
+                            onPressed: _centerOnCourier,
+                            backgroundColor: Colors.white,
+                            foregroundColor: TajGoColors.darkGreen,
+                            tooltip: 'Моё местоположение',
+                            child: Icon(
+                              _followCourier
+                                  ? Icons.gps_fixed_rounded
+                                  : Icons.my_location_rounded,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                     if (target != null)
@@ -441,6 +518,7 @@ class _CourierOrderScreenState extends State<CourierOrderScreen> {
                 etaMinutes: etaMinutes,
                 geoAvailable: _position != null && target != null,
                 geoError: _geoError,
+                onFixLocation: _openLocationSettings,
                 busy: _busy,
                 onNavigate: target == null
                     ? null
@@ -457,6 +535,7 @@ class _CourierOrderScreenState extends State<CourierOrderScreen> {
                       () => repository.markArrived(
                         orderId: order.id,
                         courierId: _uid,
+                        distanceToPointKm: targetDistance,
                       ),
                     );
                   } else if (order.status == OrderStatus.accepted) {
@@ -491,6 +570,7 @@ class _OrderPanel extends StatelessWidget {
     required this.etaMinutes,
     required this.geoAvailable,
     required this.geoError,
+    required this.onFixLocation,
     required this.busy,
     required this.onNavigate,
     required this.onClient,
@@ -503,6 +583,7 @@ class _OrderPanel extends StatelessWidget {
   final int? etaMinutes;
   final bool geoAvailable;
   final String? geoError;
+  final VoidCallback onFixLocation;
   final bool busy;
   final VoidCallback? onNavigate;
   final VoidCallback onClient;
@@ -546,11 +627,7 @@ class _OrderPanel extends StatelessWidget {
         order.status == OrderStatus.accepted ||
         order.status == OrderStatus.pickedUp;
     final primaryEnabled =
-        _primaryLabel != null &&
-        (!needsGeo ||
-            (order.status == OrderStatus.accepted &&
-                order.arrivedAtPickupAt == null) ||
-            geoAvailable);
+        _primaryLabel != null && (!needsGeo || (geoAvailable && !tooFar));
     final address = order.status == OrderStatus.accepted
         ? order.fromText
         : order.toText;
@@ -587,11 +664,32 @@ class _OrderPanel extends StatelessWidget {
                 const SizedBox(height: 7),
                 Text(
                   'До точки: ${distance!.toStringAsFixed(1)} км'
-                  '${etaMinutes == null ? '' : ' · ≈ $etaMinutes мин'}'
-                  '${tooFar ? ' — подойдите ближе, чтобы подтвердить' : ''}',
-                  style: TextStyle(
-                    color: tooFar ? TajGoColors.warning : TajGoColors.muted,
-                    fontWeight: tooFar ? FontWeight.w800 : FontWeight.w500,
+                  '${etaMinutes == null ? '' : ' · ≈ $etaMinutes мин'}',
+                  style: const TextStyle(color: TajGoColors.muted),
+                ),
+              ],
+              if (needsGeo && geoAvailable) ...[
+                const SizedBox(height: 8),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 9,
+                  ),
+                  decoration: BoxDecoration(
+                    color: tooFar ? const Color(0xFFFFF7E6) : TajGoColors.mint,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    tooFar
+                        ? 'Подойдите ближе, чтобы подтвердить действие'
+                        : 'Можно подтвердить действие',
+                    style: TextStyle(
+                      color: tooFar
+                          ? TajGoColors.warning
+                          : TajGoColors.darkGreen,
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
                 ),
               ],
@@ -599,13 +697,18 @@ class _OrderPanel extends StatelessWidget {
                 const SizedBox(height: 7),
                 Text(
                   geoError == null
-                      ? 'Определяем местоположение...'
-                      : 'Включите геолокацию, чтобы подтвердить действие',
+                      ? 'Ищем GPS...'
+                      : 'Разрешите геолокацию для работы курьером',
                   style: const TextStyle(
                     color: TajGoColors.error,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
+                if (geoError != null)
+                  TextButton(
+                    onPressed: onFixLocation,
+                    child: const Text('Открыть настройки'),
+                  ),
               ],
               if (order.status == OrderStatus.delivered)
                 const Padding(
@@ -734,9 +837,8 @@ class _NavigationInstruction extends StatelessWidget {
   final double? distanceKm;
   final int? etaMinutes;
 
-  String get _targetLabel => status == OrderStatus.accepted
-      ? 'Направляйтесь к точке забора'
-      : 'Направляйтесь к клиенту';
+  String get _targetLabel =>
+      status == OrderStatus.accepted ? 'Едем к точке забора' : 'Везём клиенту';
 
   String get _direction {
     final value = bearing;

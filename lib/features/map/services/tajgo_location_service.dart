@@ -1,20 +1,35 @@
+import 'dart:async';
+
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../models/tajgo_map_location.dart';
 
+enum TajGoLocationIssue { serviceDisabled, denied, deniedForever }
+
 class TajGoLocationException implements Exception {
-  const TajGoLocationException(this.message);
+  const TajGoLocationException(this.issue, this.message);
+
+  final TajGoLocationIssue issue;
   final String message;
+
+  bool get requiresSettings =>
+      issue == TajGoLocationIssue.serviceDisabled ||
+      issue == TajGoLocationIssue.deniedForever;
+
   @override
   String toString() => message;
 }
 
 class TajGoLocationService {
+  StreamController<Position>? _positionController;
+  StreamSubscription<Position>? _nativePositionSubscription;
+
   Future<Position> determineCurrentPosition() async {
     final enabled = await Geolocator.isLocationServiceEnabled();
     if (!enabled) {
       throw const TajGoLocationException(
+        TajGoLocationIssue.serviceDisabled,
         'Включите геолокацию на телефоне и попробуйте ещё раз.',
       );
     }
@@ -25,11 +40,13 @@ class TajGoLocationService {
     }
     if (permission == LocationPermission.denied) {
       throw const TajGoLocationException(
+        TajGoLocationIssue.denied,
         'Без разрешения на геолокацию мы не сможем показать ваше местоположение.',
       );
     }
     if (permission == LocationPermission.deniedForever) {
       throw const TajGoLocationException(
+        TajGoLocationIssue.deniedForever,
         'Разрешение запрещено навсегда. Откройте настройки приложения и разрешите геолокацию.',
       );
     }
@@ -37,6 +54,13 @@ class TajGoLocationService {
     return Geolocator.getCurrentPosition(
       locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
     );
+  }
+
+  Future<bool> openSettingsFor(TajGoLocationIssue issue) {
+    if (issue == TajGoLocationIssue.serviceDisabled) {
+      return Geolocator.openLocationSettings();
+    }
+    return Geolocator.openAppSettings();
   }
 
   Future<TajGoMapLocation> reverseGeocode({
@@ -69,12 +93,38 @@ class TajGoLocationService {
     }
   }
 
-  Stream<Position> positionStream() => Geolocator.getPositionStream(
-    locationSettings: const LocationSettings(
-      accuracy: LocationAccuracy.bestForNavigation,
-      distanceFilter: 5,
-    ),
-  );
+  /// One shared native GPS stream for CourierHome and CourierOrder.
+  Stream<Position> positionStream() {
+    final existing = _positionController;
+    if (existing != null) {
+      return existing.stream;
+    }
+    late final StreamController<Position> controller;
+    controller = StreamController<Position>.broadcast(
+      onListen: () => _startNativePositionStream(controller),
+      onCancel: _stopNativePositionStream,
+    );
+    _positionController = controller;
+    return controller.stream;
+  }
+
+  void _startNativePositionStream(StreamController<Position> controller) {
+    if (_nativePositionSubscription != null) {
+      return;
+    }
+    _nativePositionSubscription = Geolocator.getPositionStream(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.bestForNavigation,
+        distanceFilter: 5,
+      ),
+    ).listen(controller.add, onError: controller.addError);
+  }
+
+  Future<void> _stopNativePositionStream() async {
+    final subscription = _nativePositionSubscription;
+    _nativePositionSubscription = null;
+    await subscription?.cancel();
+  }
 
   TajGoMapLocation _fallback(double latitude, double longitude) {
     return TajGoMapLocation(
