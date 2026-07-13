@@ -579,8 +579,8 @@ class _DetailsPanel extends StatelessWidget {
             ),
             const SizedBox(height: 2),
             Text(
-              'Цена предложена за $distance км. Можно изменить — '
-              'курьер увидит вашу цену.',
+              'Цена рассчитана по расстоянию. '
+              'В тестовом режиме может быть уточнена.',
               style: const TextStyle(color: TajGoColors.muted, fontSize: 12),
             ),
             const SizedBox(height: 6),

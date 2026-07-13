@@ -12,6 +12,7 @@ class TajGoCourier {
     this.phoneNumber,
     this.location,
     this.locationUpdatedAt,
+    this.updatedAt,
     this.activeOrderId,
     this.ordersToday = 0,
     this.score = 100,
@@ -23,6 +24,7 @@ class TajGoCourier {
   final num earningsToday;
   final GeoPoint? location;
   final DateTime? locationUpdatedAt;
+  final DateTime? updatedAt;
   final String? activeOrderId;
   final int ordersToday;
   final int score;
@@ -45,6 +47,7 @@ class TajGoCourier {
       earningsToday: data['earningsToday'] as num? ?? 0,
       location: _locationFrom(data),
       locationUpdatedAt: (data['locationUpdatedAt'] as Timestamp?)?.toDate(),
+      updatedAt: (data['updatedAt'] as Timestamp?)?.toDate(),
       activeOrderId: data['activeOrderId'] as String?,
       ordersToday: (data['ordersToday'] as num? ?? 0).toInt(),
       score: (data['score'] as num? ?? 100).toInt(),

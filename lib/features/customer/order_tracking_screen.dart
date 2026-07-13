@@ -212,6 +212,9 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
     final to = order.toLocation == null
         ? null
         : LatLng(order.toLocation!.latitude, order.toLocation!.longitude);
+    final route = from != null && to != null
+        ? TajGoScope.of(context).routeService.directRoute(from: from, to: to)
+        : null;
     final courierPoint = courier?.location == null
         ? null
         : LatLng(courier!.location!.latitude, courier.location!.longitude);
@@ -240,7 +243,7 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
                     PolylineLayer(
                       polylines: [
                         Polyline(
-                          points: [from, to],
+                          points: route!.polylinePoints,
                           color: TajGoColors.green,
                           strokeWidth: 4,
                         ),
@@ -409,6 +412,11 @@ class _StatusPanel extends StatelessWidget {
               ].join(' · '),
               style: const TextStyle(color: TajGoColors.muted, fontSize: 13),
             ),
+            if (order.fromLocation != null && order.toLocation != null)
+              const Text(
+                'Маршрут предварительный — показана прямая линия.',
+                style: TextStyle(color: TajGoColors.warning, fontSize: 12),
+              ),
             if ((order.comment ?? '').isNotEmpty) ...[
               const SizedBox(height: 3),
               Text(

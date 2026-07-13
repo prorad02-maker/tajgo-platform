@@ -20,7 +20,9 @@ void main() {
     expect(etaMinutes(2.5), 14);
     expect(courierNavigationEtaMinutes(3), 10);
     expect(suggestedPrice(0), 10);
-    expect(suggestedPrice(2.5), 20);
+    expect(suggestedPrice(1), 10);
+    expect(suggestedPrice(2.5), 15);
+    expect(suggestedPrice(10), 37);
   });
 
   test('комментарий попадает в данные заказа только когда он не пустой', () {

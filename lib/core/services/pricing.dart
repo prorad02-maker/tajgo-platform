@@ -15,8 +15,12 @@ int etaMinutes(double kilometers) => (kilometers / 18 * 60).ceil() + 5;
 int courierNavigationEtaMinutes(double kilometers) =>
     ((kilometers / 18) * 60).ceil().clamp(1, 999);
 
+const num minimumPrice = 10;
+const num basePrice = 7;
+const num pricePerKm = 3;
+
 num suggestedPrice(double kilometers) =>
-    math.max(10, (10 + 4 * kilometers).ceil());
+    math.max(minimumPrice, (basePrice + pricePerKm * kilometers).round());
 
 const double actionRadiusKm = 2.0;
 

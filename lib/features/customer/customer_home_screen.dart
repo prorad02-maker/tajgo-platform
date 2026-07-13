@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/constants/tajgo_colors.dart';
@@ -5,7 +6,9 @@ import '../../core/models/tajgo_order.dart';
 import '../../shared/widgets/tajgo_scope.dart';
 import '../../shared/widgets/tajgo_badge.dart';
 import '../../shared/widgets/tajgo_order_history_tile.dart';
+import '../admin/admin_home_screen.dart';
 import '../courier/courier_home_screen.dart';
+import '../demo/demo_tools_screen.dart';
 import '../map/screens/new_order_map_screen.dart';
 import 'order_tracking_screen.dart';
 
@@ -210,6 +213,45 @@ class CustomerHomeScreen extends StatelessWidget {
                     ),
                   ),
                 ),
+                FutureBuilder(
+                  future: scope.userRepository.getUser(uid),
+                  builder: (context, snapshot) {
+                    final isAdmin = snapshot.data?.role == 'admin';
+                    if (!isAdmin && !kDebugMode) {
+                      return const SizedBox.shrink();
+                    }
+                    return Column(
+                      children: [
+                        const SizedBox(height: 12),
+                        _ManagementCard(
+                          icon: Icons.admin_panel_settings_rounded,
+                          title: '🛠 Управление TajGo',
+                          badge: kDebugMode && !isAdmin ? 'debug' : 'admin',
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const AdminHomeScreen(),
+                            ),
+                          ),
+                        ),
+                        if (kDebugMode) ...[
+                          const SizedBox(height: 10),
+                          _ManagementCard(
+                            icon: Icons.science_rounded,
+                            title: 'Тест · Demo Tools',
+                            badge: 'debug',
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const DemoToolsScreen(),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    );
+                  },
+                ),
               ],
             ),
           ),
@@ -217,6 +259,48 @@ class CustomerHomeScreen extends StatelessWidget {
       ),
     );
   }
+}
+
+class _ManagementCard extends StatelessWidget {
+  const _ManagementCard({
+    required this.icon,
+    required this.title,
+    required this.badge,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final String badge;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Card(
+    shape: RoundedRectangleBorder(
+      side: const BorderSide(color: TajGoColors.darkGreen, width: 1.5),
+      borderRadius: BorderRadius.circular(18),
+    ),
+    child: ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      leading: CircleAvatar(
+        backgroundColor: TajGoColors.mint,
+        child: Icon(icon, color: TajGoColors.darkGreen),
+      ),
+      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w900)),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TajGoBadge(
+            text: badge,
+            background: TajGoColors.lime,
+            foreground: TajGoColors.ink,
+          ),
+          const Icon(Icons.chevron_right_rounded),
+        ],
+      ),
+      onTap: onTap,
+    ),
+  );
 }
 
 class _PlatformHeader extends StatelessWidget {

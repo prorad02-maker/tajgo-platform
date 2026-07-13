@@ -15,6 +15,13 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/couriers/$(request.auth.uid));
     }
 
+    function isAdmin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
+          == 'admin';
+    }
+
     function authPhone() {
       return request.auth.token.get('phone_number', null);
     }
@@ -25,8 +32,8 @@ service cloud.firestore {
     }
 
     match /users/{uid} {
-      allow get: if owns(uid);
-      allow list: if false;
+      allow get: if owns(uid) || isAdmin();
+      allow list: if isAdmin();
 
       allow create: if owns(uid)
         && request.resource.data.uid == uid
@@ -131,8 +138,8 @@ service cloud.firestore {
           && completionStatsUpdateIsValid();
       }
 
-      allow get: if owns(uid);
-      allow list: if false;
+      allow get: if owns(uid) || isAdmin();
+      allow list: if isAdmin();
 
       allow create: if owns(uid)
         && baseCourierDataIsValid()
@@ -146,7 +153,8 @@ service cloud.firestore {
       allow update: if ownerProfileUpdateIsValid()
         || ownerAcceptUpdateIsValid()
         || (owns(uid) && completionStatsUpdateIsValid())
-        || assignedCustomerCompletesOrder();
+        || assignedCustomerCompletesOrder()
+        || isAdmin();
 
       allow delete: if false;
     }
@@ -207,14 +215,17 @@ service cloud.firestore {
 
       allow get: if signedIn()
         && (owns(uid)
+          || isAdmin()
           || resource.data.get('isOnline', false) == true
           || assignedCustomerCanRead());
-      allow list: if signedIn()
-        && resource.data.get('isOnline', false) == true
-        && request.query.limit != null
-        && request.query.limit <= 50;
+      allow list: if isAdmin()
+        || (signedIn()
+          && resource.data.get('isOnline', false) == true
+          && request.query.limit != null
+          && request.query.limit <= 50);
 
-      allow create, update: if owns(uid) && publicDataMatchesPrivate();
+      allow create, update: if (owns(uid) && publicDataMatchesPrivate())
+        || isAdmin();
       allow delete: if false;
     }
 
@@ -422,23 +433,30 @@ service cloud.firestore {
         ]);
 
       allow get, list: if signedIn()
-        && (resource.data.customerId == request.auth.uid
+        && (isAdmin()
+          || resource.data.customerId == request.auth.uid
           || (isCourier() && resource.data.status == 'waiting')
           || resource.data.get('courierId', null) == request.auth.uid);
 
-      allow update: if signedIn()
-        && immutableOrderData()
-        && (customerCancels()
-          || customerCompletes()
-          || customerDisputes()
-          || courierDeclines()
-          || courierAccepts()
-          || courierArrives()
-          || courierPicksUp()
-          || courierDelivers()
-          || courierCompletesWithCode());
+      allow update: if isAdmin()
+        || (signedIn()
+          && immutableOrderData()
+          && (customerCancels()
+            || customerCompletes()
+            || customerDisputes()
+            || courierDeclines()
+            || courierAccepts()
+            || courierArrives()
+            || courierPicksUp()
+            || courierDelivers()
+            || courierCompletesWithCode()));
 
       allow delete: if false;
+    }
+
+    match /admin_logs/{logId} {
+      allow create, read: if isAdmin();
+      allow update, delete: if false;
     }
 
     match /{document=**} {

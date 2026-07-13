@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 
 import '../models/app_user.dart';
 
@@ -41,5 +42,21 @@ class UserRepository {
   Future<AppUser?> getUser(String uid) async {
     final doc = await _db.collection('users').doc(uid).get();
     return doc.exists ? AppUser.fromDoc(doc) : null;
+  }
+
+  Stream<AppUser?> userStream(String uid) => _db
+      .collection('users')
+      .doc(uid)
+      .snapshots()
+      .map((doc) => doc.exists ? AppUser.fromDoc(doc) : null);
+
+  Future<void> setAdminRoleForTesting(String uid) async {
+    if (!kDebugMode) {
+      throw StateError('Тестовое изменение роли доступно только в debug.');
+    }
+    await _db.collection('users').doc(uid).update({
+      'role': AppUserRole.admin,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
   }
 }

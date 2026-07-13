@@ -57,6 +57,14 @@ class TajGoOrder {
     this.arrivedAtPickupAt,
     this.completedAt,
     this.disputedAt,
+    this.pickedUpAt,
+    this.deliveredAt,
+    this.cancelledAt,
+    this.cancelledReason,
+    this.resolvedBy,
+    this.resolvedAt,
+    this.manuallyCompletedBy,
+    this.adminNote,
     this.comment,
   });
 
@@ -77,8 +85,18 @@ class TajGoOrder {
   final List<String> declinedBy;
   final DateTime? createdAt, acceptedAt, updatedAt;
   final String? confirmationCode;
-  final DateTime? arrivedAtPickupAt, completedAt, disputedAt;
-  final String? comment;
+  final DateTime? arrivedAtPickupAt,
+      pickedUpAt,
+      deliveredAt,
+      completedAt,
+      disputedAt,
+      cancelledAt,
+      resolvedAt;
+  final String? comment,
+      cancelledReason,
+      resolvedBy,
+      manuallyCompletedBy,
+      adminNote;
 
   factory TajGoOrder.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data() ?? const <String, dynamic>{};
@@ -105,8 +123,16 @@ class TajGoOrder {
       updatedAt: date('updatedAt'),
       confirmationCode: data['confirmationCode'] as String?,
       arrivedAtPickupAt: date('arrivedAtPickupAt'),
+      pickedUpAt: date('pickedUpAt'),
+      deliveredAt: date('deliveredAt'),
       completedAt: date('completedAt'),
       disputedAt: date('disputedAt'),
+      cancelledAt: date('cancelledAt'),
+      cancelledReason: data['cancelledReason'] as String?,
+      resolvedBy: data['resolvedBy'] as String?,
+      resolvedAt: date('resolvedAt'),
+      manuallyCompletedBy: data['manuallyCompletedBy'] as String?,
+      adminNote: data['adminNote'] as String?,
       comment: data['comment'] as String?,
     );
   }

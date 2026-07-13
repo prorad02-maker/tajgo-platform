@@ -353,6 +353,11 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
           final to = order.toLocation == null
               ? null
               : LatLng(order.toLocation!.latitude, order.toLocation!.longitude);
+          final orderRoute = from != null && to != null
+              ? TajGoScope.of(
+                  context,
+                ).routeService.directRoute(from: from, to: to)
+              : null;
           final target = switch (order.status) {
             OrderStatus.accepted => from,
             OrderStatus.pickedUp => to,
@@ -396,7 +401,7 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
                           polylines: [
                             if (from != null && to != null)
                               Polyline(
-                                points: [from, to],
+                                points: orderRoute!.polylinePoints,
                                 color: TajGoColors.green,
                                 strokeWidth: 4,
                               ),
@@ -653,6 +658,19 @@ class _OrderPanel extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               Text(address, style: const TextStyle(color: TajGoColors.muted)),
+              const SizedBox(height: 3),
+              Text(
+                'Ваш доход за заказ: ${order.price} TJS.',
+                style: const TextStyle(
+                  color: TajGoColors.darkGreen,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              if (order.fromLocation != null && order.toLocation != null)
+                const Text(
+                  'Маршрут предварительный — показана прямая линия.',
+                  style: TextStyle(color: TajGoColors.warning, fontSize: 12),
+                ),
               if ((order.comment ?? '').isNotEmpty) ...[
                 const SizedBox(height: 4),
                 Text(
