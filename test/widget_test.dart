@@ -5,7 +5,10 @@ import 'package:latlong2/latlong.dart';
 import 'package:tajgo/core/models/tajgo_order.dart';
 import 'package:tajgo/core/services/pricing.dart';
 import 'package:tajgo/features/map/models/place_suggestion.dart';
+import 'package:tajgo/features/map/models/tajgo_route.dart';
 import 'package:tajgo/features/map/services/address_normalizer.dart';
+import 'package:tajgo/features/map/services/direct_route_provider.dart';
+import 'package:tajgo/features/map/services/route_cache.dart';
 
 void main() {
   test('неизвестный статус заказа считается ожидающим', () {
@@ -91,5 +94,57 @@ void main() {
     );
     expect(normalizer.scoreMatch('панч', place), 1);
     expect(normalizer.buildShortAddress(place), 'Панчшанбе');
+  });
+
+  test('direct route остаётся безопасным fallback', () {
+    const provider = DirectRouteProvider();
+    final route = provider.buildSync(
+      from: const LatLng(40.2833, 69.6222),
+      to: const LatLng(40.2933, 69.6322),
+      mode: RouteMode.bicycle,
+    );
+    expect(route.points, hasLength(2));
+    expect(route.routeQuality, RouteQuality.directFallback);
+    expect(route.isRoadRouteApproximation, isTrue);
+    expect(route.distanceKm, greaterThan(0));
+    expect(route.etaMinutes, greaterThan(0));
+  });
+
+  test('route cache использует округлённые координаты и mode', () {
+    final cache = RouteCache();
+    const from = LatLng(40.28331, 69.62221);
+    const almostSameFrom = LatLng(40.28334, 69.62224);
+    const to = LatLng(40.2933, 69.6322);
+    final route = TajGoRoute(
+      points: const [from, to],
+      distanceKm: 2,
+      etaMinutes: 8,
+      isRoadRouteApproximation: false,
+      providerName: 'test',
+      routeQuality: RouteQuality.road,
+      createdAt: DateTime.now().toUtc(),
+    );
+    cache.put(from, to, RouteMode.bicycle, route);
+    expect(cache.get(almostSameFrom, to, RouteMode.bicycle), same(route));
+    expect(cache.get(from, to, RouteMode.walking), isNull);
+  });
+
+  test('gazetteer metadata сохраняется в PlaceSuggestion', () {
+    final place = PlaceSuggestion.fromJson({
+      'id': 'market_1',
+      'title': 'Демо рынок',
+      'shortTitle': 'Рынок',
+      'address': 'Худжанд',
+      'lat': 40.28,
+      'lng': 69.62,
+      'category': 'market',
+      'district': 'Демо',
+      'verified': false,
+      'popularity': 90,
+    });
+    expect(place.category, 'market');
+    expect(place.district, 'Демо');
+    expect(place.verified, isFalse);
+    expect(place.popularity, 90);
   });
 }

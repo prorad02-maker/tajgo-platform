@@ -13,7 +13,7 @@ class NativeGeocodingProvider implements GeocodingProvider {
 
   @override
   Future<List<PlaceSuggestion>> search(String query, LatLng? near) async {
-    if (query.trim().length < 3) return const [];
+    if (query.trim().length < 2) return const [];
     try {
       final locations = await Geocoding()
           .locationFromAddress('$query, Худжанд, Таджикистан')

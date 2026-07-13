@@ -10,6 +10,8 @@ class TajGoMapCamera {
   static const double navigationZoom = 17;
 
   int _animationId = 0;
+  DateTime? _lastAnimationAt;
+  LatLng? _lastTarget;
 
   Future<void> animateTo({
     required MapController controller,
@@ -17,6 +19,17 @@ class TajGoMapCamera {
     double zoom = cityZoom,
     Duration duration = const Duration(milliseconds: 420),
   }) async {
+    final now = DateTime.now();
+    final lastAt = _lastAnimationAt;
+    final lastTarget = _lastTarget;
+    if (lastAt != null &&
+        lastTarget != null &&
+        now.difference(lastAt) < const Duration(milliseconds: 250) &&
+        const Distance().as(LengthUnit.Meter, lastTarget, target) < 5) {
+      return;
+    }
+    _lastAnimationAt = now;
+    _lastTarget = target;
     final animationId = ++_animationId;
     try {
       final start = controller.camera;

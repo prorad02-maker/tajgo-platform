@@ -5,9 +5,13 @@
     "shortTitle": "Центр",
     "aliases": ["центр", "центр худжанда", "center", "khujand center"],
     "address": "Демо-точка · центр Худжанда",
+    "district": "Демо",
     "lat": 40.2833,
     "lng": 69.6222,
-    "category": "demo"
+    "category": "landmark",
+    "verified": false,
+    "popularity": 100,
+    "notes": "Демонстрационная координата. Заменить после проверки владельцем."
   },
   {
     "id": "demo_north",
@@ -15,9 +19,13 @@
     "shortTitle": "Север города",
     "aliases": ["север", "север города", "north"],
     "address": "Демо-точка · север Худжанда",
+    "district": "Демо",
     "lat": 40.2933,
     "lng": 69.6222,
-    "category": "demo"
+    "category": "district",
+    "verified": false,
+    "popularity": 70,
+    "notes": "Демонстрационная координата."
   },
   {
     "id": "demo_south",
@@ -25,9 +33,13 @@
     "shortTitle": "Юг города",
     "aliases": ["юг", "юг города", "south"],
     "address": "Демо-точка · юг Худжанда",
+    "district": "Демо",
     "lat": 40.2733,
     "lng": 69.6222,
-    "category": "demo"
+    "category": "district",
+    "verified": false,
+    "popularity": 60,
+    "notes": "Демонстрационная координата."
   },
   {
     "id": "demo_east",
@@ -35,8 +47,12 @@
     "shortTitle": "Восток города",
     "aliases": ["восток", "восток города", "east"],
     "address": "Демо-точка · восток Худжанда",
+    "district": "Демо",
     "lat": 40.2833,
     "lng": 69.6372,
-    "category": "demo"
+    "category": "district",
+    "verified": false,
+    "popularity": 50,
+    "notes": "Демонстрационная координата."
   }
 ]

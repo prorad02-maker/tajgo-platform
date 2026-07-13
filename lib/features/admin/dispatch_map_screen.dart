@@ -13,6 +13,8 @@ import 'admin_order_details_screen.dart';
 import 'admin_orders_screen.dart';
 import 'widgets/admin_access_gate.dart';
 
+enum _DispatchFilter { all, couriers, waiting, active }
+
 class DispatchMapScreen extends StatefulWidget {
   const DispatchMapScreen({super.key, this.focusCourierId});
   final String? focusCourierId;
@@ -29,6 +31,7 @@ class _DispatchMapScreenState extends State<DispatchMapScreen> {
   LatLng? _currentPosition;
   bool _locating = false;
   bool _focused = false;
+  _DispatchFilter _filter = _DispatchFilter.all;
 
   @override
   void initState() {
@@ -89,6 +92,11 @@ class _DispatchMapScreenState extends State<DispatchMapScreen> {
     }
   }
 
+  void _showCity() {
+    setState(() => _selected = null);
+    _camera.animateTo(controller: _map, target: _khujand, zoom: 12.5);
+  }
+
   @override
   void dispose() {
     _camera.stop();
@@ -119,6 +127,23 @@ class _DispatchMapScreenState extends State<DispatchMapScreen> {
                   }.contains(order.status),
                 )
                 .toList();
+            final waitingCount = orders
+                .where((order) => order.status == OrderStatus.waiting)
+                .length;
+            final activeCount = orders.length - waitingCount;
+            final visibleCouriers =
+                _filter == _DispatchFilter.all ||
+                    _filter == _DispatchFilter.couriers
+                ? online
+                : const <TajGoCourier>[];
+            final visibleOrders = orders.where((order) {
+              return switch (_filter) {
+                _DispatchFilter.all => true,
+                _DispatchFilter.couriers => false,
+                _DispatchFilter.waiting => order.status == OrderStatus.waiting,
+                _DispatchFilter.active => order.status != OrderStatus.waiting,
+              };
+            }).toList();
             if (!_focused && widget.focusCourierId != null) {
               final focused = couriers
                   .where(
@@ -143,7 +168,10 @@ class _DispatchMapScreenState extends State<DispatchMapScreen> {
               }
             }
             final routeLines = <Polyline>[];
-            for (final order in orders) {
+            final selectedOrder = _selected is TajGoOrder
+                ? _selected as TajGoOrder
+                : null;
+            for (final order in <TajGoOrder>[?selectedOrder]) {
               if (order.fromLocation == null || order.toLocation == null) {
                 continue;
               }
@@ -182,7 +210,7 @@ class _DispatchMapScreenState extends State<DispatchMapScreen> {
                     PolylineLayer(polylines: routeLines),
                     MarkerLayer(
                       markers: [
-                        ...online.map(
+                        ...visibleCouriers.map(
                           (courier) => Marker(
                             point: LatLng(
                               courier.location!.latitude,
@@ -210,7 +238,7 @@ class _DispatchMapScreenState extends State<DispatchMapScreen> {
                             ),
                           ),
                         ),
-                        ...orders.expand((order) sync* {
+                        ...visibleOrders.expand((order) sync* {
                           if (order.fromLocation != null) {
                             yield Marker(
                               point: LatLng(
@@ -246,7 +274,7 @@ class _DispatchMapScreenState extends State<DispatchMapScreen> {
                                 onTap: () => setState(() => _selected = order),
                                 child: const Icon(
                                   Icons.location_pin,
-                                  color: TajGoColors.lime,
+                                  color: Colors.blue,
                                   size: 40,
                                 ),
                               ),
@@ -290,7 +318,7 @@ class _DispatchMapScreenState extends State<DispatchMapScreen> {
                               vertical: 10,
                             ),
                             child: Text(
-                              '🛵 ${online.length} на линии · 📦 ${orders.length} активных',
+                              '🛵 ${online.length} на линии · 📦 $waitingCount ждут · 🚚 $activeCount в пути',
                               style: const TextStyle(
                                 fontWeight: FontWeight.w800,
                               ),
@@ -302,12 +330,50 @@ class _DispatchMapScreenState extends State<DispatchMapScreen> {
                   ),
                 ),
                 Positioned(
+                  top: MediaQuery.paddingOf(context).top + 70,
+                  left: 12,
+                  right: 12,
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Material(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(22),
+                      elevation: 3,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 6),
+                        child: Row(
+                          children: [
+                            _filterChip('Все', _DispatchFilter.all),
+                            _filterChip('Курьеры', _DispatchFilter.couriers),
+                            _filterChip('Ждут', _DispatchFilter.waiting),
+                            _filterChip('В пути', _DispatchFilter.active),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
                   right: 12,
                   bottom: _selected == null ? 16 : 124,
-                  child: TajGoLocateButton(
-                    heroTag: 'dispatchLocate',
-                    loading: _locating,
-                    onPressed: _locate,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      FloatingActionButton.small(
+                        heroTag: 'dispatchCity',
+                        onPressed: _showCity,
+                        backgroundColor: Colors.white,
+                        foregroundColor: TajGoColors.darkGreen,
+                        tooltip: 'Показать весь город',
+                        child: const Icon(Icons.location_city_rounded),
+                      ),
+                      const SizedBox(height: 8),
+                      TajGoLocateButton(
+                        heroTag: 'dispatchLocate',
+                        loading: _locating,
+                        onPressed: _locate,
+                      ),
+                    ],
                   ),
                 ),
                 if (_selected != null)
@@ -323,6 +389,18 @@ class _DispatchMapScreenState extends State<DispatchMapScreen> {
           },
         ),
       ),
+    ),
+  );
+
+  Widget _filterChip(String label, _DispatchFilter value) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 2),
+    child: FilterChip(
+      label: Text(label),
+      selected: _filter == value,
+      onSelected: (_) => setState(() {
+        _filter = value;
+        _selected = null;
+      }),
     ),
   );
 }

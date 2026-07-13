@@ -15,7 +15,8 @@ import '../../shared/widgets/tajgo_order_progress.dart';
 import '../../shared/widgets/tajgo_scope.dart';
 import '../map/services/tajgo_location_service.dart';
 import '../map/services/tajgo_map_camera.dart';
-import '../map/widgets/tajgo_location_widgets.dart';
+import '../map/models/tajgo_route.dart';
+import '../map/widgets/tajgo_map_action_buttons.dart';
 
 class CourierOrderScreen extends StatefulWidget {
   const CourierOrderScreen({super.key, required this.orderId});
@@ -42,6 +43,12 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
   OrderStatus? _lastNavigationStatus;
   TajGoLocationException? _locationIssue;
   String? _geoError;
+  TajGoRoute? _navigationRoute;
+  LatLng? _activeTarget;
+  LatLng? _lastRouteOrigin;
+  DateTime? _lastRouteAt;
+  bool _routeLoading = false;
+  bool _offRoute = false;
 
   String get _uid => TajGoScope.of(context).authService.currentUser!.uid;
 
@@ -101,6 +108,7 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
                 ),
               );
             }
+            unawaited(_maybeRebuildRoute(_position!));
           }
           await _publishPosition(position);
         },
@@ -179,6 +187,89 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
         zoom: TajGoMapCamera.navigationZoom,
       ),
     );
+  }
+
+  void _setActiveTarget(LatLng? target) {
+    final previous = _activeTarget;
+    final changed =
+        target == null ||
+        previous == null ||
+        const Distance().as(LengthUnit.Meter, previous, target) > 5;
+    if (!changed) return;
+    _activeTarget = target;
+    _navigationRoute = null;
+    _lastRouteAt = null;
+    _offRoute = false;
+    final position = _position;
+    if (position != null && target != null) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _rebuildRoute(position, target, force: true),
+      );
+    }
+  }
+
+  Future<void> _maybeRebuildRoute(LatLng position) async {
+    final target = _activeTarget;
+    if (target == null || _routeLoading) return;
+    final now = DateTime.now();
+    final elapsed = now.difference(
+      _lastRouteAt ?? DateTime.fromMillisecondsSinceEpoch(0),
+    );
+    final moved = _lastRouteOrigin == null
+        ? double.infinity
+        : const Distance().as(LengthUnit.Meter, _lastRouteOrigin!, position);
+    final offRoute = _distanceFromRouteMeters(position) > 150;
+    if (mounted && offRoute != _offRoute) {
+      setState(() => _offRoute = offRoute);
+    }
+    final shouldRefresh =
+        _navigationRoute == null ||
+        (elapsed >= const Duration(seconds: 25) && moved >= 120) ||
+        (offRoute && elapsed >= const Duration(seconds: 20));
+    if (shouldRefresh) {
+      await _rebuildRoute(position, target, force: offRoute);
+    }
+  }
+
+  Future<void> _rebuildRoute(
+    LatLng from,
+    LatLng target, {
+    required bool force,
+  }) async {
+    if (_routeLoading || !mounted) return;
+    setState(() => _routeLoading = true);
+    final route = await TajGoScope.of(context).routeService.buildRoute(
+      from: from,
+      to: target,
+      mode: RouteMode.bicycle,
+      forceRefresh: force,
+    );
+    if (!mounted) return;
+    if (_activeTarget != target) {
+      setState(() => _routeLoading = false);
+      return;
+    }
+    setState(() {
+      _navigationRoute = route;
+      _lastRouteOrigin = from;
+      _lastRouteAt = DateTime.now();
+      _routeLoading = false;
+      _offRoute = false;
+    });
+  }
+
+  double _distanceFromRouteMeters(LatLng position) {
+    final route = _navigationRoute;
+    if (route == null || route.isFallback) return 0;
+    final points = route.points;
+    if (points.length < 2) return 0;
+    const distance = Distance();
+    var nearest = double.infinity;
+    for (final point in points) {
+      final meters = distance.as(LengthUnit.Meter, position, point);
+      if (meters < nearest) nearest = meters;
+    }
+    return nearest;
   }
 
   @override
@@ -370,20 +461,17 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
           final to = order.toLocation == null
               ? null
               : LatLng(order.toLocation!.latitude, order.toLocation!.longitude);
-          final orderRoute = from != null && to != null
-              ? TajGoScope.of(
-                  context,
-                ).routeService.directRoute(from: from, to: to)
-              : null;
           final target = switch (order.status) {
             OrderStatus.accepted => from,
             OrderStatus.pickedUp => to,
             _ => null,
           };
+          _setActiveTarget(target);
           final targetDistance = _distanceTo(target);
           final etaMinutes = _etaMinutes(targetDistance);
           final targetBearing = _bearingTo(target);
-          final fitPoints = <LatLng>[?_position, ?from, ?to];
+          final fitPoints =
+              _navigationRoute?.points ?? <LatLng>[?_position, ?target];
           if (_lastNavigationStatus != order.status) {
             _lastNavigationStatus = order.status;
             _fitted = false;
@@ -416,13 +504,15 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
                         ),
                         PolylineLayer(
                           polylines: [
-                            if (from != null && to != null)
+                            if (_navigationRoute != null)
                               Polyline(
-                                points: orderRoute!.polylinePoints,
+                                points: _navigationRoute!.points,
                                 color: TajGoColors.green,
-                                strokeWidth: 4,
+                                strokeWidth: 5,
                               ),
-                            if (_position != null && target != null)
+                            if (_navigationRoute == null &&
+                                _position != null &&
+                                target != null)
                               Polyline(
                                 points: [_position!, target],
                                 color: TajGoColors.muted,
@@ -440,9 +530,13 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
                                 point: from,
                                 width: 48,
                                 height: 48,
-                                child: const _AddressPin(
+                                child: _AddressPin(
                                   label: 'A',
-                                  color: TajGoColors.darkGreen,
+                                  color: order.status == OrderStatus.accepted
+                                      ? TajGoColors.darkGreen
+                                      : TajGoColors.muted.withValues(
+                                          alpha: 0.55,
+                                        ),
                                 ),
                               ),
                             if (to != null)
@@ -450,9 +544,13 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
                                 point: to,
                                 width: 48,
                                 height: 48,
-                                child: const _AddressPin(
+                                child: _AddressPin(
                                   label: 'B',
-                                  color: TajGoColors.lime,
+                                  color: order.status == OrderStatus.pickedUp
+                                      ? Colors.blue
+                                      : TajGoColors.muted.withValues(
+                                          alpha: 0.55,
+                                        ),
                                 ),
                               ),
                             if (_position != null)
@@ -491,25 +589,12 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
                     Positioned(
                       right: 12,
                       bottom: 12,
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          FloatingActionButton.small(
-                            heroTag: 'centerRoute',
-                            onPressed: () => _centerRoute(fitPoints),
-                            backgroundColor: Colors.white,
-                            foregroundColor: TajGoColors.darkGreen,
-                            tooltip: 'Центрировать маршрут',
-                            child: const Icon(Icons.route_rounded),
-                          ),
-                          const SizedBox(height: 8),
-                          TajGoLocateButton(
-                            heroTag: 'centerCourier',
-                            onPressed: _centerOnCourier,
-                            loading: _locationStarting,
-                            following: _followCourier && _position != null,
-                          ),
-                        ],
+                      child: TajGoMapActionButtons(
+                        heroPrefix: 'courierOrder',
+                        onShowRoute: () => _centerRoute(fitPoints),
+                        onLocate: _centerOnCourier,
+                        locating: _locationStarting,
+                        following: _followCourier && _position != null,
                       ),
                     ),
                     if (target != null)
@@ -522,6 +607,10 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
                           bearing: targetBearing,
                           distanceKm: targetDistance,
                           etaMinutes: etaMinutes,
+                          route: _navigationRoute,
+                          rebuilding: _routeLoading,
+                          offRoute: _offRoute,
+                          gpsWeak: (_accuracy ?? 0) > 50,
                         ),
                       ),
                   ],
@@ -534,6 +623,9 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
                 etaMinutes: etaMinutes,
                 geoAvailable: _position != null && target != null,
                 geoError: _geoError,
+                route: _navigationRoute,
+                routeLoading: _routeLoading,
+                offRoute: _offRoute,
                 onFixLocation: _openLocationSettings,
                 busy: _busy,
                 onNavigate: target == null
@@ -586,6 +678,9 @@ class _OrderPanel extends StatelessWidget {
     required this.etaMinutes,
     required this.geoAvailable,
     required this.geoError,
+    required this.route,
+    required this.routeLoading,
+    required this.offRoute,
     required this.onFixLocation,
     required this.busy,
     required this.onNavigate,
@@ -599,6 +694,9 @@ class _OrderPanel extends StatelessWidget {
   final int? etaMinutes;
   final bool geoAvailable;
   final String? geoError;
+  final TajGoRoute? route;
+  final bool routeLoading;
+  final bool offRoute;
   final VoidCallback onFixLocation;
   final bool busy;
   final VoidCallback? onNavigate;
@@ -619,9 +717,9 @@ class _OrderPanel extends StatelessWidget {
 
   String get _title => switch (order.status) {
     OrderStatus.accepted when order.arrivedAtPickupAt == null =>
-      'Еду к точке забора',
+      'Едем к точке забора',
     OrderStatus.accepted => 'Вы на месте',
-    OrderStatus.pickedUp => 'Доставляю',
+    OrderStatus.pickedUp => 'Везём клиенту',
     OrderStatus.delivered => '⏳ Ждём подтверждения клиента',
     OrderStatus.completed => '✅ Доставлено! +${order.price} TJS',
     OrderStatus.disputed => '⚠️ Клиент сообщил, что не получил заказ',
@@ -678,9 +776,28 @@ class _OrderPanel extends StatelessWidget {
                 ),
               ),
               if (order.fromLocation != null && order.toLocation != null)
+                Text(
+                  routeLoading
+                      ? 'Перестраиваем маршрут…'
+                      : route?.isFallback == true
+                      ? 'Маршрут предварительный'
+                      : 'Маршрут построен',
+                  style: TextStyle(
+                    color: route?.isFallback == false
+                        ? TajGoColors.darkGreen
+                        : TajGoColors.warning,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              if (offRoute)
                 const Text(
-                  'Маршрут предварительный — показана прямая линия.',
-                  style: TextStyle(color: TajGoColors.warning, fontSize: 12),
+                  'Вы отклонились от маршрута. Перестраиваем…',
+                  style: TextStyle(
+                    color: TajGoColors.warning,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               if ((order.comment ?? '').isNotEmpty) ...[
                 const SizedBox(height: 4),
@@ -711,8 +828,8 @@ class _OrderPanel extends StatelessWidget {
                   ),
                   child: Text(
                     tooFar
-                        ? 'Подойдите ближе, чтобы подтвердить действие'
-                        : 'Можно подтвердить действие',
+                        ? '⚠ Подойдите ближе, чтобы подтвердить'
+                        : 'Можно подтверждать — вы у точки',
                     style: TextStyle(
                       color: tooFar
                           ? TajGoColors.warning
@@ -726,7 +843,7 @@ class _OrderPanel extends StatelessWidget {
                 const SizedBox(height: 7),
                 Text(
                   geoError == null
-                      ? 'Ищем GPS...'
+                      ? 'Ищем точную геолокацию'
                       : 'Разрешите геолокацию для работы курьером',
                   style: const TextStyle(
                     color: TajGoColors.error,
@@ -859,12 +976,20 @@ class _NavigationInstruction extends StatelessWidget {
     required this.bearing,
     required this.distanceKm,
     required this.etaMinutes,
+    required this.route,
+    required this.rebuilding,
+    required this.offRoute,
+    required this.gpsWeak,
   });
 
   final OrderStatus status;
   final double? bearing;
   final double? distanceKm;
   final int? etaMinutes;
+  final TajGoRoute? route;
+  final bool rebuilding;
+  final bool offRoute;
+  final bool gpsWeak;
 
   String get _targetLabel =>
       status == OrderStatus.accepted ? 'Едем к точке забора' : 'Везём клиенту';
@@ -927,6 +1052,26 @@ class _NavigationInstruction extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
+                  Text(
+                    offRoute
+                        ? 'Вы отклонились от маршрута'
+                        : rebuilding
+                        ? 'Перестраиваем маршрут…'
+                        : gpsWeak
+                        ? 'GPS слабый — подойдите к окну или выйдите на улицу'
+                        : route?.isFallback == true
+                        ? 'Маршрут предварительный'
+                        : 'Маршрут построен',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: offRoute || rebuilding || gpsWeak
+                          ? const Color(0xFFFFD166)
+                          : const Color(0xFFB8F7C9),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ],
               ),

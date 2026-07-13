@@ -7,6 +7,7 @@ import 'package:latlong2/latlong.dart';
 import '../../core/constants/tajgo_colors.dart';
 import '../../core/models/tajgo_courier.dart';
 import '../../core/models/tajgo_order.dart';
+import '../../core/services/pricing.dart' as pricing;
 import '../../shared/widgets/tajgo_action_button.dart';
 import '../../shared/widgets/tajgo_confirmation_code.dart';
 import '../../shared/widgets/tajgo_courier_banner.dart';
@@ -14,7 +15,10 @@ import '../../shared/widgets/tajgo_order_progress.dart';
 import '../../shared/widgets/tajgo_scope.dart';
 import '../../shared/widgets/tajgo_status_header.dart';
 import '../map/services/tajgo_map_camera.dart';
+import '../map/models/tajgo_route.dart';
 import '../map/widgets/tajgo_location_widgets.dart';
+import '../map/widgets/tajgo_map_action_buttons.dart';
+import '../map/widgets/tajgo_route_summary_card.dart';
 
 /// Экран отслеживания заказа клиентом: карта с точками A/B, живой маркер
 /// курьера и статусная панель со всеми шагами доставки.
@@ -40,6 +44,9 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
   OrderStatus? _lastStatus;
   Timer? _bannerTimer;
   Timer? _completedTimer;
+  TajGoRoute? _route;
+  String? _routeKey;
+  bool _routeLoading = false;
 
   @override
   void initState() {
@@ -204,6 +211,37 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
     });
   }
 
+  void _ensureRoute(LatLng from, LatLng to) {
+    final key =
+        '${from.latitude},${from.longitude}:${to.latitude},${to.longitude}';
+    if (_routeKey == key) return;
+    _routeKey = key;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      setState(() => _routeLoading = true);
+      final route = await TajGoScope.of(
+        context,
+      ).routeService.buildRoute(from: from, to: to, mode: RouteMode.bicycle);
+      if (mounted && _routeKey == key) {
+        setState(() {
+          _route = route;
+          _routeLoading = false;
+        });
+      }
+    });
+  }
+
+  void _showEntireRoute(LatLng? from, LatLng? to) {
+    final points = _route?.points ?? <LatLng>[?from, ?to];
+    if (points.length < 2) return;
+    _mapController.fitCamera(
+      CameraFit.coordinates(
+        coordinates: points,
+        padding: const EdgeInsets.fromLTRB(50, 80, 50, 50),
+      ),
+    );
+  }
+
   int _step(TajGoOrder order) => switch (order.status) {
     OrderStatus.waiting => 0,
     OrderStatus.accepted => 1,
@@ -277,12 +315,17 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
     final to = order.toLocation == null
         ? null
         : LatLng(order.toLocation!.latitude, order.toLocation!.longitude);
-    final route = from != null && to != null
-        ? TajGoScope.of(context).routeService.directRoute(from: from, to: to)
-        : null;
+    if (from != null && to != null) _ensureRoute(from, to);
     final courierPoint = courier?.location == null
         ? null
         : LatLng(courier!.location!.latitude, courier.location!.longitude);
+    final liveTarget = order.status == OrderStatus.pickedUp ? to : from;
+    final liveDistance = courierPoint != null && liveTarget != null
+        ? pricing.haversineDistanceKm(courierPoint, liveTarget)
+        : null;
+    final liveEta = liveDistance == null
+        ? null
+        : pricing.courierNavigationEtaMinutes(liveDistance);
     _fitMap(from, to);
     return Column(
       children: [
@@ -308,7 +351,7 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
                     PolylineLayer(
                       polylines: [
                         Polyline(
-                          points: route!.polylinePoints,
+                          points: _route?.points ?? [from, to],
                           color: TajGoColors.green,
                           strokeWidth: 4,
                         ),
@@ -333,7 +376,7 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
                           height: 48,
                           child: const _AddressPin(
                             label: 'B',
-                            color: TajGoColors.lime,
+                            color: Colors.blue,
                           ),
                         ),
                       if (courierPoint != null)
@@ -393,10 +436,13 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
               Positioned(
                 right: 12,
                 bottom: 12,
-                child: TajGoLocateButton(
-                  heroTag: 'trackingLocate',
-                  loading: _locating,
-                  onPressed: _locate,
+                child: TajGoMapActionButtons(
+                  heroPrefix: 'tracking',
+                  locating: _locating,
+                  onLocate: _locate,
+                  onShowRoute: from == null || to == null
+                      ? null
+                      : () => _showEntireRoute(from, to),
                 ),
               ),
             ],
@@ -419,6 +465,12 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
           step: _step(order),
           title: _title(order),
           subtitle: _subtitle(order),
+          route: _route,
+          routeLoading: _routeLoading,
+          liveEtaMinutes: liveEta,
+          onShowRoute: from == null || to == null
+              ? null
+              : () => _showEntireRoute(from, to),
         ),
       ],
     );
@@ -437,6 +489,10 @@ class _StatusPanel extends StatelessWidget {
     required this.step,
     required this.title,
     required this.subtitle,
+    required this.route,
+    required this.routeLoading,
+    required this.liveEtaMinutes,
+    required this.onShowRoute,
   });
 
   final TajGoOrder order;
@@ -449,6 +505,10 @@ class _StatusPanel extends StatelessWidget {
   final int step;
   final String title;
   final String? subtitle;
+  final TajGoRoute? route;
+  final bool routeLoading;
+  final int? liveEtaMinutes;
+  final VoidCallback? onShowRoute;
 
   @override
   Widget build(BuildContext context) => Material(
@@ -468,6 +528,16 @@ class _StatusPanel extends StatelessWidget {
             ),
             const SizedBox(height: 14),
             TajGoStatusHeader(title: title, subtitle: subtitle),
+            if (liveEtaMinutes != null) ...[
+              const SizedBox(height: 4),
+              Text(
+                'Примерное время: $liveEtaMinutes мин',
+                style: const TextStyle(
+                  color: TajGoColors.darkGreen,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
             if (courier != null &&
                 order.status != OrderStatus.completed &&
                 order.status != OrderStatus.disputed) ...[
@@ -493,11 +563,15 @@ class _StatusPanel extends StatelessWidget {
               ].join(' · '),
               style: const TextStyle(color: TajGoColors.muted, fontSize: 13),
             ),
-            if (order.fromLocation != null && order.toLocation != null)
-              const Text(
-                'Маршрут предварительный — показана прямая линия.',
-                style: TextStyle(color: TajGoColors.warning, fontSize: 12),
+            if (order.fromLocation != null && order.toLocation != null) ...[
+              const SizedBox(height: 8),
+              TajGoRouteSummaryCard(
+                route: route,
+                loading: routeLoading,
+                onShowEntireRoute: onShowRoute,
+                compact: true,
               ),
+            ],
             if ((order.comment ?? '').isNotEmpty) ...[
               const SizedBox(height: 3),
               Text(

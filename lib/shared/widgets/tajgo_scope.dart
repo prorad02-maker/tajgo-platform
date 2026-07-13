@@ -17,7 +17,7 @@ class TajGoScope extends InheritedWidget {
       adminRepository = AdminRepository(FirebaseFirestore.instance),
       courierRepository = CourierRepository(FirebaseFirestore.instance),
       orderRepository = OrderRepository(FirebaseFirestore.instance),
-      routeService = const RouteService(),
+      routeService = RouteService(),
       locationService = TajGoLocationService();
 
   final AuthService authService;

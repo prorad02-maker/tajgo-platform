@@ -9,10 +9,12 @@ import '../../../shared/widgets/tajgo_scope.dart';
 import '../../customer/order_tracking_screen.dart';
 import '../models/place_suggestion.dart';
 import '../models/tajgo_map_location.dart';
+import '../models/tajgo_route.dart';
 import '../services/place_search_service.dart';
 import '../services/tajgo_map_camera.dart';
 import '../widgets/tajgo_location_widgets.dart';
-import '../widgets/place_search_sheet.dart';
+import '../widgets/tajgo_place_search_sheet.dart';
+import '../widgets/tajgo_route_summary_card.dart';
 
 enum _Stage { pickFrom, pickTo, details }
 
@@ -42,6 +44,10 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
   late String _type = widget.initialType;
   TajGoMapLocation? _from, _to;
   PlaceSuggestion? _pendingPlace;
+  TajGoRoute? _route;
+  bool _routeLoading = false;
+  int _routeRequestId = 0;
+  int _reverseRequestId = 0;
   LatLng? _current;
   String _address = 'Определяем адрес...';
   bool _resolving = false, _locating = false, _busy = false;
@@ -128,6 +134,7 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
           ? 'Найти точку забора'
           : 'Найти точку доставки',
       near: _current,
+      recentType: stage == _Stage.pickFrom ? 'pickup' : 'dropoff',
     );
     if (!mounted || selected == null) return;
     setState(() {
@@ -156,8 +163,9 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
       _address = 'Определяем адрес...';
     });
     final point = _map.camera.center;
+    final requestId = ++_reverseRequestId;
     final result = await _placeSearch.reverse(point);
-    if (mounted) {
+    if (mounted && requestId == _reverseRequestId) {
       setState(() {
         _address = result.address;
         _pendingPlace = result;
@@ -287,7 +295,37 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
           ),
         ),
       );
+      await _buildOrderRoute();
     }
+  }
+
+  Future<void> _buildOrderRoute() async {
+    final from = _from?.toLatLng();
+    final to = _to?.toLatLng();
+    if (from == null || to == null) return;
+    final requestId = ++_routeRequestId;
+    setState(() => _routeLoading = true);
+    final route = await TajGoScope.of(
+      context,
+    ).routeService.buildRoute(from: from, to: to, mode: RouteMode.bicycle);
+    if (!mounted || requestId != _routeRequestId) return;
+    setState(() {
+      _route = route;
+      _routeLoading = false;
+      _price.text = pricing.suggestedPrice(route.distanceKm).toString();
+    });
+  }
+
+  void _showEntireRoute() {
+    final points =
+        _route?.points ?? <LatLng>[?_from?.toLatLng(), ?_to?.toLatLng()];
+    if (points.length < 2) return;
+    _map.fitCamera(
+      CameraFit.coordinates(
+        coordinates: points,
+        padding: const EdgeInsets.fromLTRB(50, 90, 50, 390),
+      ),
+    );
   }
 
   void _edit(_Stage stage) {
@@ -313,7 +351,9 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
       final scope = TajGoScope.of(context);
       final user = scope.authService.currentUser!;
       final profile = await scope.userRepository.getUser(user.uid);
-      final km = pricing.distanceKm(_from!.toLatLng(), _to!.toLatLng());
+      final km =
+          _route?.distanceKm ??
+          pricing.distanceKm(_from!.toLatLng(), _to!.toLatLng());
       final orderId = await scope.orderRepository.createOrder(
         customerId: user.uid,
         customerName: profile?.name ?? 'Клиент',
@@ -351,9 +391,6 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
   @override
   Widget build(BuildContext context) {
     final repo = TajGoScope.of(context).courierRepository;
-    final km = _from != null && _to != null
-        ? pricing.distanceKm(_from!.toLatLng(), _to!.toLatLng())
-        : 0.0;
     return Scaffold(
       body: StreamBuilder<List<TajGoCourier>>(
         stream: repo.onlineCouriersStream(),
@@ -387,7 +424,9 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
                     PolylineLayer(
                       polylines: [
                         Polyline(
-                          points: [_from!.toLatLng(), _to!.toLatLng()],
+                          points:
+                              _route?.points ??
+                              [_from!.toLatLng(), _to!.toLatLng()],
                           color: TajGoColors.green,
                           strokeWidth: 4,
                         ),
@@ -430,7 +469,7 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
                           height: 42,
                           child: const _PointMarker(
                             label: 'B',
-                            color: TajGoColors.lime,
+                            color: Colors.blue,
                           ),
                         ),
                     ],
@@ -451,7 +490,7 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
                       size: 48,
                       color: _stage == _Stage.pickFrom
                           ? TajGoColors.darkGreen
-                          : TajGoColors.lime,
+                          : Colors.blue,
                       shadows: const [
                         Shadow(color: TajGoColors.ink, blurRadius: 2),
                       ],
@@ -488,15 +527,16 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
                   ),
                 ),
               ),
-              Positioned(
-                right: 16,
-                bottom: _stage == _Stage.details ? 330 : 390,
-                child: TajGoLocateButton(
-                  heroTag: 'newOrderLocate',
-                  loading: _locating,
-                  onPressed: _locating ? null : _locate,
+              if (_stage != _Stage.details)
+                Positioned(
+                  right: 16,
+                  bottom: 390,
+                  child: TajGoLocateButton(
+                    heroTag: 'newOrderLocate',
+                    loading: _locating,
+                    onPressed: _locating ? null : _locate,
+                  ),
                 ),
-              ),
               Align(
                 alignment: Alignment.bottomCenter,
                 child: _stage == _Stage.details
@@ -505,15 +545,16 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
                         to: _to!,
                         type: _type,
                         types: _types,
-                        distance: km,
-                        eta: pricing.etaMinutes(km),
                         price: _price,
                         comment: _comment,
                         busy: _busy,
+                        route: _route,
+                        routeLoading: _routeLoading,
                         onType: (value) => setState(() => _type = value),
                         onPrice: (_) => setState(() {}),
                         onEdit: _edit,
                         onSubmit: _createOrder,
+                        onShowRoute: _showEntireRoute,
                       )
                     : _PointPanel(
                         stage: _stage,
@@ -521,6 +562,10 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
                         to: _to,
                         address: _address,
                         approximate: (_pendingPlace?.confidence ?? 1) < 0.7,
+                        coordinateSubtitle:
+                            _pendingPlace?.address == 'Точка на карте'
+                            ? _pendingPlace?.subtitle
+                            : null,
                         resolving: _resolving,
                         onConfirm: _confirmPoint,
                         onSearchFrom: () => _showAddressSearch(_Stage.pickFrom),
@@ -551,6 +596,7 @@ class _PointPanel extends StatelessWidget {
     required this.to,
     required this.address,
     required this.approximate,
+    required this.coordinateSubtitle,
     required this.resolving,
     required this.onConfirm,
     required this.onSearchFrom,
@@ -562,6 +608,7 @@ class _PointPanel extends StatelessWidget {
   final TajGoMapLocation? to;
   final String address;
   final bool approximate;
+  final String? coordinateSubtitle;
   final bool resolving;
   final VoidCallback onConfirm;
   final VoidCallback onSearchFrom;
@@ -605,6 +652,11 @@ class _PointPanel extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(address, style: const TextStyle(color: TajGoColors.muted)),
+            if (coordinateSubtitle != null)
+              Text(
+                coordinateSubtitle!,
+                style: const TextStyle(color: TajGoColors.muted, fontSize: 11),
+              ),
             if (approximate)
               const Padding(
                 padding: EdgeInsets.only(top: 4),
@@ -737,28 +789,30 @@ class _DetailsPanel extends StatelessWidget {
     required this.to,
     required this.type,
     required this.types,
-    required this.distance,
-    required this.eta,
     required this.price,
     required this.comment,
     required this.busy,
+    required this.route,
+    required this.routeLoading,
     required this.onType,
     required this.onPrice,
     required this.onEdit,
     required this.onSubmit,
+    required this.onShowRoute,
   });
   final TajGoMapLocation from, to;
   final String type;
   final Map<String, String> types;
-  final double distance;
-  final int eta;
   final TextEditingController price;
   final TextEditingController comment;
   final bool busy;
+  final TajGoRoute? route;
+  final bool routeLoading;
   final ValueChanged<String> onType;
   final ValueChanged<String> onPrice;
   final ValueChanged<_Stage> onEdit;
   final VoidCallback onSubmit;
+  final VoidCallback onShowRoute;
   @override
   Widget build(BuildContext context) => Material(
     color: Colors.white,
@@ -811,9 +865,11 @@ class _DetailsPanel extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 10),
-            Text(
-              '~$distance км · ~$eta мин',
-              style: const TextStyle(color: TajGoColors.muted),
+            TajGoRouteSummaryCard(
+              route: route,
+              loading: routeLoading,
+              onShowEntireRoute: onShowRoute,
+              compact: true,
             ),
             const SizedBox(height: 8),
             TextField(
@@ -822,7 +878,7 @@ class _DetailsPanel extends StatelessWidget {
               maxLines: 2,
               minLines: 1,
               decoration: const InputDecoration(
-                labelText: 'Комментарий курьеру (необязательно)',
+                labelText: 'Подъезд, ориентир или комментарий',
                 hintText: 'Подъезд, этаж, «позвонить за 5 минут»',
                 counterText: '',
               ),

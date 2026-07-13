@@ -6,18 +6,25 @@ import 'package:latlong2/latlong.dart';
 import '../../../core/constants/tajgo_colors.dart';
 import '../models/place_suggestion.dart';
 import '../services/place_search_service.dart';
+import 'tajgo_address_result_tile.dart';
 
 Future<PlaceSuggestion?> showPlaceSearchSheet({
   required BuildContext context,
   required PlaceSearchService service,
   required String title,
   LatLng? near,
+  String? recentType,
 }) => showModalBottomSheet<PlaceSuggestion>(
   context: context,
   isScrollControlled: true,
   useSafeArea: true,
   backgroundColor: Colors.white,
-  builder: (_) => _PlaceSearchSheet(service: service, title: title, near: near),
+  builder: (_) => _PlaceSearchSheet(
+    service: service,
+    title: title,
+    near: near,
+    recentType: recentType,
+  ),
 );
 
 class _PlaceSearchSheet extends StatefulWidget {
@@ -25,11 +32,13 @@ class _PlaceSearchSheet extends StatefulWidget {
     required this.service,
     required this.title,
     required this.near,
+    required this.recentType,
   });
 
   final PlaceSearchService service;
   final String title;
   final LatLng? near;
+  final String? recentType;
 
   @override
   State<_PlaceSearchSheet> createState() => _PlaceSearchSheetState();
@@ -57,13 +66,17 @@ class _PlaceSearchSheetState extends State<_PlaceSearchSheet> {
 
   void _onChanged(String value) {
     _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 350), () => _search(value));
+    _debounce = Timer(const Duration(milliseconds: 320), () => _search(value));
   }
 
   Future<void> _search(String value) async {
     final requestId = ++_requestId;
     setState(() => _loading = true);
-    final results = await widget.service.search(value, near: widget.near);
+    final results = await widget.service.search(
+      value,
+      near: widget.near,
+      recentType: widget.recentType,
+    );
     if (!mounted || requestId != _requestId) return;
     setState(() {
       _results = results;
@@ -107,7 +120,7 @@ class _PlaceSearchSheetState extends State<_PlaceSearchSheet> {
               },
               textInputAction: TextInputAction.search,
               decoration: InputDecoration(
-                hintText: 'Введите адрес или короткое название',
+                hintText: 'Введите адрес, место или ориентир',
                 prefixIcon: const Icon(Icons.search_rounded),
                 suffixIcon: _query.text.isEmpty
                     ? null
@@ -121,7 +134,7 @@ class _PlaceSearchSheetState extends State<_PlaceSearchSheet> {
                       ),
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             if (_loading) const LinearProgressIndicator(minHeight: 2),
             if (!_loading && _results.length > 1 && hasQuery) ...[
               const Text(
@@ -130,95 +143,75 @@ class _PlaceSearchSheetState extends State<_PlaceSearchSheet> {
               ),
               const SizedBox(height: 2),
               const Text(
-                'Выберите нужный вариант и уточните его на карте.',
+                'Выберите нужный вариант и уточните точку на карте.',
                 style: TextStyle(color: TajGoColors.muted, fontSize: 12),
               ),
               const SizedBox(height: 8),
             ],
-            if (!_loading && !hasQuery && _results.isNotEmpty)
-              const Padding(
-                padding: EdgeInsets.only(bottom: 8),
-                child: Text(
-                  'Недавние · Рядом с вами · Популярные',
-                  style: TextStyle(fontWeight: FontWeight.w800),
-                ),
-              ),
             Expanded(
               child: !_loading && _results.isEmpty
                   ? const _EmptySearch()
-                  : ListView.separated(
-                      keyboardDismissBehavior:
-                          ScrollViewKeyboardDismissBehavior.onDrag,
-                      itemCount: _results.length,
-                      separatorBuilder: (_, _) => const Divider(height: 1),
-                      itemBuilder: (context, index) {
-                        final place = _results[index];
-                        return _PlaceTile(
-                          place: place,
-                          onTap: () => Navigator.pop(context, place),
-                        );
-                      },
-                    ),
+                  : hasQuery
+                  ? _resultList(_results)
+                  : _suggestionSections(),
             ),
-            const Text(
-              'Не нашли адрес? Закройте поиск и выберите точку вручную на карте.',
-              style: TextStyle(color: TajGoColors.muted, fontSize: 12),
-              textAlign: TextAlign.center,
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () => Navigator.pop(context),
+                icon: const Icon(Icons.map_outlined),
+                label: const Text('Выбрать на карте'),
+              ),
             ),
           ],
         ),
       ),
     );
   }
-}
 
-class _PlaceTile extends StatelessWidget {
-  const _PlaceTile({required this.place, required this.onTap});
-  final PlaceSuggestion place;
-  final VoidCallback onTap;
+  Widget _resultList(List<PlaceSuggestion> places) => ListView.separated(
+    keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+    itemCount: places.length,
+    separatorBuilder: (_, _) => const Divider(height: 1),
+    itemBuilder: (context, index) => TajGoAddressResultTile(
+      place: places[index],
+      onShowOnMap: () => Navigator.pop(context, places[index]),
+    ),
+  );
 
-  @override
-  Widget build(BuildContext context) {
-    final distance = place.distanceMetersFromUser;
-    final distanceText = distance == null
-        ? null
-        : distance < 1000
-        ? '${distance.round()} м от вас'
-        : '${(distance / 1000).toStringAsFixed(1)} км от вас';
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 2, vertical: 5),
-      leading: CircleAvatar(
-        backgroundColor: const Color(0xFFEAF4E7),
-        child: Icon(
-          _categoryIcon(place.category),
-          color: TajGoColors.darkGreen,
-        ),
-      ),
-      title: Text(
-        place.shortTitle,
-        style: const TextStyle(fontWeight: FontWeight.w800),
-      ),
-      subtitle: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(place.address, maxLines: 2, overflow: TextOverflow.ellipsis),
-          const SizedBox(height: 2),
-          Text(
-            [
-              _categoryLabel(place.category),
-              ?distanceText,
-              'Совпадение: ${_confidenceLabel(place.confidence)}',
-            ].join(' · '),
-            style: const TextStyle(fontSize: 11, color: TajGoColors.muted),
+  Widget _suggestionSections() {
+    final recent = _results.where((place) => place.source == 'recent').toList();
+    final local = _results.where((place) => place.source == 'local').toList();
+    final nearby = widget.near == null
+        ? <PlaceSuggestion>[]
+        : local.take(3).toList();
+    final popular = local.where((place) => !nearby.contains(place)).toList();
+    final children = <Widget>[];
+    void addSection(String title, List<PlaceSuggestion> places) {
+      if (places.isEmpty) return;
+      children.add(
+        Padding(
+          padding: const EdgeInsets.fromLTRB(2, 10, 2, 4),
+          child: Text(
+            title,
+            style: const TextStyle(fontWeight: FontWeight.w900),
           ),
-        ],
-      ),
-      trailing: const Tooltip(
-        message: 'Показать на карте',
-        child: Icon(Icons.map_outlined, color: TajGoColors.green),
-      ),
-      onTap: onTap,
-    );
+        ),
+      );
+      children.addAll(
+        places.map(
+          (place) => TajGoAddressResultTile(
+            place: place,
+            onShowOnMap: () => Navigator.pop(context, place),
+          ),
+        ),
+      );
+    }
+
+    addSection('Недавние', recent.take(5).toList());
+    addSection('Рядом с вами', nearby);
+    addSection('Популярные', popular);
+    return ListView(children: children);
   }
 }
 
@@ -235,12 +228,12 @@ class _EmptySearch extends StatelessWidget {
           Icon(Icons.location_searching, size: 44, color: TajGoColors.muted),
           SizedBox(height: 12),
           Text(
-            'Адрес не найден',
+            'Не нашли адрес',
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
           ),
           SizedBox(height: 6),
           Text(
-            'Проверьте написание или выберите точку вручную на карте.',
+            'Выберите точку на карте. Так даже точнее.',
             textAlign: TextAlign.center,
             style: TextStyle(color: TajGoColors.muted),
           ),
@@ -249,30 +242,3 @@ class _EmptySearch extends StatelessWidget {
     ),
   );
 }
-
-String _confidenceLabel(double value) {
-  if (value >= 0.8) return 'высокое';
-  if (value >= 0.55) return 'среднее';
-  return 'приблизительное';
-}
-
-String _categoryLabel(String category) => switch (category) {
-  'cafe' => 'Кафе',
-  'shop' => 'Магазин',
-  'street' => 'Улица',
-  'district' => 'Район',
-  'landmark' => 'Ориентир',
-  'demo' => 'Демо-точка',
-  'mapPoint' => 'Точка на карте',
-  _ => 'Адрес',
-};
-
-IconData _categoryIcon(String category) => switch (category) {
-  'cafe' => Icons.restaurant_outlined,
-  'shop' => Icons.storefront_outlined,
-  'street' => Icons.signpost_outlined,
-  'district' => Icons.location_city_outlined,
-  'landmark' => Icons.place_outlined,
-  'demo' => Icons.science_outlined,
-  _ => Icons.location_on_outlined,
-};
