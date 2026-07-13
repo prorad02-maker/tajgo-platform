@@ -1,0 +1,6 @@
+# Copy this file to android/key.properties and replace every placeholder.
+# Never commit android/key.properties or the keystore itself.
+storePassword=REPLACE_WITH_LOCAL_SECRET
+keyPassword=REPLACE_WITH_LOCAL_SECRET
+keyAlias=tajgo
+storeFile=C:\\Users\\YOUR_USER\\.android-keys\\tajgo-release-key.jks
