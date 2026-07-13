@@ -1,32 +1,21 @@
-# TajGo app icon assets
+# Иконка приложения TajGo
 
-Финальные PNG пока отсутствуют в `assets/brand/`, поэтому генерация launcher-иконок для v0.8.0 не запускалась. До получения утверждённых исходников Android продолжает использовать текущие файлы `mipmap-*/ic_launcher.png`.
+В v0.8.3 launcher-иконки Android и iOS генерируются из финального мастер-файла `assets/brand/app_icon.png`. Знак объединяет маршрут, движение вперёд и горы Худжанда.
 
-## Какие файлы подготовить
+## Файлы
 
-Все исходники экспортировать в PNG, цветовой профиль sRGB, без внешних полей и артефактов сжатия:
-
-| Файл | Размер | Требования |
+| Файл | Размер | Назначение |
 | --- | ---: | --- |
-| `app_icon.png` | 1024×1024 px | Полная квадратная иконка для legacy Android/iOS; без скругления углов в самом файле. |
-| `app_icon_foreground.png` | 1024×1024 px | Прозрачный фон; важный знак внутри центральной safe-zone примерно 66% холста. |
-| `app_icon_background.png` | 1024×1024 px | Непрозрачный фон adaptive icon, без мелких деталей. |
-| `app_icon_monochrome.png` | 1024×1024 px | Одноцветный белый силуэт на прозрачном фоне для themed icon Android 13+. |
+| `app_icon.png` | 1024×1024 px | Полноцветная иконка для обычных Android-иконок и iOS. |
+| `app_icon_foreground.png` | 1024×1024 px, RGBA | Прозрачный передний слой adaptive icon Android. Знак находится в safe zone. |
+| `app_icon_background.png` | 1024×1024 px | Непрозрачный изумрудный фон adaptive icon. |
+| `app_icon_monochrome.png` | 1024×1024 px, RGBA | Белый силуэт для themed icon Android 13+. |
 
-Положить файлы в:
+Не скругляйте углы в исходном `app_icon.png`: форму и маску применяет операционная система.
 
-```text
-assets/brand/app_icon.png
-assets/brand/app_icon_foreground.png
-assets/brand/app_icon_background.png
-assets/brand/app_icon_monochrome.png
-```
+## Повторная генерация
 
-## Генерация после утверждения дизайна
-
-1. Проверить все четыре имени и размеры.
-2. В `pubspec.yaml` заменить `adaptive_icon_background: "#CBE5AF"` на `adaptive_icon_background: assets/brand/app_icon_background.png`, если должен использоваться PNG-фон.
-3. Запустить:
+После замены исходников выполните из корня проекта:
 
 ```powershell
 flutter pub get
@@ -34,6 +23,11 @@ dart run flutter_launcher_icons
 flutter build apk --debug
 ```
 
-4. Установить APK и визуально проверить обычную, adaptive и themed icon на реальном Android-устройстве.
+Генератор обновляет ресурсы `android/app/src/main/res/mipmap-*` и каталог иконок iOS. Поэтому запускайте его только с утверждёнными файлами.
 
-Не запускать генератор с временным логотипом: он перезаписывает все launcher-ресурсы.
+## Проверка на телефоне
+
+1. Удалите прежнюю debug-версию TajGo или очистите кэш launcher.
+2. Установите новый APK.
+3. Проверьте обычную иконку, круглую маску и themed icon Android 13+.
+4. Убедитесь, что под иконкой отображается название `TajGo`.

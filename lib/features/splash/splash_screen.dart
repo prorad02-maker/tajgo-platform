@@ -81,7 +81,7 @@ class _SplashScreenState extends State<SplashScreen>
       Navigator.of(context).pushReplacement(
         MaterialPageRoute<void>(builder: (_) => const RoleScreen()),
       );
-    } catch (error) {
+    } catch (_) {
       _failed = true;
       _progressController.stop();
       _pulseController.stop();
@@ -90,7 +90,8 @@ class _SplashScreenState extends State<SplashScreen>
       }
       setState(() {
         _waiting = false;
-        _status = 'Не получилось подключиться: $error';
+        _status =
+            'Не удалось подключиться. Проверьте интернет и попробуйте снова.';
       });
     }
   }
@@ -111,8 +112,8 @@ class _SplashScreenState extends State<SplashScreen>
       body: LayoutBuilder(
         builder: (context, constraints) {
           final landscapeHeight = constraints.maxHeight * 0.34;
-          final logoWidth = (constraints.maxWidth * 0.58)
-              .clamp(116.0, 260.0)
+          final logoSize = (constraints.maxWidth * 0.29)
+              .clamp(96.0, 128.0)
               .toDouble();
           return Stack(
             children: [
@@ -134,6 +135,40 @@ class _SplashScreenState extends State<SplashScreen>
                 height: landscapeHeight,
                 child: CustomPaint(painter: _KhujandLandscapePainter(palette)),
               ),
+              Positioned.fill(
+                child: Image.asset(
+                  dark
+                      ? 'assets/brand/splash_dark.png'
+                      : 'assets/brand/splash_light.png',
+                  fit: BoxFit.cover,
+                  alignment: Alignment.bottomCenter,
+                  errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                ),
+              ),
+              Positioned.fill(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      stops: const [0, 0.46, 0.76, 1],
+                      colors: dark
+                          ? const [
+                              Color(0x26000000),
+                              Color(0x10000000),
+                              Color(0x05000000),
+                              Color(0x24000000),
+                            ]
+                          : const [
+                              Color(0x38FFFFFF),
+                              Color(0x18FFFFFF),
+                              Color(0x00FFFFFF),
+                              Color(0x080B6B3A),
+                            ],
+                    ),
+                  ),
+                ),
+              ),
               SafeArea(
                 child: Column(
                   children: [
@@ -145,19 +180,42 @@ class _SplashScreenState extends State<SplashScreen>
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              SizedBox(
-                                width: logoWidth,
-                                height: 122,
+                              Container(
+                                width: logoSize,
+                                height: logoSize,
+                                padding: const EdgeInsets.all(3),
+                                decoration: BoxDecoration(
+                                  color: dark
+                                      ? const Color(0x3316A34A)
+                                      : Colors.white.withValues(alpha: 0.88),
+                                  borderRadius: BorderRadius.circular(
+                                    logoSize * 0.27,
+                                  ),
+                                  border: Border.all(
+                                    color: dark
+                                        ? const Color(0x55A3E635)
+                                        : Colors.white,
+                                  ),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: const Color(
+                                        0xFF06130D,
+                                      ).withValues(alpha: dark ? 0.34 : 0.18),
+                                      blurRadius: 34,
+                                      offset: const Offset(0, 16),
+                                    ),
+                                  ],
+                                ),
+                                clipBehavior: Clip.antiAlias,
                                 child: Image.asset(
-                                  dark
-                                      ? 'assets/brand/tajgo_logo_dark.png'
-                                      : 'assets/brand/tajgo_logo.png',
-                                  fit: BoxFit.contain,
-                                  errorBuilder: (_, _, _) =>
-                                      const Center(child: TajGoLogo(size: 116)),
+                                  'assets/brand/tajgo_logo.png',
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, _, _) => Center(
+                                    child: TajGoLogo(size: logoSize - 6),
+                                  ),
                                 ),
                               ),
-                              const SizedBox(height: 20),
+                              const SizedBox(height: 18),
                               Text.rich(
                                 TextSpan(
                                   children: [
@@ -172,9 +230,9 @@ class _SplashScreenState extends State<SplashScreen>
                                   ],
                                 ),
                                 style: const TextStyle(
-                                  fontSize: 44,
+                                  fontSize: 46,
                                   fontWeight: FontWeight.w900,
-                                  letterSpacing: -1.5,
+                                  letterSpacing: -1.8,
                                 ),
                               ),
                               const SizedBox(height: 8),
@@ -201,7 +259,34 @@ class _SplashScreenState extends State<SplashScreen>
                                   ),
                                 ),
                               ),
-                              const SizedBox(height: 30),
+                              const SizedBox(height: 14),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 13,
+                                  vertical: 7,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: dark
+                                      ? const Color(0xB312241A)
+                                      : Colors.white.withValues(alpha: 0.72),
+                                  borderRadius: BorderRadius.circular(999),
+                                  border: Border.all(
+                                    color: palette.accent.withValues(
+                                      alpha: 0.22,
+                                    ),
+                                  ),
+                                ),
+                                child: Text(
+                                  'Худжанд  •  доставка рядом',
+                                  style: TextStyle(
+                                    color: palette.slogan,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    letterSpacing: 0.15,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 24),
                               AnimatedBuilder(
                                 animation: Listenable.merge([
                                   _progressController,
