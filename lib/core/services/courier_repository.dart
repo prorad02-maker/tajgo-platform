@@ -158,16 +158,25 @@ class CourierRepository {
     required String uid,
     required double latitude,
     required double longitude,
+    double? heading,
+    double? speed,
+    double? accuracy,
   }) async {
     final location = GeoPoint(latitude, longitude);
     final batch = _db.batch();
     batch.set(_db.collection('couriers').doc(uid), {
       'location': location,
+      if (heading != null && heading.isFinite) 'heading': heading,
+      if (speed != null && speed.isFinite) 'speed': speed,
+      if (accuracy != null && accuracy.isFinite) 'locationAccuracy': accuracy,
       'locationUpdatedAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
     batch.set(_db.collection('courier_public').doc(uid), {
       'location': location,
+      if (heading != null && heading.isFinite) 'heading': heading,
+      if (speed != null && speed.isFinite) 'speed': speed,
+      if (accuracy != null && accuracy.isFinite) 'locationAccuracy': accuracy,
       'locationUpdatedAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));

@@ -182,12 +182,18 @@ class _CourierHomeScreenState extends State<CourierHomeScreen> {
         uid: _uid,
         latitude: initial.latitude,
         longitude: initial.longitude,
+        heading: initial.heading,
+        speed: initial.speed,
+        accuracy: initial.accuracy,
       );
       _positionSubscription = scope.locationService.positionStream().listen(
         (position) => scope.courierRepository.updateLocation(
           uid: _uid,
           latitude: position.latitude,
           longitude: position.longitude,
+          heading: position.heading,
+          speed: position.speed,
+          accuracy: position.accuracy,
         ),
         onError: (Object error) async {
           await _positionSubscription?.cancel();

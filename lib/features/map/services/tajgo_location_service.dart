@@ -71,8 +71,8 @@ class TajGoLocationService {
 
   Stream<Position> positionStream() => Geolocator.getPositionStream(
     locationSettings: const LocationSettings(
-      accuracy: LocationAccuracy.high,
-      distanceFilter: 30,
+      accuracy: LocationAccuracy.bestForNavigation,
+      distanceFilter: 5,
     ),
   );
 

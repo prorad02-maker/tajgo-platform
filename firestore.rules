@@ -75,6 +75,9 @@ service cloud.firestore {
             'transport',
             'location',
             'locationUpdatedAt',
+            'heading',
+            'speed',
+            'locationAccuracy',
             'updatedAt'
           ]);
       }
@@ -178,6 +181,12 @@ service cloud.firestore {
             == privateAfter.data.get('location', null)
           && request.resource.data.get('locationUpdatedAt', null)
             == privateAfter.data.get('locationUpdatedAt', null)
+          && request.resource.data.get('heading', null)
+            == privateAfter.data.get('heading', null)
+          && request.resource.data.get('speed', null)
+            == privateAfter.data.get('speed', null)
+          && request.resource.data.get('locationAccuracy', null)
+            == privateAfter.data.get('locationAccuracy', null)
           && request.resource.data.updatedAt == request.time
           && request.resource.data.keys().hasOnly([
             'uid',
@@ -189,6 +198,9 @@ service cloud.firestore {
             'transport',
             'location',
             'locationUpdatedAt',
+            'heading',
+            'speed',
+            'locationAccuracy',
             'updatedAt'
           ]);
       }

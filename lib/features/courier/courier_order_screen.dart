@@ -28,6 +28,10 @@ class _CourierOrderScreenState extends State<CourierOrderScreen> {
   final _mapController = MapController();
   StreamSubscription<Position>? _positionSubscription;
   LatLng? _position;
+  double? _heading;
+  double? _speedMetersPerSecond;
+  double? _accuracy;
+  bool _followCourier = true;
   bool _busy = false;
   bool _fitted = false;
   String? _geoError;
@@ -49,16 +53,27 @@ class _CourierOrderScreenState extends State<CourierOrderScreen> {
       }
       setState(() {
         _position = LatLng(initial.latitude, initial.longitude);
+        _heading = initial.heading;
+        _speedMetersPerSecond = initial.speed;
+        _accuracy = initial.accuracy;
         _geoError = null;
       });
+      await _publishPosition(initial);
       _positionSubscription = service.positionStream().listen(
-        (position) {
+        (position) async {
           if (mounted) {
             setState(() {
               _position = LatLng(position.latitude, position.longitude);
+              _heading = position.heading;
+              _speedMetersPerSecond = position.speed;
+              _accuracy = position.accuracy;
               _geoError = null;
             });
+            if (_followCourier) {
+              _mapController.move(_position!, 16.5);
+            }
           }
+          await _publishPosition(position);
         },
         onError: (Object error) {
           if (mounted) {
@@ -74,6 +89,35 @@ class _CourierOrderScreenState extends State<CourierOrderScreen> {
         ).showSnackBar(SnackBar(content: Text('$error')));
       }
     }
+  }
+
+  Future<void> _publishPosition(Position position) async {
+    try {
+      await TajGoScope.of(context).courierRepository.updateLocation(
+        uid: _uid,
+        latitude: position.latitude,
+        longitude: position.longitude,
+        heading: position.heading,
+        speed: position.speed,
+        accuracy: position.accuracy,
+      );
+    } catch (error) {
+      if (mounted) {
+        setState(
+          () => _geoError = 'Позиция видна на карте, но не отправлена: $error',
+        );
+      }
+    }
+  }
+
+  void _centerOnCourier() {
+    final position = _position;
+    if (position == null) {
+      _startLocation();
+      return;
+    }
+    setState(() => _followCourier = true);
+    _mapController.move(position, 16.5);
   }
 
   @override
@@ -113,6 +157,13 @@ class _CourierOrderScreenState extends State<CourierOrderScreen> {
       return null;
     }
     return pricing.distanceKm(_position!, target);
+  }
+
+  int? _etaMinutes(double? distanceKm) {
+    if (distanceKm == null) return null;
+    final measuredKmh = (_speedMetersPerSecond ?? 0) * 3.6;
+    final assumedKmh = measuredKmh >= 4 ? measuredKmh : 18.0;
+    return ((distanceKm / assumedKmh) * 60).ceil().clamp(1, 999);
   }
 
   Future<void> _openNavigator(LatLng target) async {
@@ -238,6 +289,7 @@ class _CourierOrderScreenState extends State<CourierOrderScreen> {
               : LatLng(order.toLocation!.latitude, order.toLocation!.longitude);
           final target = order.status == OrderStatus.accepted ? from : to;
           final targetDistance = _distanceTo(target);
+          final etaMinutes = _etaMinutes(targetDistance);
           final fitPoints = <LatLng>[?_position, ?from, ?to];
           _fitMap(fitPoints);
           return Column(
@@ -252,6 +304,11 @@ class _CourierOrderScreenState extends State<CourierOrderScreen> {
                         initialZoom: 13,
                         minZoom: 3,
                         maxZoom: 19,
+                        onPositionChanged: (_, hasGesture) {
+                          if (hasGesture && _followCourier) {
+                            setState(() => _followCourier = false);
+                          }
+                        },
                       ),
                       children: [
                         TileLayer(
@@ -304,9 +361,12 @@ class _CourierOrderScreenState extends State<CourierOrderScreen> {
                             if (_position != null)
                               Marker(
                                 point: _position!,
-                                width: 30,
-                                height: 30,
-                                child: const _CourierDot(),
+                                width: 46,
+                                height: 46,
+                                child: _CourierDirectionMarker(
+                                  heading: _heading,
+                                  accuracy: _accuracy,
+                                ),
                               ),
                           ],
                         ),
@@ -331,6 +391,22 @@ class _CourierOrderScreenState extends State<CourierOrderScreen> {
                         ),
                       ),
                     ),
+                    Positioned(
+                      right: 12,
+                      bottom: 12,
+                      child: FloatingActionButton.small(
+                        heroTag: 'centerCourier',
+                        onPressed: _centerOnCourier,
+                        backgroundColor: Colors.white,
+                        foregroundColor: TajGoColors.darkGreen,
+                        tooltip: 'Моё местоположение',
+                        child: Icon(
+                          _followCourier
+                              ? Icons.gps_fixed_rounded
+                              : Icons.my_location_rounded,
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -338,6 +414,7 @@ class _CourierOrderScreenState extends State<CourierOrderScreen> {
                 order: order,
                 target: target,
                 distance: targetDistance,
+                etaMinutes: etaMinutes,
                 geoAvailable: _position != null && target != null,
                 geoError: _geoError,
                 busy: _busy,
@@ -387,6 +464,7 @@ class _OrderPanel extends StatelessWidget {
     required this.order,
     required this.target,
     required this.distance,
+    required this.etaMinutes,
     required this.geoAvailable,
     required this.geoError,
     required this.busy,
@@ -398,6 +476,7 @@ class _OrderPanel extends StatelessWidget {
   final TajGoOrder order;
   final LatLng? target;
   final double? distance;
+  final int? etaMinutes;
   final bool geoAvailable;
   final String? geoError;
   final bool busy;
@@ -484,6 +563,7 @@ class _OrderPanel extends StatelessWidget {
                 const SizedBox(height: 7),
                 Text(
                   'До точки: ${distance!.toStringAsFixed(1)} км'
+                  '${etaMinutes == null ? '' : ' · ≈ $etaMinutes мин'}'
                   '${tooFar ? ' — подойдите ближе, чтобы подтвердить' : ''}',
                   style: TextStyle(
                     color: tooFar ? TajGoColors.warning : TajGoColors.muted,
@@ -589,4 +669,44 @@ class _CourierDot extends StatelessWidget {
       boxShadow: const [BoxShadow(color: Color(0x33000000), blurRadius: 8)],
     ),
   );
+}
+
+class _CourierDirectionMarker extends StatelessWidget {
+  const _CourierDirectionMarker({
+    required this.heading,
+    required this.accuracy,
+  });
+
+  final double? heading;
+  final double? accuracy;
+
+  @override
+  Widget build(BuildContext context) {
+    final direction = heading != null && heading!.isFinite && heading! >= 0
+        ? heading! * 3.141592653589793 / 180
+        : 0.0;
+    return Tooltip(
+      message: accuracy == null
+          ? 'Текущая позиция'
+          : 'Точность GPS: ±${accuracy!.round()} м',
+      child: Transform.rotate(
+        angle: direction,
+        child: Container(
+          decoration: BoxDecoration(
+            color: TajGoColors.darkGreen,
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white, width: 3),
+            boxShadow: const [
+              BoxShadow(color: Color(0x33000000), blurRadius: 10),
+            ],
+          ),
+          child: const Icon(
+            Icons.navigation_rounded,
+            color: Colors.white,
+            size: 26,
+          ),
+        ),
+      ),
+    );
+  }
 }
