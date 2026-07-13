@@ -429,10 +429,11 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
               final size = Size(constraints.maxWidth, constraints.maxHeight);
               final panelHeight = _panelHeight(size);
               final selecting = _stage != _Stage.details;
-              return Stack(
+              return NewOrderMapStack(
+                key: const ValueKey('new-order-map-screen'),
                 children: [
                   Positioned.fill(
-                    bottom: panelHeight,
+                    key: const ValueKey('new-order-map-viewport'),
                     child: FlutterMap(
                       mapController: _map,
                       options: MapOptions(
@@ -550,34 +551,39 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
                         ),
                       ),
                     ),
-                  SafeArea(
-                    bottom: false,
-                    child: Padding(
-                      padding: const EdgeInsets.all(14),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _RoundButton(
-                            icon: Icons.arrow_back_rounded,
-                            onPressed: () => Navigator.maybePop(context),
-                          ),
-                          const Spacer(),
-                          if (selecting && couriers.isNotEmpty)
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 13,
-                                vertical: 9,
-                              ),
-                              decoration: _floatingDecoration(),
-                              child: Text(
-                                '💚 ${couriers.length} курьеров рядом',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w800,
-                                  fontSize: 12,
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: SafeArea(
+                      bottom: false,
+                      child: Padding(
+                        padding: const EdgeInsets.all(14),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _RoundButton(
+                              icon: Icons.arrow_back_rounded,
+                              onPressed: () => Navigator.maybePop(context),
+                            ),
+                            const Spacer(),
+                            if (selecting && couriers.isNotEmpty)
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 13,
+                                  vertical: 9,
+                                ),
+                                decoration: _floatingDecoration(),
+                                child: Text(
+                                  '💚 ${couriers.length} курьеров рядом',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 12,
+                                  ),
                                 ),
                               ),
-                            ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -591,6 +597,7 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
                       ),
                     ),
                   Positioned(
+                    key: const ValueKey('new-order-map-gps'),
                     right: 16,
                     bottom: panelHeight + 12,
                     child: Column(
@@ -625,6 +632,7 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
                     ),
                   ),
                   Positioned(
+                    key: const ValueKey('new-order-map-bottom-panel'),
                     left: 0,
                     right: 0,
                     bottom: 0,
@@ -780,6 +788,7 @@ class _PointPanel extends StatelessWidget {
                 width: double.infinity,
                 height: 48,
                 child: FilledButton(
+                  key: const ValueKey('new-order-map-confirm'),
                   onPressed: enabled ? onConfirm : null,
                   style: FilledButton.styleFrom(
                     backgroundColor: TajGoColors.lime,
@@ -1207,3 +1216,43 @@ Widget buildNewOrderPointPanelForTest({bool pickup = true}) => SizedBox(
     onSearchTo: () {},
   ),
 );
+
+@visibleForTesting
+Widget buildNewOrderEmergencyMapLayoutForTest() {
+  const size = Size(360, 800);
+  final panelHeight = NewOrderMapLayout.panelHeight(size, details: false);
+  return SizedBox.fromSize(
+    size: size,
+    child: NewOrderMapStack(
+      children: [
+        Positioned.fill(
+          key: const ValueKey('new-order-map-viewport'),
+          child: FlutterMap(
+            options: const MapOptions(
+              initialCenter: LatLng(40.2833, 69.6222),
+              initialZoom: 13,
+            ),
+            children: const [],
+          ),
+        ),
+        Positioned(
+          key: const ValueKey('new-order-map-gps'),
+          right: 16,
+          bottom: panelHeight + 12,
+          child: const TajGoLocateButton(
+            heroTag: 'newOrderEmergencyTestLocate',
+            onPressed: null,
+          ),
+        ),
+        Positioned(
+          key: const ValueKey('new-order-map-bottom-panel'),
+          left: 0,
+          right: 0,
+          bottom: 0,
+          height: panelHeight,
+          child: buildNewOrderPointPanelForTest(),
+        ),
+      ],
+    ),
+  );
+}

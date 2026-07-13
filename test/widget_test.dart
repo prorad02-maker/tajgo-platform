@@ -2,6 +2,7 @@ import 'dart:math';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:tajgo/core/models/tajgo_order.dart';
 import 'package:tajgo/core/services/pricing.dart';
@@ -521,5 +522,49 @@ void main() {
     await pump(Brightness.dark);
     expect(tester.takeException(), isNull);
     expect(find.text('Подтвердить точку забора'), findsOneWidget);
+  });
+
+  testWidgets('v1.0.3 map viewport remains visible on 360x800', (tester) async {
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MediaQuery(
+          data: const MediaQueryData(
+            size: Size(360, 800),
+            textScaler: TextScaler.linear(1.3),
+          ),
+          child: Scaffold(body: buildNewOrderEmergencyMapLayoutForTest()),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(tester.takeException(), isNull);
+    expect(find.byType(FlutterMap), findsOneWidget);
+
+    final mapRect = tester.getRect(
+      find.byKey(const ValueKey('new-order-map-viewport')),
+    );
+    final panelRect = tester.getRect(
+      find.byKey(const ValueKey('new-order-map-bottom-panel')),
+    );
+    final gpsRect = tester.getRect(
+      find.byKey(const ValueKey('new-order-map-gps')),
+    );
+    final confirmRect = tester.getRect(
+      find.byKey(const ValueKey('new-order-map-confirm')),
+    );
+
+    expect(mapRect, const Rect.fromLTWH(0, 0, 360, 800));
+    expect(panelRect.top, 528);
+    expect(panelRect.bottom, 800);
+    expect(panelRect.height, lessThanOrEqualTo(300));
+    expect(gpsRect.bottom, lessThan(panelRect.top));
+    expect(panelRect.contains(confirmRect.center), isTrue);
+    expect(find.text('Использовать моё местоположение'), findsNothing);
   });
 }
