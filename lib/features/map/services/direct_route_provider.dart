@@ -2,6 +2,7 @@ import 'package:latlong2/latlong.dart';
 
 import '../../../core/services/pricing.dart' as pricing;
 import '../models/tajgo_route.dart';
+import '../models/tajgo_navigation_step.dart';
 import 'route_provider.dart';
 
 class DirectRouteProvider implements RouteProvider {
@@ -40,6 +41,19 @@ class DirectRouteProvider implements RouteProvider {
       routeQuality: RouteQuality.directFallback,
       errorMessage: errorMessage,
       createdAt: DateTime.now().toUtc(),
+      steps: [
+        TajGoNavigationStep(
+          id: 'direct_0',
+          instructionRu: 'Двигайтесь к точке по маршруту',
+          streetName: '',
+          distanceMeters: distance * 1000,
+          durationSeconds: eta * 60,
+          maneuverType: 'continue',
+          modifier: 'straight',
+          location: to,
+          polylineIndex: 1,
+        ),
+      ],
     );
   }
 }

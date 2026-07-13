@@ -1,5 +1,7 @@
 import 'package:latlong2/latlong.dart';
 
+import 'tajgo_navigation_step.dart';
+
 enum RouteMode { walking, bicycle, scooter, car }
 
 enum RouteQuality { road, directFallback, unavailable }
@@ -14,6 +16,7 @@ class TajGoRoute {
     required this.routeQuality,
     required this.createdAt,
     this.errorMessage,
+    this.steps = const [],
   });
 
   final List<LatLng> points;
@@ -24,6 +27,7 @@ class TajGoRoute {
   final RouteQuality routeQuality;
   final String? errorMessage;
   final DateTime createdAt;
+  final List<TajGoNavigationStep> steps;
 
   List<LatLng> get polylinePoints => points;
   bool get isFallback => routeQuality != RouteQuality.road;

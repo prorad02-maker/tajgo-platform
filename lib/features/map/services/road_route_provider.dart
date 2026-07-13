@@ -1,39 +1,33 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 
+import '../models/tajgo_navigation_step.dart';
 import '../models/tajgo_route.dart';
+import 'navigation_instruction_formatter.dart';
 import 'route_provider.dart';
-
-enum RoadRouteApi { osrm, graphHopper }
+import 'routing_config.dart';
 
 class RoadRouteProvider implements RouteProvider {
   RoadRouteProvider({
-    String? endpoint,
-    String? apiKey,
-    RoadRouteApi? api,
+    RoutingConfig? config,
     http.Client? client,
-  }) : endpoint =
-           endpoint ?? const String.fromEnvironment('TAJGO_ROUTE_ENDPOINT'),
-       apiKey = apiKey ?? const String.fromEnvironment('TAJGO_ROUTE_API_KEY'),
-       api =
-           api ??
-           (const String.fromEnvironment('TAJGO_ROUTE_PROVIDER') ==
-                   'graphhopper'
-               ? RoadRouteApi.graphHopper
-               : RoadRouteApi.osrm),
-       _client = client ?? http.Client();
+    NavigationInstructionFormatter? formatter,
+  }) : config = config ?? RoutingConfig.fromEnvironment(),
+       _client = client ?? http.Client(),
+       _formatter = formatter ?? const NavigationInstructionFormatter();
 
-  final String endpoint;
-  final String apiKey;
-  final RoadRouteApi api;
+  final RoutingConfig config;
   final http.Client _client;
+  final NavigationInstructionFormatter _formatter;
 
-  bool get configured => endpoint.trim().isNotEmpty;
+  bool get configured => config.enabled && config.baseUrl.trim().isNotEmpty;
 
   @override
-  String get name => api == RoadRouteApi.osrm ? 'osrm' : 'graphhopper';
+  String get name =>
+      config.providerType == RoutingProviderType.osrm ? 'osrm' : 'graphhopper';
 
   @override
   Future<TajGoRoute> buildRoute({
@@ -42,20 +36,23 @@ class RoadRouteProvider implements RouteProvider {
     required RouteMode mode,
   }) async {
     if (!configured) {
-      throw StateError('Road route endpoint is not configured.');
+      throw StateError('Road route provider is disabled.');
     }
-    final uri = api == RoadRouteApi.osrm
+    final uri = config.providerType == RoutingProviderType.osrm
         ? _osrmUri(from, to, mode)
         : _graphHopperUri(from, to, mode);
-    final response = await _client.get(uri).timeout(const Duration(seconds: 7));
+    if (config.debugLogging) debugPrint('TajGo routing request: $name');
+    final response = await _client.get(uri).timeout(config.timeout);
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw StateError('Route provider returned ${response.statusCode}.');
     }
-    final json = jsonDecode(response.body) as Map<String, dynamic>;
-    return api == RoadRouteApi.osrm
-        ? _parseOsrm(json)
-        : _parseGraphHopper(json);
+    return parseResponse(jsonDecode(response.body) as Map<String, dynamic>);
   }
+
+  TajGoRoute parseResponse(Map<String, dynamic> json) =>
+      config.providerType == RoutingProviderType.osrm
+      ? _parseOsrm(json)
+      : _parseGraphHopper(json);
 
   Uri _osrmUri(LatLng from, LatLng to, RouteMode mode) {
     final profile = switch (mode) {
@@ -63,11 +60,17 @@ class RoadRouteProvider implements RouteProvider {
       RouteMode.bicycle => 'bike',
       RouteMode.scooter || RouteMode.car => 'driving',
     };
-    final base = endpoint.replaceAll(RegExp(r'/+$'), '');
+    final base = config.baseUrl.replaceAll(RegExp(r'/+$'), '');
     return Uri.parse(
       '$base/route/v1/$profile/${from.longitude},${from.latitude};${to.longitude},${to.latitude}',
     ).replace(
-      queryParameters: const {'overview': 'full', 'geometries': 'geojson'},
+      queryParameters: {
+        'overview': 'full',
+        'geometries': 'geojson',
+        'steps': 'true',
+        'language': 'ru',
+        if (config.apiKey.isNotEmpty) 'key': config.apiKey,
+      },
     );
   }
 
@@ -78,14 +81,17 @@ class RoadRouteProvider implements RouteProvider {
       RouteMode.scooter => 'scooter',
       RouteMode.car => 'car',
     };
-    final base = Uri.parse(endpoint);
+    final base = Uri.parse(config.baseUrl);
     final query = <String>[
       if (base.query.isNotEmpty) base.query,
       'point=${Uri.encodeQueryComponent('${from.latitude},${from.longitude}')}',
       'point=${Uri.encodeQueryComponent('${to.latitude},${to.longitude}')}',
       'profile=${Uri.encodeQueryComponent(profile)}',
       'points_encoded=false',
-      if (apiKey.isNotEmpty) 'key=${Uri.encodeQueryComponent(apiKey)}',
+      'locale=ru',
+      'instructions=true',
+      if (config.apiKey.isNotEmpty)
+        'key=${Uri.encodeQueryComponent(config.apiKey)}',
     ].join('&');
     return base.replace(query: query);
   }
@@ -96,10 +102,50 @@ class RoadRouteProvider implements RouteProvider {
     final route = routes.first as Map<String, dynamic>;
     final geometry = route['geometry'] as Map<String, dynamic>;
     final coordinates = geometry['coordinates'] as List<dynamic>;
+    final points = _points(coordinates);
+    final steps = <TajGoNavigationStep>[];
+    final legs = route['legs'] as List<dynamic>? ?? const [];
+    for (final legValue in legs) {
+      final leg = legValue as Map<String, dynamic>;
+      final rawSteps = leg['steps'] as List<dynamic>? ?? const [];
+      for (final indexed in rawSteps.indexed) {
+        final step = indexed.$2 as Map<String, dynamic>;
+        final maneuver = step['maneuver'] as Map<String, dynamic>? ?? const {};
+        final location = maneuver['location'] as List<dynamic>?;
+        if (location == null || location.length < 2) continue;
+        final point = LatLng(
+          (location[1] as num).toDouble(),
+          (location[0] as num).toDouble(),
+        );
+        final type = maneuver['type'] as String? ?? 'unknown';
+        final modifier = maneuver['modifier'] as String? ?? '';
+        final street = step['name'] as String? ?? '';
+        final distanceMeters = (step['distance'] as num?)?.toDouble() ?? 0;
+        steps.add(
+          TajGoNavigationStep(
+            id: 'osrm_${steps.length}_${type}_$modifier',
+            instructionRu: _formatter.format(
+              maneuverType: type,
+              modifier: modifier,
+              streetName: street,
+              distanceMeters: distanceMeters,
+            ),
+            streetName: street,
+            distanceMeters: distanceMeters,
+            durationSeconds: (step['duration'] as num?)?.toDouble() ?? 0,
+            maneuverType: type,
+            modifier: modifier,
+            location: point,
+            polylineIndex: _nearestIndex(points, point),
+          ),
+        );
+      }
+    }
     return _roadRoute(
-      coordinates,
+      points,
       distanceMeters: (route['distance'] as num).toDouble(),
       durationMilliseconds: (route['duration'] as num).toDouble() * 1000,
+      steps: steps,
     );
   }
 
@@ -107,24 +153,41 @@ class RoadRouteProvider implements RouteProvider {
     final paths = json['paths'] as List<dynamic>?;
     if (paths == null || paths.isEmpty) throw StateError('Route not found.');
     final path = paths.first as Map<String, dynamic>;
-    final points = path['points'] as Map<String, dynamic>;
-    final coordinates = points['coordinates'] as List<dynamic>;
+    final pointsJson = path['points'] as Map<String, dynamic>;
+    final points = _points(pointsJson['coordinates'] as List<dynamic>);
     return _roadRoute(
-      coordinates,
+      points,
       distanceMeters: (path['distance'] as num).toDouble(),
       durationMilliseconds: (path['time'] as num).toDouble(),
+      steps: const [],
     );
   }
 
+  List<LatLng> _points(List<dynamic> coordinates) => coordinates.map((item) {
+    final pair = item as List<dynamic>;
+    return LatLng((pair[1] as num).toDouble(), (pair[0] as num).toDouble());
+  }).toList();
+
+  int _nearestIndex(List<LatLng> points, LatLng target) {
+    const distance = Distance();
+    var result = 0;
+    var nearest = double.infinity;
+    for (var index = 0; index < points.length; index++) {
+      final meters = distance.as(LengthUnit.Meter, points[index], target);
+      if (meters < nearest) {
+        nearest = meters;
+        result = index;
+      }
+    }
+    return result;
+  }
+
   TajGoRoute _roadRoute(
-    List<dynamic> coordinates, {
+    List<LatLng> points, {
     required double distanceMeters,
     required double durationMilliseconds,
+    required List<TajGoNavigationStep> steps,
   }) {
-    final points = coordinates.map((item) {
-      final pair = item as List<dynamic>;
-      return LatLng((pair[1] as num).toDouble(), (pair[0] as num).toDouble());
-    }).toList();
     if (points.length < 2) throw StateError('Route geometry is empty.');
     return TajGoRoute(
       points: points,
@@ -133,6 +196,7 @@ class RoadRouteProvider implements RouteProvider {
       isRoadRouteApproximation: false,
       providerName: name,
       routeQuality: RouteQuality.road,
+      steps: steps,
       createdAt: DateTime.now().toUtc(),
     );
   }

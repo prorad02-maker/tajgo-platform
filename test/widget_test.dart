@@ -8,7 +8,11 @@ import 'package:tajgo/features/map/models/place_suggestion.dart';
 import 'package:tajgo/features/map/models/tajgo_route.dart';
 import 'package:tajgo/features/map/services/address_normalizer.dart';
 import 'package:tajgo/features/map/services/direct_route_provider.dart';
+import 'package:tajgo/features/map/services/navigation_instruction_formatter.dart';
 import 'package:tajgo/features/map/services/route_cache.dart';
+import 'package:tajgo/features/map/services/road_route_provider.dart';
+import 'package:tajgo/features/map/services/route_progress_service.dart';
+import 'package:tajgo/features/map/services/routing_config.dart';
 
 void main() {
   test('неизвестный статус заказа считается ожидающим', () {
@@ -127,6 +131,128 @@ void main() {
     cache.put(from, to, RouteMode.bicycle, route);
     expect(cache.get(almostSameFrom, to, RouteMode.bicycle), same(route));
     expect(cache.get(from, to, RouteMode.walking), isNull);
+  });
+
+  test('русские инструкции форматируют основные манёвры', () {
+    const formatter = NavigationInstructionFormatter();
+    expect(
+      formatter.format(
+        maneuverType: 'turn',
+        modifier: 'right',
+        streetName: '',
+        distanceMeters: 200,
+      ),
+      'Через 200 м поверните направо',
+    );
+    expect(
+      formatter.format(
+        maneuverType: 'turn',
+        modifier: 'left',
+        streetName: 'улицу Сомони',
+        distanceMeters: 50,
+      ),
+      'Через 50 м поверните налево на улицу Сомони',
+    );
+    expect(
+      formatter.format(
+        maneuverType: 'uturn',
+        modifier: '',
+        streetName: '',
+        distanceMeters: 30,
+      ),
+      'Через 30 м развернитесь, когда будет безопасно',
+    );
+  });
+
+  test('route progress считает остаток и отклонение без сети', () {
+    final route = TajGoRoute(
+      points: const [
+        LatLng(40.2800, 69.6200),
+        LatLng(40.2900, 69.6200),
+        LatLng(40.3000, 69.6200),
+      ],
+      distanceKm: 2.22,
+      etaMinutes: 10,
+      isRoadRouteApproximation: false,
+      providerName: 'test',
+      routeQuality: RouteQuality.road,
+      createdAt: DateTime.now().toUtc(),
+    );
+    const service = RouteProgressService(offRouteThresholdMeters: 150);
+    final progress = service.calculateProgress(
+      route,
+      const LatLng(40.2900, 69.6201),
+    );
+    expect(progress.remainingDistanceKm, closeTo(1.11, 0.08));
+    expect(progress.routeCompletionPercent, closeTo(50, 5));
+    expect(progress.isOffRoute, isFalse);
+    expect(
+      service.detectOffRoute(route, const LatLng(40.2900, 69.6230)),
+      isTrue,
+    );
+  });
+
+  test('OSRM sample разбирает геометрию, ETA и steps', () {
+    final provider = RoadRouteProvider(
+      config: const RoutingConfig(
+        enabled: true,
+        providerType: RoutingProviderType.osrm,
+        baseUrl: 'https://routing.invalid',
+        apiKey: '',
+        timeout: Duration(seconds: 2),
+        mode: RouteMode.bicycle,
+        debugLogging: false,
+      ),
+    );
+    final route = provider.parseResponse({
+      'routes': [
+        {
+          'distance': 1600,
+          'duration': 480,
+          'geometry': {
+            'type': 'LineString',
+            'coordinates': [
+              [69.6200, 40.2800],
+              [69.6250, 40.2850],
+              [69.6300, 40.2900],
+            ],
+          },
+          'legs': [
+            {
+              'steps': [
+                {
+                  'distance': 500,
+                  'duration': 120,
+                  'name': 'проспект Сомони',
+                  'maneuver': {
+                    'type': 'depart',
+                    'modifier': 'straight',
+                    'location': [69.6200, 40.2800],
+                  },
+                },
+                {
+                  'distance': 1100,
+                  'duration': 360,
+                  'name': 'улицу Гагарина',
+                  'maneuver': {
+                    'type': 'turn',
+                    'modifier': 'right',
+                    'location': [69.6250, 40.2850],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    expect(route.routeQuality, RouteQuality.road);
+    expect(route.points, hasLength(3));
+    expect(route.distanceKm, 1.6);
+    expect(route.etaMinutes, 8);
+    expect(route.steps, hasLength(2));
+    expect(route.steps.last.instructionRu, contains('направо'));
+    expect(route.steps.last.streetName, 'улицу Гагарина');
   });
 
   test('gazetteer metadata сохраняется в PlaceSuggestion', () {

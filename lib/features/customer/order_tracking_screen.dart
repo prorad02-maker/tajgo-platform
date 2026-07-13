@@ -47,6 +47,8 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
   TajGoRoute? _route;
   String? _routeKey;
   bool _routeLoading = false;
+  TajGoRoute? _liveRoute;
+  String? _liveRouteKey;
 
   @override
   void initState() {
@@ -242,6 +244,27 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
     );
   }
 
+  void _ensureLiveRoute(LatLng? courier, LatLng? target) {
+    if (courier == null || target == null) return;
+    final key =
+        '${courier.latitude.toStringAsFixed(3)},${courier.longitude.toStringAsFixed(3)}:'
+        '${target.latitude.toStringAsFixed(4)},${target.longitude.toStringAsFixed(4)}';
+    if (_liveRouteKey == key) return;
+    _liveRouteKey = key;
+    _liveRoute = null;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      final route = await TajGoScope.of(context).routeService.buildRoute(
+        from: courier,
+        to: target,
+        mode: RouteMode.bicycle,
+      );
+      if (mounted && _liveRouteKey == key) {
+        setState(() => _liveRoute = route);
+      }
+    });
+  }
+
   int _step(TajGoOrder order) => switch (order.status) {
     OrderStatus.waiting => 0,
     OrderStatus.accepted => 1,
@@ -249,28 +272,34 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
     _ => 3,
   };
 
-  String _title(TajGoOrder order) => switch (order.status) {
-    OrderStatus.waiting => '🔎 Ищем курьера…',
-    OrderStatus.accepted when order.arrivedAtPickupAt != null =>
-      '📍 Курьер на месте забора',
-    OrderStatus.accepted => '🚴 Курьер найден!',
-    OrderStatus.pickedUp => '📦 Заказ у курьера',
-    OrderStatus.delivered => 'Курьер передал заказ?',
-    OrderStatus.completed => '✅ Доставлено. Спасибо!',
-    OrderStatus.disputed => '⚠️ Мы разбираемся',
-    OrderStatus.cancelled => 'Заказ отменён',
-  };
+  String _title(TajGoOrder order, {required bool courierNearby}) =>
+      switch (order.status) {
+        OrderStatus.waiting => '🔎 Ищем курьера…',
+        OrderStatus.accepted when order.arrivedAtPickupAt != null =>
+          '📍 Курьер забирает заказ',
+        OrderStatus.accepted => '🚴 Курьер едет за заказом',
+        OrderStatus.pickedUp when courierNearby => '📍 Курьер рядом',
+        OrderStatus.pickedUp => '📦 Заказ у курьера',
+        OrderStatus.delivered => 'Курьер передал заказ?',
+        OrderStatus.completed => '✅ Доставлено. Спасибо!',
+        OrderStatus.disputed => '⚠️ Мы разбираемся',
+        OrderStatus.cancelled => 'Заказ отменён',
+      };
 
-  String? _subtitle(TajGoOrder order) => switch (order.status) {
-    OrderStatus.waiting => 'Обычно это занимает пару минут',
-    OrderStatus.accepted when order.arrivedAtPickupAt == null =>
-      'Курьер едет к точке забора',
-    OrderStatus.pickedUp => 'Курьер едет к вам',
-    OrderStatus.delivered => 'Подтвердите получение',
-    OrderStatus.disputed =>
-      'Заказ помечен как неполученный. Мы свяжемся с вами.',
-    _ => null,
-  };
+  String? _subtitle(TajGoOrder order, {required bool courierNearby}) =>
+      switch (order.status) {
+        OrderStatus.waiting => 'Обычно это занимает пару минут',
+        OrderStatus.accepted when order.arrivedAtPickupAt != null =>
+          'Курьер забирает заказ',
+        OrderStatus.accepted when order.arrivedAtPickupAt == null =>
+          'Курьер едет за заказом',
+        OrderStatus.pickedUp when courierNearby => 'Курьер уже близко к вам',
+        OrderStatus.pickedUp => 'Курьер едет к вам',
+        OrderStatus.delivered => 'Подтвердите получение',
+        OrderStatus.disputed =>
+          'Заказ помечен как неполученный. Мы свяжемся с вами.',
+        _ => null,
+      };
 
   @override
   Widget build(BuildContext context) {
@@ -319,13 +348,18 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
     final courierPoint = courier?.location == null
         ? null
         : LatLng(courier!.location!.latitude, courier.location!.longitude);
-    final liveTarget = order.status == OrderStatus.pickedUp ? to : from;
+    final liveTarget = order.status == OrderStatus.accepted ? from : to;
     final liveDistance = courierPoint != null && liveTarget != null
         ? pricing.haversineDistanceKm(courierPoint, liveTarget)
         : null;
-    final liveEta = liveDistance == null
+    _ensureLiveRoute(courierPoint, liveTarget);
+    final liveEta = courierPoint == null
         ? null
-        : pricing.courierNavigationEtaMinutes(liveDistance);
+        : _liveRoute?.etaMinutes ??
+              (liveDistance == null
+                  ? null
+                  : pricing.courierNavigationEtaMinutes(liveDistance));
+    final courierNearby = liveDistance != null && liveDistance <= 0.12;
     _fitMap(from, to);
     return Column(
       children: [
@@ -463,11 +497,12 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
           onNotReceived: () => _reportNotReceived(order),
           onDone: () => Navigator.maybePop(context),
           step: _step(order),
-          title: _title(order),
-          subtitle: _subtitle(order),
+          title: _title(order, courierNearby: courierNearby),
+          subtitle: _subtitle(order, courierNearby: courierNearby),
           route: _route,
           routeLoading: _routeLoading,
           liveEtaMinutes: liveEta,
+          courierNearby: courierNearby,
           onShowRoute: from == null || to == null
               ? null
               : () => _showEntireRoute(from, to),
@@ -492,6 +527,7 @@ class _StatusPanel extends StatelessWidget {
     required this.route,
     required this.routeLoading,
     required this.liveEtaMinutes,
+    required this.courierNearby,
     required this.onShowRoute,
   });
 
@@ -508,6 +544,7 @@ class _StatusPanel extends StatelessWidget {
   final TajGoRoute? route;
   final bool routeLoading;
   final int? liveEtaMinutes;
+  final bool courierNearby;
   final VoidCallback? onShowRoute;
 
   @override
@@ -528,10 +565,19 @@ class _StatusPanel extends StatelessWidget {
             ),
             const SizedBox(height: 14),
             TajGoStatusHeader(title: title, subtitle: subtitle),
-            if (liveEtaMinutes != null) ...[
+            if (courierNearby) ...[
+              const SizedBox(height: 4),
+              const Text(
+                'Курьер рядом',
+                style: TextStyle(
+                  color: TajGoColors.darkGreen,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ] else if (liveEtaMinutes != null) ...[
               const SizedBox(height: 4),
               Text(
-                'Примерное время: $liveEtaMinutes мин',
+                'Осталось примерно $liveEtaMinutes мин',
                 style: const TextStyle(
                   color: TajGoColors.darkGreen,
                   fontWeight: FontWeight.w800,
