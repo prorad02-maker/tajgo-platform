@@ -213,6 +213,14 @@ function isAdmin() {
    courier_repository (+ модель TajGoOrder читает их и `cancelledAt`,
    `cancelledReason`, `resolvedBy/At`, `manuallyCompletedBy`, `adminNote`);
    `cancelledAt` в существующем cancelOrder.
+   ⚠️ **ВНИМАНИЕ (добавлено после инцидента GPS v0.6.0):** задеплоенные
+   в Firebase правила проверяют `affectedKeys().hasOnly([...])` и НЕ знают
+   новых полей — запись `pickedUpAt`/`deliveredAt`/`cancelledAt` в переходы
+   СЛОМАЕТ основной поток заказа до деплоя обновлённых правил (как это было
+   с heading/speed). Делать одним из двух способов: (а) отложить эти поля до
+   деплоя правил; (б) писать их с fallback как в updateLocation — при
+   permission-denied повторить запись без новых полей. Таймлайн в C3 обязан
+   работать и без этих полей (показывать только заполненные).
 2. `admin_repository.dart` (§G) + регистрация в TajGoScope.
 3. Общие виджеты §E (+ вынести `_AddressPin`/`_CourierDot` в shared).
 4. Экраны C1–C5.
