@@ -1,0 +1,8 @@
+{
+  "ROUTING_ENABLED": "true",
+  "ROUTING_PROVIDER": "osrm",
+  "ROUTING_BASE_URL": "https://routing.example.tj",
+  "ROUTING_API_KEY": "",
+  "ROUTING_TIMEOUT_SECONDS": "7",
+  "ROUTING_MODE": "bicycle"
+}

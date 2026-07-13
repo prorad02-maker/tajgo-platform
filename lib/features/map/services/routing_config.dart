@@ -24,29 +24,48 @@ class RoutingConfig {
   final bool debugLogging;
 
   factory RoutingConfig.fromEnvironment() {
-    const provider = String.fromEnvironment(
+    const preferredProvider = String.fromEnvironment('ROUTING_PROVIDER');
+    const legacyProvider = String.fromEnvironment(
       'TAJGO_ROUTE_PROVIDER',
       defaultValue: 'osrm',
     );
-    const modeValue = String.fromEnvironment(
+    const provider = preferredProvider == ''
+        ? legacyProvider
+        : preferredProvider;
+    const preferredMode = String.fromEnvironment('ROUTING_MODE');
+    const legacyMode = String.fromEnvironment(
       'TAJGO_ROUTE_MODE',
       defaultValue: 'bicycle',
     );
+    const modeValue = preferredMode == '' ? legacyMode : preferredMode;
+    const preferredBaseUrl = String.fromEnvironment('ROUTING_BASE_URL');
+    const legacyBaseUrl = String.fromEnvironment('TAJGO_ROUTE_ENDPOINT');
+    const preferredKey = String.fromEnvironment('ROUTING_API_KEY');
+    const legacyKey = String.fromEnvironment('TAJGO_ROUTE_API_KEY');
+    const timeoutSeconds = int.fromEnvironment(
+      'ROUTING_TIMEOUT_SECONDS',
+      defaultValue: 0,
+    );
+    const legacyTimeoutMs = int.fromEnvironment(
+      'TAJGO_ROUTE_TIMEOUT_MS',
+      defaultValue: 7000,
+    );
     return RoutingConfig(
-      enabled: const bool.fromEnvironment(
-        'TAJGO_ROUTE_ENABLED',
-        defaultValue: false,
-      ),
+      enabled:
+          const bool.fromEnvironment('ROUTING_ENABLED', defaultValue: false) ||
+          const bool.fromEnvironment(
+            'TAJGO_ROUTE_ENABLED',
+            defaultValue: false,
+          ),
       providerType: provider == 'graphhopper'
           ? RoutingProviderType.graphHopper
           : RoutingProviderType.osrm,
-      baseUrl: const String.fromEnvironment('TAJGO_ROUTE_ENDPOINT'),
-      apiKey: const String.fromEnvironment('TAJGO_ROUTE_API_KEY'),
+      baseUrl: preferredBaseUrl == '' ? legacyBaseUrl : preferredBaseUrl,
+      apiKey: preferredKey == '' ? legacyKey : preferredKey,
       timeout: Duration(
-        milliseconds: const int.fromEnvironment(
-          'TAJGO_ROUTE_TIMEOUT_MS',
-          defaultValue: 7000,
-        ),
+        milliseconds: timeoutSeconds > 0
+            ? timeoutSeconds * 1000
+            : legacyTimeoutMs,
       ),
       mode: switch (modeValue) {
         'walking' => RouteMode.walking,
@@ -57,4 +76,13 @@ class RoutingConfig {
       debugLogging: kDebugMode,
     );
   }
+
+  bool get isConfigured => enabled && baseUrl.trim().isNotEmpty;
+
+  List<String> get validationIssues => [
+    if (enabled && baseUrl.trim().isEmpty) 'ROUTING_BASE_URL не задан',
+    if (timeout <= Duration.zero) 'Timeout должен быть больше нуля',
+    if (baseUrl.isNotEmpty && Uri.tryParse(baseUrl)?.hasScheme != true)
+      'ROUTING_BASE_URL должен быть абсолютным URL',
+  ];
 }

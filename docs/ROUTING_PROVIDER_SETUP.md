@@ -1,35 +1,56 @@
-# Настройка дорожного route provider
+# Routing provider: настройка для пилота
 
-По умолчанию внешний провайдер выключен. Секреты и endpoint не хранятся в Git.
+Внешний routing по умолчанию выключен. Приложение всегда собирается и создаёт
+заказы без него: `DirectRouteProvider` строит честно помеченный предварительный
+маршрут. Firebase, Phone Auth и applicationId от routing не зависят.
 
-## Параметры `--dart-define`
+## Переменные запуска
 
-| Параметр | Пример | Назначение |
-|---|---|---|
-| `TAJGO_ROUTE_ENABLED` | `true` | Включить дорожные маршруты |
-| `TAJGO_ROUTE_PROVIDER` | `osrm` | `osrm` или `graphhopper` |
-| `TAJGO_ROUTE_ENDPOINT` | `https://routing.example.tj` | Базовый URL сервиса |
-| `TAJGO_ROUTE_API_KEY` | локальный секрет | Необязательный ключ |
-| `TAJGO_ROUTE_TIMEOUT_MS` | `7000` | Timeout запроса |
-| `TAJGO_ROUTE_MODE` | `bicycle` | `walking`, `bicycle`, `scooter`, `car` |
+| Параметр | Значение |
+|---|---|
+| `ROUTING_ENABLED` | `true` включает road provider |
+| `ROUTING_PROVIDER` | `osrm` или `graphhopper` |
+| `ROUTING_BASE_URL` | абсолютный URL без ключа в строке |
+| `ROUTING_API_KEY` | необязательный локальный секрет |
+| `ROUTING_TIMEOUT_SECONDS` | обычно `7` |
+| `ROUTING_MODE` | `walking`, `bicycle`, `scooter`, `car` |
 
-Пример локального запуска:
+Старые имена `TAJGO_ROUTE_*` сохранены для обратной совместимости. Новые
+`ROUTING_*` имеют приоритет.
 
 ```powershell
-flutter run `
-  --dart-define=TAJGO_ROUTE_ENABLED=true `
-  --dart-define=TAJGO_ROUTE_PROVIDER=osrm `
-  --dart-define=TAJGO_ROUTE_ENDPOINT=https://routing.example.tj
+flutter run -d <DEVICE_ID> `
+  --dart-define=ROUTING_ENABLED=true `
+  --dart-define=ROUTING_PROVIDER=osrm `
+  --dart-define=ROUTING_BASE_URL=https://routing.example.tj `
+  --dart-define=ROUTING_TIMEOUT_SECONDS=7 `
+  --dart-define=ROUTING_MODE=bicycle
 ```
 
-OSRM-запрос использует `overview=full`, `geometries=geojson`, `steps=true` и `language=ru`. Endpoint должен поддерживать профили, соответствующие режимам TajGo. Для GraphHopper можно передать ключ только через локальный `--dart-define` или секрет CI.
+Можно скопировать `tool/routing.example.json` в `tool/routing.local.json`,
+заполнить локально и выполнить:
 
-## Проверка
+```powershell
+flutter run -d <DEVICE_ID> --dart-define-from-file=tool/routing.local.json
+```
 
-1. Запустить приложение с включённым провайдером.
-2. Открыть активный заказ курьера.
-3. Убедиться, что статус — «Маршрут построен», а не «Маршрут предварительный».
-4. Проверить манёвры и ETA на реальной дороге.
-5. Отключить сеть: приложение должно тихо перейти на fallback и продолжить сценарий.
+`routing.local.json` игнорируется Git. Ключи нельзя помещать в исходники,
+скриншоты, issue или документацию.
 
-Никогда не коммитить API-ключ, приватный endpoint с токеном или файл секретов.
+## OSRM-совместимость
+
+Запрос использует координаты `lng,lat`, `overview=full`,
+`geometries=geojson`, `steps=true`, `language=ru`. Ответ разбирает geometry,
+distance, duration, legs, steps и maneuver. Неуспешный HTTP, timeout, плохой
+JSON или OSRM code не `Ok` переводятся в безопасный fallback.
+
+## Debug Health
+
+В debug-сборке откройте Demo Tools → **Routing & Map Health**. Карточка показывает
+конфигурацию, число запросов, успехи, fallback, cache hits, latency и медленные
+операции. Кнопка «Проверить routing provider» строит тестовый маршрут Худжанда.
+Release-интерфейс эту диагностику не показывает.
+
+Для production нужен управляемый endpoint/коммерческий SLA, rate limits,
+server-side cache, мониторинг доступности и юридическая проверка условий
+провайдера. Публичный demo OSRM нельзя считать production SLA.

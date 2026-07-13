@@ -20,6 +20,10 @@ class PlaceSuggestion {
     this.notes,
     this.usedAt,
     this.recentType,
+    this.partnerId,
+    this.isPartner = false,
+    this.isPinned = false,
+    this.tags = const [],
   });
 
   final String id;
@@ -40,6 +44,10 @@ class PlaceSuggestion {
   final String? notes;
   final DateTime? usedAt;
   final String? recentType;
+  final String? partnerId;
+  final bool isPartner;
+  final bool isPinned;
+  final List<String> tags;
 
   LatLng get point => LatLng(lat, lng);
 
@@ -49,6 +57,7 @@ class PlaceSuggestion {
     String? source,
     DateTime? usedAt,
     String? recentType,
+    bool? isPinned,
   }) => PlaceSuggestion(
     id: id,
     title: title,
@@ -69,6 +78,10 @@ class PlaceSuggestion {
     notes: notes,
     usedAt: usedAt ?? this.usedAt,
     recentType: recentType ?? this.recentType,
+    partnerId: partnerId,
+    isPartner: isPartner,
+    isPinned: isPinned ?? this.isPinned,
+    tags: tags,
   );
 
   Map<String, dynamic> toJson({String? type, DateTime? usedAt}) {
@@ -87,6 +100,10 @@ class PlaceSuggestion {
       'verified': verified,
       'popularity': popularity,
       'notes': notes,
+      'partnerId': partnerId,
+      'isPartner': isPartner,
+      'pinned': isPinned,
+      'tags': tags,
     };
     if (type != null) json['type'] = type;
     if (usedAt != null) json['usedAt'] = usedAt.toIso8601String();
@@ -116,5 +133,11 @@ class PlaceSuggestion {
     notes: json['notes'] as String?,
     usedAt: DateTime.tryParse(json['usedAt'] as String? ?? ''),
     recentType: json['type'] as String?,
+    partnerId: json['partnerId'] as String?,
+    isPartner: json['isPartner'] as bool? ?? json['partnerId'] != null,
+    isPinned: json['pinned'] as bool? ?? false,
+    tags:
+        (json['tags'] as List<dynamic>?)?.whereType<String>().toList() ??
+        const [],
   );
 }

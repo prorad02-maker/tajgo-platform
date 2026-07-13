@@ -4,7 +4,23 @@ import 'tajgo_navigation_step.dart';
 
 enum RouteMode { walking, bicycle, scooter, car }
 
-enum RouteQuality { road, directFallback, unavailable }
+enum RouteQuality {
+  road,
+  approximate,
+  directFallback,
+  providerError,
+  unavailable,
+}
+
+extension RouteQualityLabel on RouteQuality {
+  String get userLabel => switch (this) {
+    RouteQuality.road => 'Маршрут построен',
+    RouteQuality.approximate ||
+    RouteQuality.directFallback => 'Маршрут предварительный',
+    RouteQuality.providerError => 'Используем предварительный маршрут',
+    RouteQuality.unavailable => 'Маршрут недоступен',
+  };
+}
 
 class TajGoRoute {
   const TajGoRoute({
@@ -31,4 +47,5 @@ class TajGoRoute {
 
   List<LatLng> get polylinePoints => points;
   bool get isFallback => routeQuality != RouteQuality.road;
+  String get qualityLabel => routeQuality.userLabel;
 }

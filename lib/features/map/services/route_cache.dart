@@ -12,6 +12,11 @@ class RouteCache {
   final Duration fallbackTtl;
   final Map<String, TajGoRoute> _entries = {};
 
+  int get length {
+    prune();
+    return _entries.length;
+  }
+
   String key(LatLng from, LatLng to, RouteMode mode) =>
       '${from.latitude.toStringAsFixed(4)},${from.longitude.toStringAsFixed(4)}:'
       '${to.latitude.toStringAsFixed(4)},${to.longitude.toStringAsFixed(4)}:'

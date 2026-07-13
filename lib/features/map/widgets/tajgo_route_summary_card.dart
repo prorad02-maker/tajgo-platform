@@ -57,9 +57,12 @@ class TajGoRouteSummaryCard extends StatelessWidget {
                   style: const TextStyle(fontWeight: FontWeight.w800),
                 ),
                 if (!loading && value?.isFallback == true)
-                  const Text(
-                    'Маршрут предварительный',
-                    style: TextStyle(color: TajGoColors.warning, fontSize: 12),
+                  Text(
+                    value!.qualityLabel,
+                    style: const TextStyle(
+                      color: TajGoColors.warning,
+                      fontSize: 12,
+                    ),
                   )
                 else if (!loading && value != null)
                   const Text(

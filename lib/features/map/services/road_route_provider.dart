@@ -23,7 +23,7 @@ class RoadRouteProvider implements RouteProvider {
   final http.Client _client;
   final NavigationInstructionFormatter _formatter;
 
-  bool get configured => config.enabled && config.baseUrl.trim().isNotEmpty;
+  bool get configured => config.isConfigured && config.validationIssues.isEmpty;
 
   @override
   String get name =>
@@ -38,9 +38,7 @@ class RoadRouteProvider implements RouteProvider {
     if (!configured) {
       throw StateError('Road route provider is disabled.');
     }
-    final uri = config.providerType == RoutingProviderType.osrm
-        ? _osrmUri(from, to, mode)
-        : _graphHopperUri(from, to, mode);
+    final uri = buildRequestUri(from: from, to: to, mode: mode);
     if (config.debugLogging) debugPrint('TajGo routing request: $name');
     final response = await _client.get(uri).timeout(config.timeout);
     if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -53,6 +51,14 @@ class RoadRouteProvider implements RouteProvider {
       config.providerType == RoutingProviderType.osrm
       ? _parseOsrm(json)
       : _parseGraphHopper(json);
+
+  Uri buildRequestUri({
+    required LatLng from,
+    required LatLng to,
+    required RouteMode mode,
+  }) => config.providerType == RoutingProviderType.osrm
+      ? _osrmUri(from, to, mode)
+      : _graphHopperUri(from, to, mode);
 
   Uri _osrmUri(LatLng from, LatLng to, RouteMode mode) {
     final profile = switch (mode) {
@@ -97,6 +103,10 @@ class RoadRouteProvider implements RouteProvider {
   }
 
   TajGoRoute _parseOsrm(Map<String, dynamic> json) {
+    final code = json['code'] as String?;
+    if (code != null && code != 'Ok') {
+      throw StateError('OSRM response code: $code');
+    }
     final routes = json['routes'] as List<dynamic>?;
     if (routes == null || routes.isEmpty) throw StateError('Route not found.');
     final route = routes.first as Map<String, dynamic>;

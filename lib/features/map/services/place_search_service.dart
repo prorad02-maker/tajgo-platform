@@ -8,6 +8,8 @@ import 'address_normalizer.dart';
 import 'geocoding_provider.dart';
 import 'recent_places_service.dart';
 import 'reverse_geocoding_service.dart';
+import 'saved_places_service.dart';
+import 'map_performance_monitor.dart';
 
 class PlaceSearchService {
   PlaceSearchService({
@@ -15,15 +17,21 @@ class PlaceSearchService {
     RecentPlacesService? recentPlaces,
     AddressNormalizer? normalizer,
     ReverseGeocodingService? reverseGeocoding,
+    SavedPlacesService? savedPlaces,
+    MapPerformanceMonitor? performanceMonitor,
   }) : _remoteProvider = remoteProvider ?? const NativeGeocodingProvider(),
        recentPlaces = recentPlaces ?? RecentPlacesService(),
        _normalizer = normalizer ?? const AddressNormalizer(),
-       _reverseGeocoding = reverseGeocoding ?? const ReverseGeocodingService();
+       _reverseGeocoding = reverseGeocoding ?? const ReverseGeocodingService(),
+       savedPlaces = savedPlaces ?? SavedPlacesService(),
+       performance = performanceMonitor ?? MapPerformanceMonitor.shared;
 
   final GeocodingProvider _remoteProvider;
   final RecentPlacesService recentPlaces;
   final AddressNormalizer _normalizer;
   final ReverseGeocodingService _reverseGeocoding;
+  final SavedPlacesService savedPlaces;
+  final MapPerformanceMonitor performance;
   List<PlaceSuggestion>? _localCache;
 
   Future<List<PlaceSuggestion>> search(
@@ -31,9 +39,11 @@ class PlaceSearchService {
     LatLng? near,
     String? recentType,
   }) async {
+    final stopwatch = Stopwatch()..start();
     final query = _normalizer.normalizeQuery(input);
     final local = await _loadLocal();
     final recent = await recentPlaces.load(type: recentType);
+    final favorites = await savedPlaces.load();
     final output = <PlaceSuggestion>[];
 
     void addMatches(List<PlaceSuggestion> places, String source) {
@@ -51,6 +61,7 @@ class PlaceSearchService {
       }
     }
 
+    addMatches(favorites, 'favorite');
     addMatches(recent, 'recent');
     addMatches(local, 'local');
 
@@ -81,11 +92,17 @@ class PlaceSearchService {
           b.distanceMetersFromUser ?? double.infinity,
         );
       });
-    return result.take(12).toList();
+    stopwatch.stop();
+    performance.recordSearch(stopwatch.elapsed);
+    return result.take(16).toList();
   }
 
   Future<PlaceSuggestion> reverse(LatLng point) async {
-    return _reverseGeocoding.resolve(point);
+    final stopwatch = Stopwatch()..start();
+    final result = await _reverseGeocoding.resolve(point);
+    stopwatch.stop();
+    performance.recordReverseGeocode(stopwatch.elapsed);
+    return result;
   }
 
   Future<List<PlaceSuggestion>> _loadLocal() async {
@@ -117,9 +134,10 @@ class PlaceSearchService {
   }
 
   int _sourcePriority(String source) => switch (source) {
-    'recent' => 0,
-    'local' => 1,
-    'remote' => 2,
-    _ => 3,
+    'favorite' => 0,
+    'recent' => 1,
+    'local' => 2,
+    'remote' => 3,
+    _ => 4,
   };
 }

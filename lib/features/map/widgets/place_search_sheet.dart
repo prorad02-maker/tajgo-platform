@@ -48,6 +48,7 @@ class _PlaceSearchSheetState extends State<_PlaceSearchSheet> {
   final _query = TextEditingController();
   Timer? _debounce;
   List<PlaceSuggestion> _results = const [];
+  Set<String> _favoriteIds = const {};
   bool _loading = true;
   int _requestId = 0;
 
@@ -77,9 +78,11 @@ class _PlaceSearchSheetState extends State<_PlaceSearchSheet> {
       near: widget.near,
       recentType: widget.recentType,
     );
+    final favorites = await widget.service.savedPlaces.load();
     if (!mounted || requestId != _requestId) return;
     setState(() {
       _results = results;
+      _favoriteIds = favorites.map(_placeKey).toSet();
       _loading = false;
     });
   }
@@ -176,12 +179,19 @@ class _PlaceSearchSheetState extends State<_PlaceSearchSheet> {
     itemBuilder: (context, index) => TajGoAddressResultTile(
       place: places[index],
       onShowOnMap: () => Navigator.pop(context, places[index]),
+      favorite: _favoriteIds.contains(_placeKey(places[index])),
+      onToggleFavorite: () => _toggleFavorite(places[index]),
     ),
   );
 
   Widget _suggestionSections() {
+    final favorites = _results
+        .where((place) => place.source == 'favorite')
+        .toList();
     final recent = _results.where((place) => place.source == 'recent').toList();
     final local = _results.where((place) => place.source == 'local').toList();
+    final partners = local.where((place) => place.isPartner).toList();
+    final pinned = local.where((place) => place.isPinned).toList();
     final nearby = widget.near == null
         ? <PlaceSuggestion>[]
         : local.take(3).toList();
@@ -203,16 +213,30 @@ class _PlaceSearchSheetState extends State<_PlaceSearchSheet> {
           (place) => TajGoAddressResultTile(
             place: place,
             onShowOnMap: () => Navigator.pop(context, place),
+            favorite: _favoriteIds.contains(_placeKey(place)),
+            onToggleFavorite: () => _toggleFavorite(place),
           ),
         ),
       );
     }
 
+    addSection('Избранные', favorites.take(5).toList());
+    addSection('Закреплённые места', pinned.take(5).toList());
+    addSection('Партнёры TajGo', partners.take(5).toList());
     addSection('Недавние', recent.take(5).toList());
     addSection('Рядом с вами', nearby);
     addSection('Популярные', popular);
     return ListView(children: children);
   }
+
+  Future<void> _toggleFavorite(PlaceSuggestion place) async {
+    await widget.service.savedPlaces.toggleFavorite(place);
+    await _search(_query.text);
+  }
+
+  String _placeKey(PlaceSuggestion place) => place.id.isNotEmpty
+      ? place.id
+      : '${place.lat.toStringAsFixed(5)}:${place.lng.toStringAsFixed(5)}';
 }
 
 class _EmptySearch extends StatelessWidget {

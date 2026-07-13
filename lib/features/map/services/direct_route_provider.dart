@@ -23,6 +23,7 @@ class DirectRouteProvider implements RouteProvider {
     required LatLng to,
     required RouteMode mode,
     String? errorMessage,
+    RouteQuality quality = RouteQuality.directFallback,
   }) {
     final distance = pricing.distanceKm(from, to);
     final speedKmH = switch (mode) {
@@ -38,7 +39,7 @@ class DirectRouteProvider implements RouteProvider {
       etaMinutes: eta,
       isRoadRouteApproximation: true,
       providerName: name,
-      routeQuality: RouteQuality.directFallback,
+      routeQuality: quality,
       errorMessage: errorMessage,
       createdAt: DateTime.now().toUtc(),
       steps: [

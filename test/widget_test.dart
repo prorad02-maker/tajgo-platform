@@ -13,6 +13,10 @@ import 'package:tajgo/features/map/services/route_cache.dart';
 import 'package:tajgo/features/map/services/road_route_provider.dart';
 import 'package:tajgo/features/map/services/route_progress_service.dart';
 import 'package:tajgo/features/map/services/routing_config.dart';
+import 'package:tajgo/features/map/services/route_service.dart';
+import 'package:tajgo/features/map/services/routing_health_monitor.dart';
+import 'package:tajgo/features/map/services/map_performance_monitor.dart';
+import 'package:tajgo/features/map/services/delivery_map_intelligence_service.dart';
 
 void main() {
   test('неизвестный статус заказа считается ожидающим', () {
@@ -272,5 +276,143 @@ void main() {
     expect(place.district, 'Демо');
     expect(place.verified, isFalse);
     expect(place.popularity, 90);
+  });
+
+  test('routing config валидирует production endpoint', () {
+    const missingUrl = RoutingConfig(
+      enabled: true,
+      providerType: RoutingProviderType.osrm,
+      baseUrl: '',
+      apiKey: '',
+      timeout: Duration(seconds: 7),
+      mode: RouteMode.bicycle,
+      debugLogging: false,
+    );
+    expect(missingUrl.isConfigured, isFalse);
+    expect(missingUrl.validationIssues, contains('ROUTING_BASE_URL не задан'));
+
+    const valid = RoutingConfig(
+      enabled: true,
+      providerType: RoutingProviderType.osrm,
+      baseUrl: 'https://routing.example.tj',
+      apiKey: '',
+      timeout: Duration(seconds: 7),
+      mode: RouteMode.bicycle,
+      debugLogging: false,
+    );
+    expect(valid.isConfigured, isTrue);
+    expect(valid.validationIssues, isEmpty);
+  });
+
+  test('OSRM request builder использует lng,lat и обязательные параметры', () {
+    final provider = RoadRouteProvider(
+      config: const RoutingConfig(
+        enabled: true,
+        providerType: RoutingProviderType.osrm,
+        baseUrl: 'https://routing.example.tj',
+        apiKey: '',
+        timeout: Duration(seconds: 7),
+        mode: RouteMode.bicycle,
+        debugLogging: false,
+      ),
+    );
+    final uri = provider.buildRequestUri(
+      from: const LatLng(40.2833, 69.6222),
+      to: const LatLng(40.2933, 69.6322),
+      mode: RouteMode.bicycle,
+    );
+    expect(
+      uri.path,
+      contains('/route/v1/bike/69.6222,40.2833;69.6322,40.2933'),
+    );
+    expect(uri.queryParameters['geometries'], 'geojson');
+    expect(uri.queryParameters['steps'], 'true');
+  });
+
+  test('provider disabled даёт fallback и обновляет health', () async {
+    const config = RoutingConfig(
+      enabled: false,
+      providerType: RoutingProviderType.osrm,
+      baseUrl: '',
+      apiKey: '',
+      timeout: Duration(seconds: 7),
+      mode: RouteMode.bicycle,
+      debugLogging: false,
+    );
+    final road = RoadRouteProvider(config: config);
+    final health = RoutingHealthMonitor(config);
+    final performance = MapPerformanceMonitor();
+    final service = RouteService(
+      roadProvider: road,
+      healthMonitor: health,
+      performanceMonitor: performance,
+    );
+    final route = await service.buildRoute(
+      from: const LatLng(40.2833, 69.6222),
+      to: const LatLng(40.2933, 69.6322),
+      mode: RouteMode.bicycle,
+    );
+    expect(route.routeQuality, RouteQuality.directFallback);
+    expect(route.qualityLabel, 'Маршрут предварительный');
+    expect(health.snapshot.fallbacks, 1);
+    expect(performance.snapshot.routeBuilds, 1);
+  });
+
+  test('partner и pinned metadata проходят JSON roundtrip', () {
+    final place = PlaceSuggestion.fromJson({
+      'id': 'partner_1',
+      'title': 'Партнёр TajGo',
+      'shortTitle': 'Партнёр',
+      'address': 'Худжанд',
+      'lat': 40.28,
+      'lng': 69.62,
+      'category': 'shop',
+      'partnerId': 'business_1',
+      'isPartner': true,
+      'pinned': true,
+      'tags': ['partner', 'pickup'],
+    });
+    final restored = PlaceSuggestion.fromJson(place.toJson());
+    expect(restored.isPartner, isTrue);
+    expect(restored.isPinned, isTrue);
+    expect(restored.partnerId, 'business_1');
+    expect(restored.tags, contains('pickup'));
+  });
+
+  test('delivery intelligence переключает следующую цель A на B', () {
+    const service = DeliveryMapIntelligenceService();
+    const pickup = TajGoOrder(
+      id: 'o1',
+      customerId: 'c1',
+      customerName: 'Клиент',
+      status: OrderStatus.accepted,
+      type: 'package',
+      city: 'Худжанд',
+      fromText: 'A',
+      toText: 'B',
+      price: 15,
+      currency: 'TJS',
+      comment: 'Вход со двора',
+    );
+    final pickupInfo = service.forOrder(pickup);
+    expect(pickupInfo.targetLabel, 'A · Забрать');
+    expect(pickupInfo.showConfirmationCode, isFalse);
+
+    const dropoffInfoOrder = TajGoOrder(
+      id: 'o1',
+      customerId: 'c1',
+      customerName: 'Клиент',
+      status: OrderStatus.pickedUp,
+      type: 'package',
+      city: 'Худжанд',
+      fromText: 'A',
+      toText: 'B',
+      price: 15,
+      currency: 'TJS',
+      comment: 'Вход со двора',
+    );
+    final dropoffInfo = service.forOrder(dropoffInfoOrder);
+    expect(dropoffInfo.targetLabel, 'B · Доставить');
+    expect(dropoffInfo.showConfirmationCode, isTrue);
   });
 }

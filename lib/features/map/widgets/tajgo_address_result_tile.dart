@@ -8,10 +8,14 @@ class TajGoAddressResultTile extends StatelessWidget {
     super.key,
     required this.place,
     required this.onShowOnMap,
+    this.onToggleFavorite,
+    this.favorite = false,
   });
 
   final PlaceSuggestion place;
   final VoidCallback onShowOnMap;
+  final VoidCallback? onToggleFavorite;
+  final bool favorite;
 
   @override
   Widget build(BuildContext context) {
@@ -58,9 +62,20 @@ class TajGoAddressResultTile extends StatelessWidget {
           ),
         ],
       ),
-      trailing: TextButton(
-        onPressed: onShowOnMap,
-        child: const Text('На карте'),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (onToggleFavorite != null)
+            IconButton(
+              tooltip: favorite ? 'Убрать из избранного' : 'В избранное',
+              onPressed: onToggleFavorite,
+              icon: Icon(
+                favorite ? Icons.star_rounded : Icons.star_border_rounded,
+                color: favorite ? TajGoColors.warning : TajGoColors.muted,
+              ),
+            ),
+          TextButton(onPressed: onShowOnMap, child: const Text('На карте')),
+        ],
       ),
       onTap: onShowOnMap,
     );

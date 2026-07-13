@@ -10,6 +10,7 @@ import '../../core/models/tajgo_order.dart';
 import '../../core/services/pricing.dart' as pricing;
 import '../../shared/widgets/tajgo_badge.dart';
 import '../../shared/widgets/tajgo_scope.dart';
+import '../map/models/tajgo_route.dart';
 
 class DemoToolsScreen extends StatefulWidget {
   const DemoToolsScreen({super.key});
@@ -21,6 +22,7 @@ class DemoToolsScreen extends StatefulWidget {
 class _DemoToolsScreenState extends State<DemoToolsScreen> {
   String? _selectedOrderId;
   bool _busy = false;
+  String? _routingProbeResult;
 
   String get _uid => TajGoScope.of(context).authService.currentUser!.uid;
 
@@ -94,6 +96,32 @@ class _DemoToolsScreenState extends State<DemoToolsScreen> {
     );
   }
 
+  Future<void> _probeRoutingProvider() async {
+    setState(() {
+      _busy = true;
+      _routingProbeResult = 'Проверяем маршрут…';
+    });
+    try {
+      final route = await TajGoScope.of(context).routeService.buildRoute(
+        from: const LatLng(40.2833, 69.6222),
+        to: const LatLng(40.2933, 69.6322),
+        mode: RouteMode.bicycle,
+        forceRefresh: true,
+      );
+      if (!mounted) return;
+      setState(
+        () => _routingProbeResult =
+            '${route.qualityLabel} · ${route.providerName} · '
+            '${route.distanceKm.toStringAsFixed(1)} км · '
+            '${route.etaMinutes} мин',
+      );
+    } catch (error) {
+      if (mounted) setState(() => _routingProbeResult = 'Ошибка: $error');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (!kDebugMode) {
@@ -156,6 +184,66 @@ class _DemoToolsScreenState extends State<DemoToolsScreen> {
                         ],
                       ),
                     ),
+                  ),
+                  const SizedBox(height: 14),
+                  AnimatedBuilder(
+                    animation: Listenable.merge([
+                      scope.routeService.health,
+                      scope.routeService.performance,
+                    ]),
+                    builder: (context, _) {
+                      final health = scope.routeService.health.snapshot;
+                      final performance =
+                          scope.routeService.performance.snapshot;
+                      return Card(
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Routing & Map Health',
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text('Статус: ${health.statusLabel}'),
+                              Text('Provider: ${health.providerName}'),
+                              Text(
+                                'Запросы: ${health.requests} · успех: '
+                                '${health.successes} · fallback: ${health.fallbacks}',
+                              ),
+                              Text('Cache hits: ${health.cacheHits}'),
+                              Text(
+                                'Средний route: ${performance.averageRouteMs} мс · '
+                                'search: ${performance.averageSearchMs} мс',
+                              ),
+                              Text(
+                                'Медленные операции: '
+                                '${performance.slowOperations}',
+                              ),
+                              if (health.lastLatency != null)
+                                Text(
+                                  'Последний ответ: '
+                                  '${health.lastLatency!.inMilliseconds} мс',
+                                ),
+                              if (_routingProbeResult != null) ...[
+                                const SizedBox(height: 6),
+                                SelectableText(_routingProbeResult!),
+                              ],
+                              const SizedBox(height: 8),
+                              OutlinedButton.icon(
+                                onPressed: _busy ? null : _probeRoutingProvider,
+                                icon: const Icon(Icons.route_rounded),
+                                label: const Text('Проверить routing provider'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
                   ),
                   const SizedBox(height: 14),
                   _ToolButton(
