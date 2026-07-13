@@ -163,24 +163,36 @@ class CourierRepository {
     double? accuracy,
   }) async {
     final location = GeoPoint(latitude, longitude);
-    final batch = _db.batch();
-    batch.set(_db.collection('couriers').doc(uid), {
+    final privateRef = _db.collection('couriers').doc(uid);
+    final publicRef = _db.collection('courier_public').doc(uid);
+    final coreData = <String, dynamic>{
       'location': location,
+      'locationUpdatedAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    };
+    final telemetryData = <String, dynamic>{
+      ...coreData,
       if (heading != null && heading.isFinite) 'heading': heading,
       if (speed != null && speed.isFinite) 'speed': speed,
       if (accuracy != null && accuracy.isFinite) 'locationAccuracy': accuracy,
-      'locationUpdatedAt': FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
-    batch.set(_db.collection('courier_public').doc(uid), {
-      'location': location,
-      if (heading != null && heading.isFinite) 'heading': heading,
-      if (speed != null && speed.isFinite) 'speed': speed,
-      if (accuracy != null && accuracy.isFinite) 'locationAccuracy': accuracy,
-      'locationUpdatedAt': FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
-    await batch.commit();
+    };
+
+    Future<void> commit(Map<String, dynamic> data) async {
+      final batch = _db.batch();
+      batch.set(privateRef, data, SetOptions(merge: true));
+      batch.set(publicRef, data, SetOptions(merge: true));
+      await batch.commit();
+    }
+
+    try {
+      await commit(telemetryData);
+    } on FirebaseException catch (error) {
+      // Previously deployed rules may not know the optional navigation
+      // telemetry fields yet. Keep live GPS working until the new rules are
+      // deployed, then richer heading/speed data starts flowing automatically.
+      if (error.code != 'permission-denied') rethrow;
+      await commit(coreData);
+    }
   }
 
   Future<void> declineOrder({
