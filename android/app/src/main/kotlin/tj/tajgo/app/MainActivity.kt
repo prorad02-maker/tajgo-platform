@@ -1,4 +1,4 @@
-package com.example.tajgo
+package tj.tajgo.app
 
 import io.flutter.embedding.android.FlutterActivity
 

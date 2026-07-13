@@ -1,46 +1,39 @@
-# TajGo v0.8.0 — следующие шаги владельца
+# TajGo v0.8.1 — следующие шаги владельца
 
 ## Уже готово
 
 - v0.7.0 Customer, Courier, Navigation, Admin/Dispatch и debug-only Demo Tools сохранены.
 - Android launcher name приведён к `TajGo`.
-- Версия проекта подготовлена как `0.8.0+8`.
+- Финальный Android package применён: `tj.tajgo.app`.
+- Версия проекта подготовлена как `0.8.1+9`.
 - Gradle поддерживает локальный release keystore через `android/key.properties`, не раскрывая секреты.
 - Firestore rules закрывают неизвестные коллекции и разделяют customer/courier/admin доступ.
 - Индекс customer orders описан в `firestore.indexes.json`.
 - Подготовлены инструкции по Firebase, signing и финальным иконкам.
 
-## Решения, которые должен подтвердить владелец
+## Ручные действия владельца
 
-### 1. Финальный package
+### 1. Зарегистрировать финальный package в Firebase
 
-Рекомендуемый: `tj.tajgo.app`.
+Gradle namespace/applicationId, Kotlin `MainActivity` и Android runtime-ссылки уже переведены на `tj.tajgo.app`. Текущий `google-services.json` относится к старому `com.example.tajgo` и должен быть заменён файлом из Firebase Console.
 
-Альтернативы: `app.tajgo.delivery`, `tj.tajgo.delivery`.
-
-Сейчас используется `com.example.tajgo`; он не подходит как финальная identity. При подтверждённой смене затрагиваются:
-
-- `android/app/build.gradle.kts` (`applicationId`, `namespace`);
-- package и путь `android/app/src/main/kotlin/.../MainActivity.kt`;
-- `android/app/google-services.json`;
-- Android app registration и SHA fingerprints в Firebase;
-- `userAgentPackageName` в map-экранах;
-- при необходимости Firebase-конфигурация других платформ.
-
-`AndroidManifest.xml` и текущая конфигурация `flutter_launcher_icons` от package напрямую не зависят, но их надо перепроверить после сборки. Смена package создаёт для Android отдельное приложение: установленная версия `com.example.tajgo` не обновится поверх `tj.tajgo.app`, а Firebase Phone Auth не заработает без новой регистрации/config.
+Смена package создаёт для Android отдельное приложение. Установленная версия `com.example.tajgo` не обновится поверх `tj.tajgo.app`: перед установкой нужно вручную удалить старое приложение либо оставить обе версии как отдельные приложения. Локальные данные старого Android package автоматически не переносятся.
 
 ### 2. Firebase Console
 
 Выполнить последовательно по `docs/FIREBASE_PRODUCTION_SETUP.md`:
 
-1. Включить Phone Auth и тестовые номера.
-2. Решить, когда отключать Anonymous fallback.
-3. Зарегистрировать подтверждённый package.
-4. Добавить debug/release SHA-1 и SHA-256.
-5. Скачать подходящий `google-services.json`.
-6. Назначить владельцу `users/{uid}.role = "admin"`.
-7. Проверить отдельные customer/courier/admin аккаунты.
-8. Только после подтверждения задеплоить rules/indexes.
+1. Открыть Firebase Console → Project settings.
+2. Add app → Android.
+3. Указать package `tj.tajgo.app`.
+4. Указать nickname `TajGo Android`.
+5. Добавить debug SHA-1/SHA-256.
+6. После создания release keystore добавить release SHA-1/SHA-256.
+7. Скачать новый `google-services.json`.
+8. Заменить `android/app/google-services.json`.
+9. Выполнить `flutter clean`, `flutter pub get` и `flutter build apk --debug`.
+10. Включить Phone Auth, назначить admin и проверить customer/courier/admin аккаунты.
+11. Только после отдельного подтверждения задеплоить rules/indexes.
 
 ## Как получить настоящий release APK
 
@@ -67,7 +60,7 @@ flutter build apk --release
 - Для клиента передавать только APK с финальным package и release-подписью.
 - Перед передачей записать version/build, SHA-256 файла, дату, Firebase-проект и список известных ограничений.
 - Не отправлять вместе с APK keystore, `key.properties`, Firebase service-account или пароли.
-- Попросить тестера удалить старую сборку, если менялся package/подпись и Android не может установить обновление поверх неё.
+- Перед первой установкой `tj.tajgo.app` удалить старую сборку `com.example.tajgo`, если не требуется сохранять обе версии рядом.
 
 ## Как назначить admin
 
@@ -93,7 +86,7 @@ git worktree add ..\tajgo-v0.7.0 v0.7.0
 
 ## Нельзя делать перед показом
 
-- Не менять `applicationId` частично: Gradle, Kotlin package и Firebase config должны совпасть.
+- Не возвращать `applicationId` назад из-за ожидаемой ошибки старого `google-services.json`; зарегистрировать `tj.tajgo.app` и заменить конфиг.
 - Не выполнять Firebase deploy без ревью и подтверждения владельца.
 - Не раздавать debug-signed `app-release.apk` как production.
 - Не включать Demo Tools или debug-назначение admin в клиентской сборке.

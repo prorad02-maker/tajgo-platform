@@ -233,7 +233,7 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
                   TileLayer(
                     urlTemplate:
                         'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                    userAgentPackageName: 'com.example.tajgo',
+                    userAgentPackageName: 'tj.tajgo.app',
                     maxZoom: 19,
                   ),
                   if (_stage == _Stage.details)

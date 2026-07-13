@@ -1,6 +1,8 @@
 # Firebase production setup для TajGo
 
-Текущий Android `applicationId` и Firebase package: `com.example.tajgo`. Предпочтительный финальный идентификатор — `tj.tajgo.app`, альтернативы — `app.tajgo.delivery` и `tj.tajgo.delivery`. Не менять package в коде до отдельного решения владельца и регистрации соответствующего Android app в Firebase.
+Финальный Android `applicationId` и namespace подтверждены владельцем: `tj.tajgo.app`.
+
+На этапе v0.8.1 исходный `android/app/google-services.json` всё ещё относится к прежнему package `com.example.tajgo`. Это намеренно: Firebase-проект не изменяется автоматически. До получения нового файла Android debug/release build может завершаться ошибкой Google Services о том, что подходящий client для `tj.tajgo.app` не найден.
 
 ## 1. Authentication
 
@@ -14,24 +16,36 @@
 
 ## 2. Android app и fingerprints
 
-1. Зафиксировать финальный `applicationId` владельцем.
-2. В Firebase Project Settings зарегистрировать Android app с точно таким же package. Для нового package это новая Android-регистрация, а не простое переименование старой.
-3. Получить debug SHA-1/SHA-256:
+1. Открыть **Firebase Console → Project settings** текущего проекта TajGo.
+2. Нажать **Add app → Android**.
+3. В поле **Android package name** указать точно `tj.tajgo.app`.
+4. В поле **App nickname** указать `TajGo Android`.
+5. Получить и добавить debug SHA-1/SHA-256:
 
 ```powershell
 keytool -list -v -alias androiddebugkey -keystore "$env:USERPROFILE\.android\debug.keystore" -storepass android -keypass android
 ```
 
-4. Создать release keystore по `docs/ANDROID_RELEASE_SIGNING.md` и получить release SHA-1/SHA-256:
+6. Зарегистрировать приложение и скачать предложенный `google-services.json`.
+7. Создать release keystore по `docs/ANDROID_RELEASE_SIGNING.md`, получить release SHA-1/SHA-256 и позже добавить оба fingerprint в настройки этого же Android app:
 
 ```powershell
 keytool -list -v -keystore "$env:USERPROFILE\.android-keys\tajgo-release-key.jks" -alias tajgo
 ```
 
-5. Добавить debug и release fingerprints в выбранный Firebase Android app.
-6. Скачать новый `google-services.json` именно для выбранного package и проекта.
-7. Заменить `android/app/google-services.json` и проверить, что `client.client_info.android_client_info.package_name` равен Gradle `applicationId`.
-8. Если package изменён, синхронно обновить `namespace`, package/path `MainActivity.kt` и значения `userAgentPackageName` в коде. `firebase_options.dart` менять только осознанной повторной конфигурацией того же Firebase-проекта.
+8. Заменить файл `android/app/google-services.json` новым скачанным файлом.
+9. Проверить, что в новом JSON `client.client_info.android_client_info.package_name` равен `tj.tajgo.app`.
+10. Выполнить чистую сборку:
+
+```powershell
+flutter clean
+flutter pub get
+flutter analyze
+flutter test
+flutter build apk --debug
+```
+
+Не редактировать старый `google-services.json` вручную: простая замена строки package не создаёт Firebase Android app и не добавляет корректный OAuth client. `firebase_options.dart` не требуется менять, пока используется тот же Firebase-проект и добавляется только новая Android-регистрация; при повторном запуске FlutterFire CLI изменения этого файла надо отдельно проверить.
 
 ## 3. Пользователи и роли
 

@@ -106,7 +106,7 @@ class _DispatchMapScreenState extends State<DispatchMapScreen> {
                     TileLayer(
                       urlTemplate:
                           'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                      userAgentPackageName: 'com.example.tajgo',
+                      userAgentPackageName: 'tj.tajgo.app',
                     ),
                     PolylineLayer(polylines: routeLines),
                     MarkerLayer(

@@ -385,7 +385,7 @@ class _OrderMap extends StatelessWidget {
       children: [
         TileLayer(
           urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-          userAgentPackageName: 'com.example.tajgo',
+          userAgentPackageName: 'tj.tajgo.app',
         ),
         if (route != null)
           PolylineLayer(

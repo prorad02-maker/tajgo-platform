@@ -394,7 +394,7 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
                         TileLayer(
                           urlTemplate:
                               'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                          userAgentPackageName: 'com.example.tajgo',
+                          userAgentPackageName: 'tj.tajgo.app',
                           maxZoom: 19,
                         ),
                         PolylineLayer(
