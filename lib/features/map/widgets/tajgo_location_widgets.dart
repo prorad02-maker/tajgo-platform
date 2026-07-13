@@ -10,10 +10,12 @@ class TajGoCurrentLocationMarker extends StatelessWidget {
     super.key,
     this.heading,
     this.navigation = false,
+    this.weakAccuracy = false,
   });
 
   final double? heading;
   final bool navigation;
+  final bool weakAccuracy;
 
   @override
   Widget build(BuildContext context) {
@@ -25,8 +27,11 @@ class TajGoCurrentLocationMarker extends StatelessWidget {
           width: navigation ? 42 : 34,
           height: navigation ? 42 : 34,
           decoration: BoxDecoration(
-            color: Colors.blue.withValues(alpha: 0.14),
+            color: Colors.blue.withValues(alpha: weakAccuracy ? 0.22 : 0.14),
             shape: BoxShape.circle,
+            border: weakAccuracy
+                ? Border.all(color: Colors.blue.withValues(alpha: 0.30))
+                : null,
           ),
         ),
         Container(

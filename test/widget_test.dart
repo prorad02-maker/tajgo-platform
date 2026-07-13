@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:tajgo/core/models/tajgo_order.dart';
 import 'package:tajgo/core/services/pricing.dart';
@@ -14,6 +15,9 @@ import 'package:tajgo/features/map/services/road_route_provider.dart';
 import 'package:tajgo/features/map/services/route_progress_service.dart';
 import 'package:tajgo/features/map/services/routing_config.dart';
 import 'package:tajgo/features/map/utils/route_display_formatter.dart';
+import 'package:tajgo/features/map/utils/map_address_formatter.dart';
+import 'package:tajgo/features/map/utils/new_order_map_layout.dart';
+import 'package:tajgo/features/map/screens/new_order_map_screen.dart';
 import 'package:tajgo/features/map/services/route_service.dart';
 import 'package:tajgo/features/map/services/routing_health_monitor.dart';
 import 'package:tajgo/features/map/services/map_performance_monitor.dart';
@@ -458,5 +462,64 @@ void main() {
     expect(formatRouteQuality(fallback), 'Маршрут предварительный');
     expect(formatRouteQuality(providerError), 'Маршрут предварительный');
     expect(formatRouteQuality(null), 'Маршрут предварительный');
+  });
+
+  test('Plus Code никогда не становится главным адресом', () {
+    final plusCode = formatMapAddress('7JP6+86G, Худжанд');
+    expect(plusCode.primary, 'Точка на карте');
+    expect(plusCode.secondary, contains('7JP6+86G'));
+
+    final street = formatMapAddress('ул. Исмоили Сомони, 54, Худжанд');
+    expect(street.primary, 'ул. Исмоили Сомони');
+    expect(street.secondary, '54, Худжанд');
+
+    final current = formatMapAddress('Точка на карте', currentLocation: true);
+    expect(current.primary, 'Ваше местоположение');
+    expect(current.secondary, 'Худжанд');
+  });
+
+  test('collapsed карта занимает больше половины экрана 360x800', () {
+    const size = Size(360, 800);
+    expect(NewOrderMapLayout.panelHeight(size, details: false), 272);
+    expect(
+      NewOrderMapLayout.visibleMapRatio(size, details: false),
+      greaterThanOrEqualTo(0.5),
+    );
+  });
+
+  testWidgets('collapsed panel не переполняется на 360x800 и text scale 1.3', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    Future<void> pump(Brightness brightness) => tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(brightness: brightness),
+        home: MediaQuery(
+          data: MediaQueryData(
+            size: const Size(360, 800),
+            textScaler: const TextScaler.linear(1.3),
+            platformBrightness: brightness,
+          ),
+          child: Scaffold(
+            body: Align(
+              alignment: Alignment.bottomCenter,
+              child: buildNewOrderPointPanelForTest(),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await pump(Brightness.light);
+    expect(tester.takeException(), isNull);
+    expect(find.text('Подтвердить точку забора'), findsOneWidget);
+
+    await pump(Brightness.dark);
+    expect(tester.takeException(), isNull);
+    expect(find.text('Подтвердить точку забора'), findsOneWidget);
   });
 }
