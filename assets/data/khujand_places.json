@@ -1,0 +1,42 @@
+[
+  {
+    "id": "demo_center",
+    "title": "Демо: Центр Худжанда",
+    "shortTitle": "Центр",
+    "aliases": ["центр", "центр худжанда", "center", "khujand center"],
+    "address": "Демо-точка · центр Худжанда",
+    "lat": 40.2833,
+    "lng": 69.6222,
+    "category": "demo"
+  },
+  {
+    "id": "demo_north",
+    "title": "Демо: Север Худжанда",
+    "shortTitle": "Север города",
+    "aliases": ["север", "север города", "north"],
+    "address": "Демо-точка · север Худжанда",
+    "lat": 40.2933,
+    "lng": 69.6222,
+    "category": "demo"
+  },
+  {
+    "id": "demo_south",
+    "title": "Демо: Юг Худжанда",
+    "shortTitle": "Юг города",
+    "aliases": ["юг", "юг города", "south"],
+    "address": "Демо-точка · юг Худжанда",
+    "lat": 40.2733,
+    "lng": 69.6222,
+    "category": "demo"
+  },
+  {
+    "id": "demo_east",
+    "title": "Демо: Восток Худжанда",
+    "shortTitle": "Восток города",
+    "aliases": ["восток", "восток города", "east"],
+    "address": "Демо-точка · восток Худжанда",
+    "lat": 40.2833,
+    "lng": 69.6372,
+    "category": "demo"
+  }
+]

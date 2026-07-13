@@ -4,6 +4,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:tajgo/core/models/tajgo_order.dart';
 import 'package:tajgo/core/services/pricing.dart';
+import 'package:tajgo/features/map/models/place_suggestion.dart';
+import 'package:tajgo/features/map/services/address_normalizer.dart';
 
 void main() {
   test('неизвестный статус заказа считается ожидающим', () {
@@ -62,5 +64,32 @@ void main() {
     expect(int.tryParse(code), isNotNull);
     expect(withinActionRadius(2), isTrue);
     expect(withinActionRadius(2.01), isFalse);
+  });
+
+  test('поисковый запрос адреса нормализуется', () {
+    const normalizer = AddressNormalizer();
+    expect(normalizer.normalizeQuery('  УЛ.   Сомони '), 'улица сомони');
+    expect(normalizer.normalizeQuery('пр Сомони'), 'проспект сомони');
+    expect(normalizer.normalizeQuery('д 12'), 'дом 12');
+    expect(normalizer.normalizeQuery('KHujand center'), 'худжанд center');
+  });
+
+  test('локальные aliases повышают соответствие места', () {
+    const normalizer = AddressNormalizer();
+    const place = PlaceSuggestion(
+      id: 'p1',
+      title: 'Панчшанбе',
+      subtitle: 'Ориентир',
+      shortTitle: 'Панчшанбе',
+      address: 'Худжанд',
+      lat: 40.28,
+      lng: 69.62,
+      source: 'local',
+      confidence: 1,
+      category: 'landmark',
+      aliases: ['панч', 'базар панчшанбе'],
+    );
+    expect(normalizer.scoreMatch('панч', place), 1);
+    expect(normalizer.buildShortAddress(place), 'Панчшанбе');
   });
 }

@@ -184,6 +184,6 @@ class TajGoLocationService {
   }
 
   String _label(double latitude, double longitude) {
-    return '${latitude.toStringAsFixed(5)}, ${longitude.toStringAsFixed(5)}';
+    return 'Точка на карте · ${latitude.toStringAsFixed(4)}, ${longitude.toStringAsFixed(4)}';
   }
 }
