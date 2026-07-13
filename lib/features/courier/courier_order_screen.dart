@@ -166,6 +166,17 @@ class _CourierOrderScreenState extends State<CourierOrderScreen> {
     return ((distanceKm / assumedKmh) * 60).ceil().clamp(1, 999);
   }
 
+  double? _bearingTo(LatLng? target) {
+    final position = _position;
+    if (position == null || target == null) return null;
+    return Geolocator.bearingBetween(
+      position.latitude,
+      position.longitude,
+      target.latitude,
+      target.longitude,
+    );
+  }
+
   Future<void> _openNavigator(LatLng target) async {
     final latitude = target.latitude;
     final longitude = target.longitude;
@@ -290,6 +301,7 @@ class _CourierOrderScreenState extends State<CourierOrderScreen> {
           final target = order.status == OrderStatus.accepted ? from : to;
           final targetDistance = _distanceTo(target);
           final etaMinutes = _etaMinutes(targetDistance);
+          final targetBearing = _bearingTo(target);
           final fitPoints = <LatLng>[?_position, ?from, ?to];
           _fitMap(fitPoints);
           return Column(
@@ -407,6 +419,18 @@ class _CourierOrderScreenState extends State<CourierOrderScreen> {
                         ),
                       ),
                     ),
+                    if (target != null)
+                      Positioned(
+                        left: 64,
+                        right: 64,
+                        top: MediaQuery.paddingOf(context).top + 12,
+                        child: _NavigationInstruction(
+                          status: order.status,
+                          bearing: targetBearing,
+                          distanceKm: targetDistance,
+                          etaMinutes: etaMinutes,
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -657,20 +681,6 @@ class _AddressPin extends StatelessWidget {
   );
 }
 
-class _CourierDot extends StatelessWidget {
-  const _CourierDot();
-
-  @override
-  Widget build(BuildContext context) => Container(
-    decoration: BoxDecoration(
-      color: Colors.blue,
-      shape: BoxShape.circle,
-      border: Border.all(color: Colors.white, width: 4),
-      boxShadow: const [BoxShadow(color: Color(0x33000000), blurRadius: 8)],
-    ),
-  );
-}
-
 class _CourierDirectionMarker extends StatelessWidget {
   const _CourierDirectionMarker({
     required this.heading,
@@ -705,6 +715,92 @@ class _CourierDirectionMarker extends StatelessWidget {
             color: Colors.white,
             size: 26,
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _NavigationInstruction extends StatelessWidget {
+  const _NavigationInstruction({
+    required this.status,
+    required this.bearing,
+    required this.distanceKm,
+    required this.etaMinutes,
+  });
+
+  final OrderStatus status;
+  final double? bearing;
+  final double? distanceKm;
+  final int? etaMinutes;
+
+  String get _targetLabel => status == OrderStatus.accepted
+      ? 'Направляйтесь к точке забора'
+      : 'Направляйтесь к клиенту';
+
+  String get _direction {
+    final value = bearing;
+    if (value == null) return 'Определяем направление';
+    const labels = [
+      'на север',
+      'на северо-восток',
+      'на восток',
+      'на юго-восток',
+      'на юг',
+      'на юго-запад',
+      'на запад',
+      'на северо-запад',
+    ];
+    final normalized = (value + 360) % 360;
+    return labels[((normalized + 22.5) ~/ 45) % 8];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final angle = ((bearing ?? 0) * 3.141592653589793) / 180;
+    return Material(
+      color: TajGoColors.ink.withValues(alpha: 0.92),
+      elevation: 6,
+      borderRadius: BorderRadius.circular(16),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Row(
+          children: [
+            Transform.rotate(
+              angle: angle,
+              child: const Icon(
+                Icons.navigation_rounded,
+                color: TajGoColors.lime,
+                size: 30,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _targetLabel,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  Text(
+                    '$_direction'
+                    '${distanceKm == null ? '' : ' · ${distanceKm!.toStringAsFixed(1)} км'}'
+                    '${etaMinutes == null ? '' : ' · ≈ $etaMinutes мин'}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );
