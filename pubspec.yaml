@@ -105,6 +105,5 @@ flutter_launcher_icons:
   ios: true
   image_path: assets/brand/app_icon.png
   remove_alpha_ios: true
-  adaptive_icon_background: assets/brand/app_icon_background.png
-  adaptive_icon_foreground: assets/brand/app_icon_foreground.png
-  adaptive_icon_monochrome: assets/brand/app_icon_monochrome.png
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: assets/brand/app_icon.png
