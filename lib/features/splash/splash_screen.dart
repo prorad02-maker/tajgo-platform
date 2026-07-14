@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/constants/tajgo_colors.dart';
-import '../../features/role/role_screen.dart';
-import '../../shared/widgets/tajgo_scope.dart';
+import '../startup/app_router.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -48,20 +47,11 @@ class _SplashScreenState extends State<SplashScreen>
   }
 
   Future<void> _bootstrap() async {
-    final scope = TajGoScope.of(context);
     final minimumSplashTime = Future<void>.delayed(
       const Duration(milliseconds: 1400),
     );
     try {
-      setState(() => _status = 'Входим в TajGo…');
-      final user = await scope.authService.signInAnonymouslyIfNeeded().timeout(
-        const Duration(seconds: 10),
-      );
-      if (!mounted) return;
-      setState(() => _status = 'Готовим профиль…');
-      await scope.userRepository
-          .ensureUser(uid: user.uid)
-          .timeout(const Duration(seconds: 10));
+      setState(() => _status = 'Готовим TajGo…');
       _bootstrapReady = true;
       await minimumSplashTime;
       await _approachNinetyPercent;
@@ -75,7 +65,7 @@ class _SplashScreenState extends State<SplashScreen>
       );
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute<void>(builder: (_) => const RoleScreen()),
+        MaterialPageRoute<void>(builder: (_) => const AppStartupRouter()),
       );
     } catch (_) {
       _failed = true;

@@ -448,6 +448,18 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
       final scope = TajGoScope.of(context);
       final user = scope.authService.currentUser!;
       final profile = await scope.userRepository.getUser(user.uid);
+      if (!kDebugMode && profile?.phoneVerified != true) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Для реального заказа подтвердите номер телефона в профиле.',
+              ),
+            ),
+          );
+        }
+        return;
+      }
       final km =
           _route?.distanceKm ??
           pricing.distanceKm(_from!.toLatLng(), _to!.toLatLng());
@@ -463,6 +475,7 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
         distanceKm: km,
         etaMinutes: pricing.etaMinutes(km),
         comment: _comment.text.trim().isEmpty ? null : _comment.text.trim(),
+        isTestOrder: kDebugMode && user.isAnonymous,
       );
       if (mounted) {
         Navigator.pushReplacement(

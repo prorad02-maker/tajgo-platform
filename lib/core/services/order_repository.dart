@@ -19,6 +19,7 @@ class OrderRepository {
     num? distanceKm,
     int? etaMinutes,
     String? comment,
+    bool isTestOrder = false,
   }) async {
     final ref = _db.collection('orders').doc();
     final order = TajGoOrder(
@@ -38,6 +39,7 @@ class OrderRepository {
       etaMinutes: etaMinutes,
       confirmationCode: generateConfirmationCode(),
       comment: comment,
+      isTestOrder: isTestOrder,
     );
     await ref.set(order.toCreateMap());
     return ref.id;

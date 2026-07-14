@@ -55,6 +55,14 @@ class TajGoOrderCard extends StatelessWidget {
                       style: const TextStyle(fontWeight: FontWeight.w800),
                     ),
                   ),
+                  if (order.isTestOrder) ...[
+                    const TajGoBadge(
+                      text: 'ТЕСТ',
+                      background: TajGoColors.warning,
+                      foreground: TajGoColors.ink,
+                    ),
+                    const SizedBox(width: 6),
+                  ],
                   TajGoBadge(
                     text: '${order.price} ${order.currency}',
                     background: TajGoColors.mint,

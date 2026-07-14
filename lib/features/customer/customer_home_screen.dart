@@ -7,7 +7,10 @@ import '../../shared/widgets/tajgo_scope.dart';
 import '../../shared/widgets/tajgo_badge.dart';
 import '../../shared/widgets/tajgo_order_history_tile.dart';
 import '../admin/admin_home_screen.dart';
+import '../account/account_profile_screen.dart';
+import '../auth/phone_auth_screen.dart';
 import '../courier/courier_home_screen.dart';
+import '../courier/courier_application_status_screen.dart';
 import '../demo/demo_tools_screen.dart';
 import '../map/screens/new_order_map_screen.dart';
 import 'order_tracking_screen.dart';
@@ -15,11 +18,65 @@ import 'order_tracking_screen.dart';
 class CustomerHomeScreen extends StatelessWidget {
   const CustomerHomeScreen({super.key});
 
-  void _openOrder(BuildContext context, [String type = 'package']) {
+  Future<void> _openOrder(
+    BuildContext context, [
+    String type = 'package',
+  ]) async {
+    final scope = TajGoScope.of(context);
+    final firebaseUser = scope.authService.currentUser;
+    final profile = firebaseUser == null
+        ? null
+        : await scope.userRepository.getUser(firebaseUser.uid);
+    if (!context.mounted) return;
+    if (firebaseUser == null ||
+        (!kDebugMode && profile?.phoneVerified != true)) {
+      await Navigator.push(
+        context,
+        MaterialPageRoute<void>(
+          builder: (_) => const PhoneAuthScreen(allowAnonymousFallback: false),
+        ),
+      );
+      return;
+    }
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => NewOrderMapScreen(initialType: type)),
     );
+  }
+
+  Future<void> _openCourierIntent(BuildContext context) async {
+    final scope = TajGoScope.of(context);
+    final uid = scope.authService.currentUser!.uid;
+    final user = await scope.userRepository.getUser(uid);
+    if (!context.mounted) return;
+    if (user?.courierApproved == true) {
+      try {
+        await scope.accountModeService.switchToCourier();
+        if (!context.mounted) return;
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute<void>(builder: (_) => const CourierHomeScreen()),
+          (_) => false,
+        );
+      } catch (_) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Не удалось открыть режим курьера. Попробуйте ещё раз.',
+            ),
+          ),
+        );
+      }
+    } else {
+      Navigator.push(
+        context,
+        MaterialPageRoute<void>(
+          builder: (_) => CourierApplicationStatusScreen(
+            status: user?.courierStatus ?? 'none',
+          ),
+        ),
+      );
+    }
   }
 
   void _showSoon(BuildContext context) {
@@ -46,6 +103,11 @@ class CustomerHomeScreen extends StatelessWidget {
         padding: EdgeInsets.zero,
         children: [
           const _PlatformHeader(),
+          if (scope.authService.currentUser?.isAnonymous == true && kDebugMode)
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 12, 16, 0),
+              child: Chip(label: Text('Тест · демо-вход')),
+            ),
           Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -170,48 +232,73 @@ class CustomerHomeScreen extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 16),
-                Card(
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(18),
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const CourierHomeScreen(),
+                FutureBuilder(
+                  future: scope.userRepository.getUser(uid),
+                  builder: (context, snapshot) {
+                    final user = snapshot.data;
+                    final (title, subtitle) = switch (user?.courierStatus) {
+                      'pending' => (
+                        'Заявка на проверке',
+                        'Клиентский режим доступен без ограничений',
                       ),
-                    ),
-                    child: const Padding(
-                      padding: EdgeInsets.all(18),
-                      child: Row(
-                        children: [
-                          _IconBubble(
-                            icon: Icons.delivery_dining_rounded,
-                            size: 56,
-                            iconSize: 34,
-                          ),
-                          SizedBox(width: 14),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Стать курьером',
-                                  style: TextStyle(
-                                    fontSize: 19,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                                Text(
-                                  'Зарабатывайте с TajGo — свободный график',
-                                  style: TextStyle(color: TajGoColors.muted),
-                                ),
-                              ],
-                            ),
-                          ),
-                          Icon(Icons.chevron_right_rounded),
-                        ],
+                      'rejected' => (
+                        'Заявка требует внимания',
+                        'Откройте статус и посмотрите следующий шаг',
                       ),
-                    ),
-                  ),
+                      'suspended' => (
+                        'Режим курьера приостановлен',
+                        'Откройте статус заявки',
+                      ),
+                      'approved' => (
+                        'Перейти в режим курьера',
+                        'Принимать заказы и выходить на линию',
+                      ),
+                      _ => (
+                        'Стать курьером',
+                        'Зарабатывайте с TajGo — свободный график',
+                      ),
+                    };
+                    return Card(
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(18),
+                        onTap: () => _openCourierIntent(context),
+                        child: Padding(
+                          padding: const EdgeInsets.all(18),
+                          child: Row(
+                            children: [
+                              const _IconBubble(
+                                icon: Icons.delivery_dining_rounded,
+                                size: 56,
+                                iconSize: 34,
+                              ),
+                              const SizedBox(width: 14),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      title,
+                                      style: const TextStyle(
+                                        fontSize: 19,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                    Text(
+                                      subtitle,
+                                      style: const TextStyle(
+                                        color: TajGoColors.muted,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const Icon(Icons.chevron_right_rounded),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
                 ),
                 FutureBuilder(
                   future: scope.userRepository.getUser(uid),
@@ -322,9 +409,29 @@ class _PlatformHeader extends StatelessWidget {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          '📍 Худжанд',
-          style: TextStyle(color: Colors.white70, fontWeight: FontWeight.w700),
+        Row(
+          children: [
+            const Expanded(
+              child: Text(
+                '📍 Худжанд',
+                style: TextStyle(
+                  color: Colors.white70,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            IconButton(
+              tooltip: 'Профиль',
+              color: Colors.white,
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) => const CustomerProfileScreen(),
+                ),
+              ),
+              icon: const Icon(Icons.account_circle_rounded),
+            ),
+          ],
         ),
         const SizedBox(height: 10),
         Text(

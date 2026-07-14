@@ -66,6 +66,7 @@ class TajGoOrder {
     this.manuallyCompletedBy,
     this.adminNote,
     this.comment,
+    this.isTestOrder = false,
   });
 
   final String id,
@@ -79,6 +80,7 @@ class TajGoOrder {
   final String? courierId;
   final OrderStatus status;
   final num price;
+  final bool isTestOrder;
   final num? distanceKm;
   final int? etaMinutes;
   final GeoPoint? fromLocation, toLocation;
@@ -134,6 +136,7 @@ class TajGoOrder {
       manuallyCompletedBy: data['manuallyCompletedBy'] as String?,
       adminNote: data['adminNote'] as String?,
       comment: data['comment'] as String?,
+      isTestOrder: data['isTestOrder'] as bool? ?? false,
     );
   }
 
@@ -153,6 +156,7 @@ class TajGoOrder {
     if (distanceKm != null) 'distanceKm': distanceKm,
     if (etaMinutes != null) 'etaMinutes': etaMinutes,
     if (comment != null && comment!.isNotEmpty) 'comment': comment,
+    if (isTestOrder) 'isTestOrder': true,
     'declinedBy': <String>[],
     'createdAt': FieldValue.serverTimestamp(),
     'updatedAt': FieldValue.serverTimestamp(),

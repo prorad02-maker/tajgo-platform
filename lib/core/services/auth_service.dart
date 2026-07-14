@@ -1,6 +1,9 @@
 import 'dart:async';
 
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
+
+const bool allowAnonymousDemo = kDebugMode;
 
 class AuthService {
   AuthService(this._auth);
@@ -9,8 +12,12 @@ class AuthService {
 
   User? get currentUser => _auth.currentUser;
   Stream<User?> get authStateChanges => _auth.authStateChanges();
+  Future<void> signOut() => _auth.signOut();
 
   Future<User> signInAnonymouslyIfNeeded() async {
+    if (!allowAnonymousDemo) {
+      throw StateError('Тестовый вход недоступен в release-сборке.');
+    }
     final existing = _auth.currentUser;
     if (existing != null) return existing;
     final credential = await _auth.signInAnonymously();
@@ -23,12 +30,13 @@ class AuthService {
 
   Future<PhoneCodeSession> requestPhoneCode({
     required String phoneNumber,
-    Future<void> Function()? onAutoVerified,
+    int? forceResendingToken,
   }) async {
     final completer = Completer<PhoneCodeSession>();
     try {
       await _auth.verifyPhoneNumber(
         phoneNumber: phoneNumber,
+        forceResendingToken: forceResendingToken,
         timeout: const Duration(seconds: 60),
         verificationCompleted: (credential) async {
           try {
@@ -36,7 +44,10 @@ class AuthService {
             if (!completer.isCompleted) {
               completer.complete(PhoneCodeSession.autoVerified(user));
             }
-            await onAutoVerified?.call();
+          } on AccountConflictFailure catch (error, stackTrace) {
+            if (!completer.isCompleted) {
+              completer.completeError(error, stackTrace);
+            }
           } on FirebaseAuthException catch (error, stackTrace) {
             if (!completer.isCompleted) {
               completer.completeError(
@@ -108,12 +119,12 @@ class AuthService {
           return user;
         }
       } on FirebaseAuthException catch (error) {
-        if (error.code != 'credential-already-in-use' &&
-            error.code != 'provider-already-linked') {
+        if (error.code == 'credential-already-in-use') {
+          throw AccountConflictFailure(credential);
+        }
+        if (error.code != 'provider-already-linked') {
           rethrow;
         }
-        // The phone already belongs to an account. Use that account instead
-        // of creating a duplicate identity.
       }
     }
     final signedIn = await _auth.signInWithCredential(credential);
@@ -126,6 +137,28 @@ class AuthService {
     }
     return user;
   }
+
+  Future<User> signInToExistingAccount(PhoneAuthCredential credential) async {
+    try {
+      final result = await _auth.signInWithCredential(credential);
+      final user = result.user;
+      if (user == null) {
+        throw const PhoneAuthFailure(
+          code: 'missing-user',
+          message: 'Не удалось войти в существующий аккаунт.',
+        );
+      }
+      return user;
+    } on FirebaseAuthException catch (error) {
+      throw PhoneAuthFailure.fromFirebase(error);
+    }
+  }
+}
+
+class AccountConflictFailure implements Exception {
+  const AccountConflictFailure(this.credential);
+
+  final PhoneAuthCredential credential;
 }
 
 class PhoneCodeSession {
@@ -156,13 +189,14 @@ class PhoneAuthFailure implements Exception {
     final message = switch (error.code) {
       'invalid-phone-number' =>
         'Проверьте номер. Нужен формат +992 XX XXX XX XX.',
-      'invalid-verification-code' => 'Неверный SMS-код.',
+      'invalid-verification-code' =>
+        'Неверный код. Проверьте SMS и попробуйте ещё раз.',
       'session-expired' => 'Срок действия кода истёк. Запросите новый.',
-      'too-many-requests' ||
-      'quota-exceeded' => 'Слишком много попыток. Попробуйте позже.',
-      'network-request-failed' => 'Нет связи. Проверьте интернет.',
+      'too-many-requests' || 'quota-exceeded' =>
+        'Слишком много попыток. Подождите немного и попробуйте снова.',
+      'network-request-failed' => 'Нет связи. Проверьте интернет и повторите.',
       'operation-not-allowed' =>
-        'Phone Auth ещё не включён в Firebase Console.',
+        'Вход по SMS временно недоступен. Попробуйте позже.',
       _ => error.message ?? 'Ошибка авторизации. Попробуйте ещё раз.',
     };
     return PhoneAuthFailure(code: error.code, message: message);
@@ -173,4 +207,16 @@ class PhoneAuthFailure implements Exception {
 
   @override
   String toString() => message;
+}
+
+enum AuthLinkDecision { linkAnonymous, signIn, conflict }
+
+AuthLinkDecision authLinkDecision({
+  required bool isAnonymous,
+  String? firebaseErrorCode,
+}) {
+  if (isAnonymous && firebaseErrorCode == 'credential-already-in-use') {
+    return AuthLinkDecision.conflict;
+  }
+  return isAnonymous ? AuthLinkDecision.linkAnonymous : AuthLinkDecision.signIn;
 }

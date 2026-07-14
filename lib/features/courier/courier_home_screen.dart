@@ -7,6 +7,7 @@ import 'package:geolocator/geolocator.dart';
 import '../../core/constants/tajgo_colors.dart';
 import '../../core/models/tajgo_courier.dart';
 import '../../core/models/tajgo_order.dart';
+import '../../core/models/app_user.dart';
 import '../map/services/tajgo_location_service.dart';
 import '../../shared/widgets/tajgo_action_button.dart';
 import '../../shared/widgets/tajgo_order_card.dart';
@@ -15,6 +16,8 @@ import '../../shared/widgets/tajgo_scope.dart';
 import '../../shared/widgets/tajgo_stat_card.dart';
 import '../../shared/widgets/tajgo_status_pill.dart';
 import 'courier_order_screen.dart';
+import 'courier_application_status_screen.dart';
+import '../account/account_profile_screen.dart';
 
 class CourierHomeScreen extends StatefulWidget {
   const CourierHomeScreen({super.key});
@@ -67,6 +70,18 @@ class _CourierHomeScreenState extends State<CourierHomeScreen>
   Future<void> _ensureCourierProfile() async {
     final scope = TajGoScope.of(context);
     final user = await scope.userRepository.getUser(_uid);
+    if (user?.courierApproved != true) {
+      if (mounted) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute<void>(
+            builder: (_) => CourierApplicationStatusScreen(
+              status: user?.courierStatus ?? CourierStatus.none,
+            ),
+          ),
+        );
+      }
+      return;
+    }
     await scope.courierRepository.ensureCourierProfile(
       uid: _uid,
       phoneNumber: user?.phoneNumber,
@@ -675,6 +690,17 @@ class _CourierHeader extends StatelessWidget {
                 'TajGo Курьер · 📍 Худжанд',
                 style: TextStyle(color: Colors.white70, fontSize: 13),
               ),
+            ),
+            IconButton(
+              tooltip: 'Профиль',
+              color: Colors.white,
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) => const CourierProfileScreen(),
+                ),
+              ),
+              icon: const Icon(Icons.account_circle_rounded),
             ),
             TajGoStatusPill(online: online),
           ],

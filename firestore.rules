@@ -32,30 +32,104 @@ service cloud.firestore {
     }
 
     match /users/{uid} {
+      function accountFieldsAreWellFormed(data) {
+        let roles = data.get('roles', ['customer']);
+        let status = data.get('courierStatus', 'none');
+        let mode = data.get('lastMode', 'customer');
+        return roles is list
+          && roles.hasOnly(['customer', 'courier'])
+          && 'customer' in roles
+          && status in [
+            'none', 'draft', 'pending', 'approved', 'rejected', 'suspended'
+          ]
+          && mode in ['customer', 'courier']
+          && data.get('phoneVerified', false) == (authPhone() != null)
+          && data.get('profileComplete', false) is bool;
+      }
+
+      function hasLegacyCourierProof(uid) {
+        return resource.data.get('role', 'customer') == 'courier'
+          || exists(/databases/$(database)/documents/couriers/$(uid));
+      }
+
+      function ownerRolesAreValid(uid) {
+        let before = resource.data.get('roles', ['customer']);
+        let after = request.resource.data.get('roles', ['customer']);
+        return after == before
+          || (hasLegacyCourierProof(uid)
+            && after.hasOnly(['customer', 'courier'])
+            && 'customer' in after
+            && 'courier' in after);
+      }
+
+      function ownerCourierStatusIsValid(uid) {
+        let before = resource.data.get('courierStatus', 'none');
+        let after = request.resource.data.get('courierStatus', 'none');
+        return after == before
+          || (before == 'none' && after == 'draft')
+          || (hasLegacyCourierProof(uid) && after == 'approved');
+      }
+
+      function ownerModeAndLegacyRoleAreValid() {
+        let mode = request.resource.data.get('lastMode', 'customer');
+        let status = request.resource.data.get('courierStatus', 'none');
+        let roles = request.resource.data.get('roles', ['customer']);
+        let beforeRole = resource.data.get('role', 'customer');
+        let afterRole = request.resource.data.get('role', 'customer');
+        let courierModeAllowed = status == 'approved' && 'courier' in roles;
+        return (mode == 'customer' || courierModeAllowed)
+          && (beforeRole == 'admin'
+            ? afterRole == 'admin'
+            : (afterRole == 'customer'
+              || (afterRole == 'courier' && courierModeAllowed)));
+      }
+
       allow get: if owns(uid) || isAdmin();
       allow list: if isAdmin();
 
       allow create: if owns(uid)
         && request.resource.data.uid == uid
         && request.resource.data.role == 'customer'
+        && request.resource.data.get('roles', ['customer']).hasOnly([
+          'customer'
+        ])
+        && request.resource.data.get('lastMode', 'customer') == 'customer'
+        && request.resource.data.get('courierStatus', 'none') in [
+          'none', 'draft'
+        ]
+        && accountFieldsAreWellFormed(request.resource.data)
         && phoneMatchesAuth(request.resource.data)
         && request.resource.data.createdAt == request.time
         && request.resource.data.updatedAt == request.time;
 
-      allow update: if owns(uid)
+      allow update: if (owns(uid)
         && request.resource.data.uid == resource.data.uid
-        && request.resource.data.role == resource.data.role
         && request.resource.data.createdAt == resource.data.createdAt
         && phoneMatchesAuth(request.resource.data)
+        && accountFieldsAreWellFormed(request.resource.data)
+        && ownerRolesAreValid(uid)
+        && ownerCourierStatusIsValid(uid)
+        && ownerModeAndLegacyRoleAreValid()
         && request.resource.data.updatedAt == request.time
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'phoneNumber',
           'displayName',
           'name',
+          'photoUrl',
+          'roles',
+          'lastMode',
+          'courierStatus',
+          'phoneVerified',
+          'profileComplete',
+          'targetRole',
+          'role',
           'city',
           'language',
           'updatedAt'
-        ]);
+        ])) || (isAdmin()
+          && request.resource.data.uid == resource.data.uid
+          && request.resource.data.createdAt == resource.data.createdAt
+          && request.resource.data.updatedAt == request.time);
 
       allow delete: if false;
     }
@@ -251,6 +325,8 @@ service cloud.firestore {
             == resource.data.get('confirmationCode', null)
           && request.resource.data.get('comment', null)
             == resource.data.get('comment', null)
+          && request.resource.data.get('isTestOrder', false)
+            == resource.data.get('isTestOrder', false)
           && request.resource.data.createdAt == resource.data.createdAt;
       }
 
@@ -409,6 +485,8 @@ service cloud.firestore {
         && request.resource.data.price >= 0
         && request.resource.data.currency == 'TJS'
         && request.resource.data.get('courierId', null) == null
+        && (authPhone() != null
+          || request.resource.data.get('isTestOrder', false) == true)
         && request.resource.data.createdAt == request.time
         && request.resource.data.updatedAt == request.time
         && request.resource.data.keys().hasOnly([
@@ -427,6 +505,7 @@ service cloud.firestore {
           'distanceKm',
           'etaMinutes',
           'comment',
+          'isTestOrder',
           'declinedBy',
           'createdAt',
           'updatedAt'

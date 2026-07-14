@@ -5,6 +5,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:tajgo/core/models/tajgo_order.dart';
+import 'package:tajgo/core/models/app_user.dart';
+import 'package:tajgo/core/services/account_migration_service.dart';
+import 'package:tajgo/core/services/account_mode_service.dart';
+import 'package:tajgo/core/services/auth_service.dart';
 import 'package:tajgo/core/services/pricing.dart';
 import 'package:tajgo/features/map/models/place_suggestion.dart';
 import 'package:tajgo/features/map/models/tajgo_route.dart';
@@ -24,8 +28,150 @@ import 'package:tajgo/features/map/services/route_service.dart';
 import 'package:tajgo/features/map/services/routing_health_monitor.dart';
 import 'package:tajgo/features/map/services/map_performance_monitor.dart';
 import 'package:tajgo/features/map/services/delivery_map_intelligence_service.dart';
+import 'package:tajgo/features/auth/phone_auth_screen.dart';
+import 'package:tajgo/features/startup/intent_selection_screen.dart';
+import 'package:tajgo/features/startup/startup_decision.dart';
 
 void main() {
+  test('legacy customer account migrates without deleting fields', () {
+    final patch = buildLegacyAccountPatch({
+      'role': 'customer',
+      'activeOrderId': 'order-1',
+      'rating': 4.9,
+    }, courierExists: false);
+    expect(patch['roles'], ['customer']);
+    expect(patch['courierStatus'], CourierStatus.none);
+    expect(patch.containsKey('activeOrderId'), isFalse);
+    expect(patch.containsKey('rating'), isFalse);
+  });
+
+  test('legacy courier account is approved on the same uid', () {
+    final patch = buildLegacyAccountPatch({
+      'role': 'customer',
+      'earnings': 100,
+    }, courierExists: true);
+    expect(patch['roles'], ['customer', 'courier']);
+    expect(patch['courierStatus'], CourierStatus.approved);
+    expect(patch.containsKey('earnings'), isFalse);
+
+    final user = AppUser.fromMap({
+      ...patch,
+      'profileComplete': true,
+    }, uid: 'u1');
+    expect(user.uid, 'u1');
+    expect(resolveAccountMode(user), ResolvedAccountMode.courier);
+
+    final partiallyMigrated = buildLegacyAccountPatch({
+      'role': 'customer',
+      'roles': ['customer'],
+    }, courierExists: true);
+    expect(partiallyMigrated['roles'], ['customer', 'courier']);
+  });
+
+  test('startup router respects profile completion, mode and approval', () {
+    expect(
+      resolveStartupDestination(authenticated: false),
+      StartupDestination.intent,
+    );
+    expect(
+      resolveStartupDestination(authenticated: true),
+      StartupDestination.profileCompletion,
+    );
+
+    AppUser user({required String mode, required String status}) =>
+        AppUser.fromMap({
+          'displayName': 'Фаррух',
+          'profileComplete': true,
+          'roles': ['customer', if (status == 'approved') 'courier'],
+          'lastMode': mode,
+          'courierStatus': status,
+        }, uid: 'same-uid');
+
+    expect(
+      resolveStartupDestination(
+        authenticated: true,
+        profile: user(mode: 'customer', status: 'none'),
+      ),
+      StartupDestination.customerHome,
+    );
+    expect(
+      resolveStartupDestination(
+        authenticated: true,
+        profile: user(mode: 'courier', status: 'approved'),
+      ),
+      StartupDestination.courierHome,
+    );
+    expect(
+      resolveStartupDestination(
+        authenticated: true,
+        profile: user(mode: 'courier', status: 'pending'),
+      ),
+      StartupDestination.customerHome,
+    );
+  });
+
+  test('phone normalization and anonymous-link policy are safe', () {
+    expect(normalizeTajikPhone('+992 92 123 45 67'), '+992921234567');
+    expect(normalizeTajikPhone('92123'), isNull);
+    expect(authLinkDecision(isAnonymous: true), AuthLinkDecision.linkAnonymous);
+    expect(
+      authLinkDecision(
+        isAnonymous: true,
+        firebaseErrorCode: 'credential-already-in-use',
+      ),
+      AuthLinkDecision.conflict,
+    );
+  });
+
+  test('new account model keeps modes on the same uid', () {
+    final user = AppUser.fromMap({
+      'phoneNumber': '+992921234567',
+      'displayName': 'Фаррух',
+      'roles': ['customer', 'courier'],
+      'lastMode': 'courier',
+      'courierStatus': 'approved',
+      'phoneVerified': true,
+      'profileComplete': true,
+    }, uid: 'one-account');
+    expect(user.uid, 'one-account');
+    expect(user.phoneVerified, isTrue);
+    expect(user.profileComplete, isTrue);
+    expect(user.courierApproved, isTrue);
+    expect(resolveAccountMode(user), ResolvedAccountMode.courier);
+    expect(user.uid, 'one-account');
+  });
+
+  testWidgets('intent screen has customer/courier intents but no admin', (
+    tester,
+  ) async {
+    await tester.pumpWidget(const MaterialApp(home: IntentSelectionScreen()));
+    expect(find.text('Что вы хотите сделать?'), findsOneWidget);
+    expect(find.text('Заказать доставку'), findsOneWidget);
+    expect(find.text('Зарабатывать с TajGo'), findsOneWidget);
+    expect(find.textContaining('Админ'), findsNothing);
+    expect(find.textContaining('Выберите роль'), findsNothing);
+  });
+
+  testWidgets('customer intent opens phone auth in customer mode', (
+    tester,
+  ) async {
+    await tester.pumpWidget(const MaterialApp(home: IntentSelectionScreen()));
+    await tester.tap(find.text('Заказать доставку'));
+    await tester.pumpAndSettle();
+    final screen = tester.widget<PhoneAuthScreen>(find.byType(PhoneAuthScreen));
+    expect(screen.initialIntent, AppUserRole.customer);
+  });
+
+  testWidgets('courier intent opens phone auth without granting courier mode', (
+    tester,
+  ) async {
+    await tester.pumpWidget(const MaterialApp(home: IntentSelectionScreen()));
+    await tester.tap(find.text('Зарабатывать с TajGo'));
+    await tester.pumpAndSettle();
+    final screen = tester.widget<PhoneAuthScreen>(find.byType(PhoneAuthScreen));
+    expect(screen.initialIntent, AppUserRole.courier);
+  });
+
   test('неизвестный статус заказа считается ожидающим', () {
     expect(orderStatusFromString('legacy'), OrderStatus.waiting);
     expect(orderStatusToString(OrderStatus.pickedUp), 'pickedUp');
@@ -74,6 +220,23 @@ void main() {
       currency: 'TJS',
     );
     expect(withoutComment.toCreateMap().containsKey('comment'), isFalse);
+  });
+
+  test('debug anonymous order сохраняет явный тестовый признак', () {
+    const order = TajGoOrder(
+      id: 'test-1',
+      customerId: 'anonymous-uid',
+      customerName: 'Тестировщик',
+      status: OrderStatus.waiting,
+      type: 'package',
+      city: 'Худжанд',
+      fromText: 'A',
+      toText: 'B',
+      price: 10,
+      currency: 'TJS',
+      isTestOrder: true,
+    );
+    expect(order.toCreateMap()['isTestOrder'], isTrue);
   });
 
   test('код подтверждения и гео-гейт', () {
