@@ -8,6 +8,7 @@ import '../../shared/widgets/tajgo_badge.dart';
 import '../../shared/widgets/tajgo_scope.dart';
 import '../../shared/widgets/tajgo_stat_card.dart';
 import 'admin_couriers_screen.dart';
+import 'admin_courier_applications_screen.dart';
 import 'admin_orders_screen.dart';
 import 'dispatch_map_screen.dart';
 import 'widgets/admin_access_gate.dart';
@@ -140,6 +141,22 @@ class AdminHomeScreen extends StatelessWidget {
                           subtitle: 'Лента, фильтры и детали',
                           onTap: () =>
                               _open(context, const AdminOrdersScreen()),
+                        ),
+                        StreamBuilder<int>(
+                          stream: TajGoScope.of(
+                            context,
+                          ).courierApplicationRepository.pendingCountStream(),
+                          builder: (context, snapshot) => _NavCard(
+                            icon: Icons.fact_check_rounded,
+                            title: 'Заявки курьеров',
+                            subtitle: snapshot.hasError
+                                ? 'Нужны новые Firestore Rules'
+                                : 'На проверке: ${snapshot.data ?? '—'}',
+                            onTap: () => _open(
+                              context,
+                              const AdminCourierApplicationsScreen(),
+                            ),
+                          ),
                         ),
                         _NavCard(
                           icon: Icons.delivery_dining_rounded,

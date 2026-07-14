@@ -7,6 +7,7 @@ import '../../core/services/account_migration_service.dart';
 import '../../core/services/account_mode_service.dart';
 import '../../core/services/admin_repository.dart';
 import '../../core/services/courier_repository.dart';
+import '../../core/services/courier_application_repository.dart';
 import '../../core/services/order_repository.dart';
 import '../../core/services/route_service.dart';
 import '../../core/services/user_repository.dart';
@@ -25,6 +26,7 @@ class TajGoScope extends InheritedWidget {
       accountMigrationService: AccountMigrationService(db),
       adminRepository: AdminRepository(db),
       courierRepository: CourierRepository(db),
+      courierApplicationRepository: CourierApplicationRepository(db),
       orderRepository: OrderRepository(db),
       routeService: RouteService(),
       locationService: TajGoLocationService(),
@@ -41,6 +43,7 @@ class TajGoScope extends InheritedWidget {
     required this.accountMigrationService,
     required this.adminRepository,
     required this.courierRepository,
+    required this.courierApplicationRepository,
     required this.orderRepository,
     required this.routeService,
     required this.locationService,
@@ -52,6 +55,7 @@ class TajGoScope extends InheritedWidget {
   final AccountMigrationService accountMigrationService;
   final AdminRepository adminRepository;
   final CourierRepository courierRepository;
+  final CourierApplicationRepository courierApplicationRepository;
   final OrderRepository orderRepository;
   final RouteService routeService;
   final TajGoLocationService locationService;

@@ -6,6 +6,7 @@ import '../../core/models/app_user.dart';
 import '../../shared/widgets/tajgo_scope.dart';
 import '../courier/courier_application_status_screen.dart';
 import '../courier/courier_home_screen.dart';
+import '../courier/courier_onboarding_screen.dart';
 import '../customer/customer_home_screen.dart';
 import '../startup/intent_selection_screen.dart';
 import 'settings_screen.dart';
@@ -94,6 +95,17 @@ class AccountProfileScreen extends StatelessWidget {
                 title: 'Избранные адреса',
                 onTap: () => _soon(context),
               ),
+              if (currentMode == AppUserRole.courier)
+                _Tile(
+                  icon: Icons.school_outlined,
+                  title: 'Как это работает',
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) => const CourierOnboardingScreen(),
+                    ),
+                  ),
+                ),
               _Tile(
                 icon: Icons.settings_rounded,
                 title: 'Настройки',
@@ -151,6 +163,13 @@ class AccountProfileScreen extends StatelessWidget {
             builder: (_) =>
                 CourierApplicationStatusScreen(status: user.courierStatus),
           ),
+        );
+        return;
+      }
+      if (!user.courierOnboardingCompleted) {
+        _replaceRoot(
+          context,
+          const CourierApplicationStatusScreen(status: 'approved'),
         );
         return;
       }

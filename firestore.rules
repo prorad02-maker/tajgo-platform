@@ -12,7 +12,15 @@ service cloud.firestore {
 
     function isCourier() {
       return signedIn()
-        && exists(/databases/$(database)/documents/couriers/$(request.auth.uid));
+        && exists(/databases/$(database)/documents/couriers/$(request.auth.uid))
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data
+          .get('courierStatus', 'none') == 'approved'
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data
+          .get('courierOnboardingCompleted', false) == true
+        && 'courier' in get(
+          /databases/$(database)/documents/users/$(request.auth.uid)
+        ).data.get('roles', []);
     }
 
     function isAdmin() {
@@ -44,7 +52,10 @@ service cloud.firestore {
           ]
           && mode in ['customer', 'courier']
           && data.get('phoneVerified', false) == (authPhone() != null)
-          && data.get('profileComplete', false) is bool;
+          && data.get('profileComplete', false) is bool
+          && data.get('courierOnboardingCompleted', false) is bool
+          && (!data.get('courierOnboardingCompleted', false)
+            || (status == 'approved' && 'courier' in roles));
       }
 
       function hasLegacyCourierProof(uid) {
@@ -67,6 +78,8 @@ service cloud.firestore {
         let after = request.resource.data.get('courierStatus', 'none');
         return after == before
           || (before == 'none' && after == 'draft')
+          || (before == 'draft' && after == 'pending')
+          || (before == 'rejected' && after in ['draft', 'pending'])
           || (hasLegacyCourierProof(uid) && after == 'approved');
       }
 
@@ -121,6 +134,7 @@ service cloud.firestore {
           'courierStatus',
           'phoneVerified',
           'profileComplete',
+          'courierOnboardingCompleted',
           'targetRole',
           'role',
           'city',
@@ -134,6 +148,70 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    match /courier_applications/{uid} {
+      function applicationDataIsValid(data) {
+        return data.uid == uid
+          && data.get('status', 'draft') in [
+            'draft', 'pending', 'approved', 'rejected', 'suspended'
+          ]
+          && data.get('currentStep', 0) is int
+          && data.get('currentStep', 0) >= 0
+          && data.get('currentStep', 0) <= 4
+          && data.get('transport', 'electric_bike') in [
+            'walking', 'bicycle', 'electric_bike', 'scooter'
+          ]
+          && data.get('termsAccepted', false) is bool
+          && data.get('dataConsent', false) is bool
+          && phoneMatchesAuth(data);
+      }
+
+      function ownerDraftUpdateIsValid() {
+        let before = resource.data.status;
+        let after = request.resource.data.status;
+        return owns(uid)
+          && before in ['draft', 'rejected']
+          && after in ['draft', 'pending']
+          && applicationDataIsValid(request.resource.data)
+          && request.resource.data.createdAt == resource.data.createdAt
+          && request.resource.data.updatedAt == request.time
+          && (after != 'pending'
+            || request.resource.data.submittedAt == request.time)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'displayName',
+            'name',
+            'phoneNumber',
+            'status',
+            'currentStep',
+            'birthDate',
+            'profilePhotoUrl',
+            'transport',
+            'documentType',
+            'documentNumber',
+            'documentPhotoUrl',
+            'transportPhotoUrl',
+            'city',
+            'workDistrict',
+            'availability',
+            'termsAccepted',
+            'dataConsent',
+            'storageEnabled',
+            'verificationMethod',
+            'submittedAt',
+            'updatedAt'
+          ]);
+      }
+
+      allow get: if owns(uid) || isAdmin();
+      allow list: if isAdmin();
+      allow create: if isAdmin() || (owns(uid)
+        && request.resource.data.status == 'draft'
+        && applicationDataIsValid(request.resource.data)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time);
+      allow update: if ownerDraftUpdateIsValid() || isAdmin();
+      allow delete: if false;
+    }
+
     match /couriers/{uid} {
       function baseCourierDataIsValid() {
         return request.resource.data.uid == uid
@@ -144,6 +222,7 @@ service cloud.firestore {
 
       function ownerProfileUpdateIsValid() {
         return owns(uid)
+          && isCourier()
           && baseCourierDataIsValid()
           && request.resource.data.updatedAt == request.time
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
@@ -215,14 +294,15 @@ service cloud.firestore {
       allow get: if owns(uid) || isAdmin();
       allow list: if isAdmin();
 
-      allow create: if owns(uid)
+      allow create: if isAdmin() || (owns(uid)
+        && isCourier()
         && baseCourierDataIsValid()
         && request.resource.data.rating == 5
         && request.resource.data.score == 100
         && request.resource.data.earningsToday == 0
         && request.resource.data.ordersToday == 0
         && request.resource.data.get('activeOrderId', null) == null
-        && request.resource.data.updatedAt == request.time;
+        && request.resource.data.updatedAt == request.time);
 
       allow update: if ownerProfileUpdateIsValid()
         || ownerAcceptUpdateIsValid()
@@ -298,7 +378,9 @@ service cloud.firestore {
           && request.query.limit != null
           && request.query.limit <= 50);
 
-      allow create, update: if (owns(uid) && publicDataMatchesPrivate())
+      allow create, update: if (owns(uid)
+          && isCourier()
+          && publicDataMatchesPrivate())
         || isAdmin();
       allow delete: if false;
     }

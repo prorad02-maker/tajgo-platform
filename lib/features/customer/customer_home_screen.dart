@@ -51,6 +51,16 @@ class CustomerHomeScreen extends StatelessWidget {
     if (!context.mounted) return;
     if (user?.courierApproved == true) {
       try {
+        if (!user!.courierOnboardingCompleted) {
+          Navigator.of(context).pushAndRemoveUntil(
+            MaterialPageRoute<void>(
+              builder: (_) =>
+                  const CourierApplicationStatusScreen(status: 'approved'),
+            ),
+            (_) => false,
+          );
+          return;
+        }
         await scope.accountModeService.switchToCourier();
         if (!context.mounted) return;
         Navigator.of(context).pushAndRemoveUntil(

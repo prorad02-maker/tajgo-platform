@@ -6,9 +6,11 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:tajgo/core/models/tajgo_order.dart';
 import 'package:tajgo/core/models/app_user.dart';
+import 'package:tajgo/core/models/courier_application.dart';
 import 'package:tajgo/core/services/account_migration_service.dart';
 import 'package:tajgo/core/services/account_mode_service.dart';
 import 'package:tajgo/core/services/auth_service.dart';
+import 'package:tajgo/core/services/courier_application_repository.dart';
 import 'package:tajgo/core/services/pricing.dart';
 import 'package:tajgo/features/map/models/place_suggestion.dart';
 import 'package:tajgo/features/map/models/tajgo_route.dart';
@@ -41,6 +43,7 @@ void main() {
     }, courierExists: false);
     expect(patch['roles'], ['customer']);
     expect(patch['courierStatus'], CourierStatus.none);
+    expect(patch['courierOnboardingCompleted'], isFalse);
     expect(patch.containsKey('activeOrderId'), isFalse);
     expect(patch.containsKey('rating'), isFalse);
   });
@@ -85,6 +88,7 @@ void main() {
           'roles': ['customer', if (status == 'approved') 'courier'],
           'lastMode': mode,
           'courierStatus': status,
+          'courierOnboardingCompleted': true,
         }, uid: 'same-uid');
 
     expect(
@@ -107,6 +111,19 @@ void main() {
         profile: user(mode: 'courier', status: 'pending'),
       ),
       StartupDestination.customerHome,
+    );
+
+    final needsOnboarding = AppUser.fromMap({
+      'displayName': 'Фаррух',
+      'profileComplete': true,
+      'roles': ['customer', 'courier'],
+      'lastMode': 'courier',
+      'courierStatus': 'approved',
+      'courierOnboardingCompleted': false,
+    }, uid: 'same-uid');
+    expect(
+      resolveStartupDestination(authenticated: true, profile: needsOnboarding),
+      StartupDestination.courierOnboarding,
     );
   });
 
@@ -132,6 +149,7 @@ void main() {
       'courierStatus': 'approved',
       'phoneVerified': true,
       'profileComplete': true,
+      'courierOnboardingCompleted': true,
     }, uid: 'one-account');
     expect(user.uid, 'one-account');
     expect(user.phoneVerified, isTrue);
@@ -139,6 +157,148 @@ void main() {
     expect(user.courierApproved, isTrue);
     expect(resolveAccountMode(user), ResolvedAccountMode.courier);
     expect(user.uid, 'one-account');
+  });
+
+  test('customer starts a persistent courier draft', () {
+    final draft = CourierApplication.empty(
+      uid: 'customer-1',
+      displayName: 'Фаррух',
+      phoneNumber: '+992921234567',
+    );
+    expect(draft.status, CourierStatus.draft);
+    expect(draft.uid, 'customer-1');
+    expect(draft.toDraftMap()['status'], CourierStatus.draft);
+    expect(draft.toDraftMap()['verificationMethod'], 'personalMeeting');
+  });
+
+  test('completed draft can become pending without granting courier mode', () {
+    final application = CourierApplication.fromMap({
+      'displayName': 'Фаррух',
+      'phoneNumber': '+992921234567',
+      'status': 'draft',
+      'currentStep': 4,
+      'transport': 'electric_bike',
+      'documentType': 'passport',
+      'documentNumber': 'A12345',
+      'termsAccepted': true,
+      'dataConsent': true,
+    }, uid: 'customer-1');
+    expect(application.canSubmit, isTrue);
+
+    final pending = AppUser.fromMap({
+      'displayName': 'Фаррух',
+      'profileComplete': true,
+      'roles': ['customer'],
+      'lastMode': 'courier',
+      'courierStatus': 'pending',
+    }, uid: 'customer-1');
+    expect(pending.courierApproved, isFalse);
+    expect(pending.canUseCourierMode, isFalse);
+    expect(resolveAccountMode(pending), ResolvedAccountMode.customer);
+
+    final approvedBeforeOnboarding = AppUser.fromMap({
+      'displayName': 'Фаррух',
+      'profileComplete': true,
+      'roles': ['customer', 'courier'],
+      'lastMode': 'customer',
+      'courierStatus': 'approved',
+      'courierOnboardingCompleted': false,
+    }, uid: 'customer-1');
+    expect(approvedBeforeOnboarding.courierApproved, isTrue);
+    expect(approvedBeforeOnboarding.canUseCourierMode, isFalse);
+
+    final afterOnboarding = AppUser.fromMap({
+      'displayName': 'Фаррух',
+      'profileComplete': true,
+      'roles': ['customer', 'courier'],
+      'lastMode': 'courier',
+      'courierStatus': 'approved',
+      'courierOnboardingCompleted': true,
+    }, uid: 'customer-1');
+    expect(afterOnboarding.canUseCourierMode, isTrue);
+    expect(resolveAccountMode(afterOnboarding), ResolvedAccountMode.courier);
+  });
+
+  test('approve keeps customer role and does not duplicate legacy courier', () {
+    expect(approvedCourierRoles(['customer']), ['customer', 'courier']);
+    expect(approvedCourierRoles(['customer', 'courier']), [
+      'customer',
+      'courier',
+    ]);
+    expect(
+      approvedCourierOnboardingCompleted(
+        existingValue: null,
+        courierProfileExists: false,
+      ),
+      isFalse,
+    );
+    expect(
+      approvedCourierOnboardingCompleted(
+        existingValue: null,
+        courierProfileExists: true,
+      ),
+      isTrue,
+    );
+
+    final application = CourierApplication.empty(
+      uid: 'courier-1',
+      displayName: 'Фаррух',
+      phoneNumber: '+992921234567',
+    );
+    final data = buildApprovedCourierData(
+      uid: 'courier-1',
+      application: application,
+      existing: const {
+        'activeOrderId': 'active-7',
+        'earningsToday': 55,
+        'ordersToday': 4,
+        'rating': 4.8,
+      },
+    );
+    expect(data['activeOrderId'], 'active-7');
+    expect(data['earningsToday'], 55);
+    expect(data['ordersToday'], 4);
+    expect(data['rating'], 4.8);
+  });
+
+  test('reject and suspend keep customer access', () {
+    AppUser account(String status) => AppUser.fromMap({
+      'displayName': 'Фаррух',
+      'profileComplete': true,
+      'roles': ['customer', 'courier'],
+      'lastMode': 'courier',
+      'courierStatus': status,
+      'courierOnboardingCompleted': true,
+    }, uid: 'same-account');
+
+    expect(
+      resolveAccountMode(account('rejected')),
+      ResolvedAccountMode.customer,
+    );
+    expect(
+      resolveAccountMode(account('suspended')),
+      ResolvedAccountMode.customer,
+    );
+    expect(account('suspended').roles, contains('customer'));
+
+    final suspension = buildSuspendedCourierPatch('server-time');
+    expect(suspension['isOnline'], isFalse);
+    expect(suspension['online'], isFalse);
+    expect(suspension.containsKey('activeOrderId'), isFalse);
+  });
+
+  test('admin courier action contains immutable audit identities', () {
+    final log = buildCourierAdminLog(
+      action: 'rejectCourier',
+      targetUid: 'courier-1',
+      adminUid: 'admin-1',
+      reason: 'Нужно уточнить документ',
+      createdAt: 'server-time',
+    );
+    expect(log['targetUid'], 'courier-1');
+    expect(log['adminUid'], 'admin-1');
+    expect(log['reason'], 'Нужно уточнить документ');
+    expect(log['createdAt'], 'server-time');
   });
 
   testWidgets('intent screen has customer/courier intents but no admin', (

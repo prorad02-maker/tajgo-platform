@@ -1,24 +1,27 @@
 # TajGo — следующие шаги владельца
 
-## После v1.1.0 Account Foundation
+## После v1.2.0 Courier Product Completion
 
 1. В Firebase Console убедиться, что Phone provider включён и Android-приложение
    зарегистрировано как `tj.tajgo.app` с актуальными debug SHA-1/SHA-256.
 2. Проверить тестовый номер Firebase Auth либо реальный `+992` номер на
    физическом Android-устройстве.
-3. До deploy отдельно просмотреть изменения `firestore.rules`. В этой задаче
-   правила не разворачивались.
-4. После одобрения правил выполнить account smoke-test: новый клиент, новый
-   courier intent, повторный запуск, выход/вход, legacy-клиент и legacy-курьер.
-5. Перейти к задаче 2: анкета курьера и admin approval. До её завершения новый
-   пользователь не получает `courierStatus=approved`.
+3. До deploy отдельно просмотреть изменения `firestore.rules`: правила заявки,
+   admin-решений и courier/public-проекций подготовлены локально, но не разворачивались.
+4. Настроить безопасное назначение тестового admin UID и пройти полный сценарий
+   `PRODUCT_V1_OWNER_TEST_PLAN.md` на двух физических устройствах.
+5. Настроить Firebase Storage и его Rules до приёма реальных документов. Сейчас
+   приложение честно использует проверку документов при личной встрече.
+6. После успешного field test подготовить release signing и пилотную группу курьеров.
 
 ## Уже готово
 
 - v0.7.0 Customer, Courier, Navigation, Admin/Dispatch и debug-only Demo Tools сохранены.
 - Android launcher name приведён к `TajGo`.
 - Финальный Android package применён: `tj.tajgo.app`.
-- Версия проекта подготовлена как `0.8.1+9`.
+- Интегрированная версия проекта подготовлена как `1.2.0+27`.
+- Реализованы анкета курьера, draft/pending/approved/rejected/suspended,
+  admin-модерация и одноразовый onboarding.
 - Gradle поддерживает локальный release keystore через `android/key.properties`, не раскрывая секреты.
 - Firestore rules закрывают неизвестные коллекции и разделяют customer/courier/admin доступ.
 - Индекс customer orders описан в `firestore.indexes.json`.

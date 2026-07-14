@@ -79,7 +79,17 @@ class CourierRepository {
   }) => _db.runTransaction((transaction) async {
     final ref = _db.collection('couriers').doc(uid);
     final publicRef = _db.collection('courier_public').doc(uid);
-    final doc = await transaction.get(ref);
+    final userRef = _db.collection('users').doc(uid);
+    final snapshots = await Future.wait([
+      transaction.get(userRef),
+      transaction.get(ref),
+    ]);
+    final account = snapshots[0].data();
+    if (account?['courierStatus'] != 'approved' ||
+        account?['courierOnboardingCompleted'] != true) {
+      throw StateError('Курьерский режим недоступен до одобрения заявки.');
+    }
+    final doc = snapshots[1];
     final existing = doc.data() ?? const <String, dynamic>{};
     final online =
         existing['isOnline'] as bool? ?? existing['online'] as bool? ?? false;
@@ -124,7 +134,17 @@ class CourierRepository {
   }) => _db.runTransaction((transaction) async {
     final ref = _db.collection('couriers').doc(uid);
     final publicRef = _db.collection('courier_public').doc(uid);
-    final doc = await transaction.get(ref);
+    final userRef = _db.collection('users').doc(uid);
+    final snapshots = await Future.wait([
+      transaction.get(userRef),
+      transaction.get(ref),
+    ]);
+    final account = snapshots[0].data();
+    if (account?['courierStatus'] != 'approved' ||
+        account?['courierOnboardingCompleted'] != true) {
+      throw StateError('Курьерский режим недоступен до одобрения заявки.');
+    }
+    final doc = snapshots[1];
     final data = <String, dynamic>{
       'uid': uid,
       'phoneNumber': phoneNumber,

@@ -5,6 +5,7 @@ import '../../core/models/tajgo_courier.dart';
 import '../../shared/widgets/tajgo_badge.dart';
 import '../../shared/widgets/tajgo_scope.dart';
 import 'admin_order_details_screen.dart';
+import 'admin_courier_application_details_screen.dart';
 import 'dispatch_map_screen.dart';
 import 'widgets/admin_access_gate.dart';
 import 'widgets/tajgo_admin_action_button.dart';
@@ -178,6 +179,18 @@ class _CourierCard extends StatelessWidget {
               spacing: 8,
               runSpacing: 8,
               children: [
+                OutlinedButton.icon(
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) => AdminCourierApplicationDetailsScreen(
+                        uid: courier.uid,
+                      ),
+                    ),
+                  ),
+                  icon: const Icon(Icons.verified_user_outlined),
+                  label: const Text('Проверка'),
+                ),
                 OutlinedButton.icon(
                   onPressed: courier.location == null
                       ? null

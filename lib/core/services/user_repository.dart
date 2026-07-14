@@ -44,6 +44,8 @@ class UserRepository {
             phoneVerified ||
             phoneNumber?.isNotEmpty == true,
         'profileComplete': existing['profileComplete'] ?? false,
+        'courierOnboardingCompleted':
+            existing['courierOnboardingCompleted'] ?? false,
         'courierStatus':
             existing['courierStatus'] ??
             (mode == AppUserRole.courier
@@ -120,6 +122,11 @@ class UserRepository {
     if (user == null) throw StateError('Профиль пользователя не найден.');
     if (mode == AppUserRole.courier && !user.courierApproved) {
       throw StateError('Режим курьера доступен после одобрения заявки.');
+    }
+    if (mode == AppUserRole.courier && !user.courierOnboardingCompleted) {
+      throw StateError(
+        'Сначала пройдите короткое знакомство с работой курьера.',
+      );
     }
     await _db.collection('users').doc(uid).update({
       'lastMode': mode,

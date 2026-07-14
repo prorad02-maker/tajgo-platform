@@ -4,6 +4,7 @@ import '../../core/models/app_user.dart';
 import '../../shared/widgets/tajgo_scope.dart';
 import '../auth/profile_completion_screen.dart';
 import '../courier/courier_home_screen.dart';
+import '../courier/courier_onboarding_screen.dart';
 import '../customer/customer_home_screen.dart';
 import 'intent_selection_screen.dart';
 import 'startup_decision.dart';
@@ -104,6 +105,7 @@ class _AppStartupRouterState extends State<AppStartupRouter> {
               : AppUserRole.customer,
         ),
         StartupDestination.customerHome => const CustomerHomeScreen(),
+        StartupDestination.courierOnboarding => const CourierOnboardingScreen(),
         StartupDestination.courierHome => const CourierHomeScreen(),
       };
     },

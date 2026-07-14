@@ -17,6 +17,7 @@ import '../../shared/widgets/tajgo_stat_card.dart';
 import '../../shared/widgets/tajgo_status_pill.dart';
 import 'courier_order_screen.dart';
 import 'courier_application_status_screen.dart';
+import 'courier_onboarding_screen.dart';
 import '../account/account_profile_screen.dart';
 
 class CourierHomeScreen extends StatefulWidget {
@@ -82,11 +83,21 @@ class _CourierHomeScreenState extends State<CourierHomeScreen>
       }
       return;
     }
+    if (!user!.courierOnboardingCompleted) {
+      if (mounted) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute<void>(
+            builder: (_) => const CourierOnboardingScreen(),
+          ),
+        );
+      }
+      return;
+    }
     await scope.courierRepository.ensureCourierProfile(
       uid: _uid,
-      phoneNumber: user?.phoneNumber,
-      displayName: user?.displayName ?? 'Курьер',
-      city: user?.city ?? 'Худжанд',
+      phoneNumber: user.phoneNumber,
+      displayName: user.displayName,
+      city: user.city,
     );
     if (mounted) {
       setState(() => _profileReady = true);
@@ -128,6 +139,10 @@ class _CourierHomeScreenState extends State<CourierHomeScreen>
 
   Future<void> _setOnline(bool online) => _run(() async {
     final scope = TajGoScope.of(context);
+    final user = await scope.userRepository.getUser(_uid);
+    if (user?.courierApproved != true) {
+      throw StateError('Курьерский режим недоступен до одобрения заявки.');
+    }
     if (online) {
       final initial = await scope.locationService.determineCurrentPosition();
       await scope.courierRepository.updateLocation(
@@ -140,7 +155,6 @@ class _CourierHomeScreenState extends State<CourierHomeScreen>
         force: true,
       );
     }
-    final user = await scope.userRepository.getUser(_uid);
     await scope.courierRepository.setOnline(
       uid: _uid,
       online: online,
@@ -518,6 +532,7 @@ class _CourierHomeScreenState extends State<CourierHomeScreen>
                                     (snapshot.data ?? const <TajGoOrder>[])
                                         .where(
                                           (order) =>
+                                              order.customerId != _uid &&
                                               !order.declinedBy.contains(_uid),
                                         )
                                         .toList();

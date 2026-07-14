@@ -69,5 +69,8 @@ Map<String, dynamic> buildLegacyAccountPatch(
     final name = data['displayName'] as String? ?? data['name'] as String?;
     patch['profileComplete'] = name?.trim().isNotEmpty == true;
   }
+  if (data['courierOnboardingCompleted'] == null) {
+    patch['courierOnboardingCompleted'] = legacyCourier;
+  }
   return patch;
 }

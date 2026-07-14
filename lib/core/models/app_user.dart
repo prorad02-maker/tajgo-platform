@@ -10,6 +10,7 @@ class AppUser {
     required this.courierStatus,
     required this.phoneVerified,
     required this.profileComplete,
+    required this.courierOnboardingCompleted,
     required this.city,
     required this.language,
     required this.createdAt,
@@ -28,6 +29,7 @@ class AppUser {
   final String courierStatus;
   final bool phoneVerified;
   final bool profileComplete;
+  final bool courierOnboardingCompleted;
   final String city;
   final String language;
   final DateTime? createdAt;
@@ -38,6 +40,7 @@ class AppUser {
   bool get courierApproved =>
       roles.contains(AppUserRole.courier) &&
       courierStatus == CourierStatus.approved;
+  bool get canUseCourierMode => courierApproved && courierOnboardingCompleted;
 
   factory AppUser.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) =>
       AppUser.fromMap(doc.data() ?? const {}, uid: doc.id);
@@ -79,6 +82,8 @@ class AppUser {
       profileComplete:
           data['profileComplete'] as bool? ??
           (displayName.trim().isNotEmpty && displayName != 'Пользователь'),
+      courierOnboardingCompleted:
+          data['courierOnboardingCompleted'] as bool? ?? legacyCourier,
       city: data['city'] as String? ?? 'Худжанд',
       language: data['language'] as String? ?? 'ru',
       createdAt: _date(data['createdAt']),
