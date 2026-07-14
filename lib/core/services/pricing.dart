@@ -2,8 +2,9 @@ import 'dart:math' as math;
 
 import 'package:latlong2/latlong.dart';
 
-double haversineDistanceKm(LatLng from, LatLng to) =>
-    const Distance().as(LengthUnit.Kilometer, from, to);
+double haversineDistanceKm(LatLng from, LatLng to) => const DistanceHaversine(
+  roundResult: false,
+).as(LengthUnit.Kilometer, from, to);
 
 double distanceKm(LatLng from, LatLng to) {
   final kilometers = haversineDistanceKm(from, to);

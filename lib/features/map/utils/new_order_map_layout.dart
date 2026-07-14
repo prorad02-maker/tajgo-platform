@@ -4,7 +4,7 @@ class NewOrderMapLayout {
   const NewOrderMapLayout._();
 
   static double panelHeight(Size size, {required bool details}) {
-    if (details) return (size.height * 0.48).clamp(360.0, 420.0);
+    if (details) return (size.height * 0.40).clamp(300.0, 340.0);
     return (size.height * 0.34).clamp(250.0, 300.0);
   }
 

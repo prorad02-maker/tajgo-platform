@@ -11,21 +11,26 @@ class TajGoRouteSummaryCard extends StatelessWidget {
     this.loading = false,
     this.onShowEntireRoute,
     this.compact = false,
+    this.directBaselineMeters,
+    this.pointsTooClose = false,
   });
 
   final TajGoRoute? route;
   final bool loading;
   final VoidCallback? onShowEntireRoute;
   final bool compact;
+  final double? directBaselineMeters;
+  final bool pointsTooClose;
 
   @override
   Widget build(BuildContext context) {
     final value = route;
+    final fallback = value?.isFallback ?? true;
     return Container(
       width: double.infinity,
       padding: EdgeInsets.all(compact ? 10 : 12),
       decoration: BoxDecoration(
-        color: const Color(0xFFF2F7F0),
+        color: fallback ? const Color(0xFFFFF8E7) : const Color(0xFFF2F7F0),
         borderRadius: BorderRadius.circular(14),
       ),
       child: Row(
@@ -37,12 +42,8 @@ class TajGoRouteSummaryCard extends StatelessWidget {
             )
           else
             Icon(
-              value?.isFallback == false
-                  ? Icons.route_rounded
-                  : Icons.timeline_rounded,
-              color: value?.isFallback == false
-                  ? TajGoColors.green
-                  : TajGoColors.warning,
+              fallback ? Icons.timeline_rounded : Icons.route_rounded,
+              color: fallback ? TajGoColors.warning : TajGoColors.green,
             ),
           const SizedBox(width: 10),
           Expanded(
@@ -50,34 +51,32 @@ class TajGoRouteSummaryCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  loading
+                  pointsTooClose
+                      ? 'Выберите другую точку доставки'
+                      : loading
                       ? 'Строим маршрут…'
                       : value == null
                       ? 'Маршрут недоступен'
-                      : '${formatRouteDistance(value.distanceKm)} · '
+                      : '${formatRouteDistance(value.distanceKm, directBaselineMeters: directBaselineMeters)} · '
                             '${formatRouteEta(value.etaMinutes)}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(fontWeight: FontWeight.w800),
                 ),
-                if (!loading && value?.isFallback == true)
-                  Text(
-                    formatRouteQuality(value),
-                    style: const TextStyle(
-                      color: TajGoColors.warning,
-                      fontSize: 12,
-                    ),
-                  )
-                else if (!loading && value != null)
+                if (!loading && !pointsTooClose && value != null)
                   Text(
                     formatRouteQuality(value),
                     style: TextStyle(
-                      color: TajGoColors.darkGreen,
+                      color: fallback
+                          ? TajGoColors.warning
+                          : TajGoColors.darkGreen,
                       fontSize: 12,
                     ),
                   ),
               ],
             ),
           ),
-          if (onShowEntireRoute != null)
+          if (onShowEntireRoute != null && value != null)
             TextButton(
               onPressed: onShowEntireRoute,
               child: const Text('Показать весь'),

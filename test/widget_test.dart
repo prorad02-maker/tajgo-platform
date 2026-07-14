@@ -14,6 +14,7 @@ import 'package:tajgo/features/map/services/navigation_instruction_formatter.dar
 import 'package:tajgo/features/map/services/route_cache.dart';
 import 'package:tajgo/features/map/services/road_route_provider.dart';
 import 'package:tajgo/features/map/services/route_progress_service.dart';
+import 'package:tajgo/features/map/services/route_sanity_service.dart';
 import 'package:tajgo/features/map/services/routing_config.dart';
 import 'package:tajgo/features/map/utils/route_display_formatter.dart';
 import 'package:tajgo/features/map/utils/map_address_formatter.dart';
@@ -122,6 +123,18 @@ void main() {
     expect(route.isRoadRouteApproximation, isTrue);
     expect(route.distanceKm, greaterThan(0));
     expect(route.etaMinutes, greaterThan(0));
+  });
+
+  test('direct route не округляет 30 метров до нуля', () {
+    const provider = DirectRouteProvider();
+    final route = provider.buildSync(
+      from: const LatLng(40.2833, 69.6222),
+      to: const LatLng(40.28357, 69.6222),
+      mode: RouteMode.bicycle,
+    );
+    expect(route.distanceKm * 1000, closeTo(30, 1));
+    expect(formatRouteDistance(route.distanceKm), '30 м');
+    expect(route.etaMinutes, 1);
   });
 
   test('route cache использует округлённые координаты и mode', () {
@@ -430,6 +443,96 @@ void main() {
     expect(formatRouteDistance(1.2), '1.2 км');
   });
 
+  test('distance formatter сохраняет точность в метрах', () {
+    expect(formatDistanceMeters(5), 'менее 10 м');
+    expect(formatDistanceMeters(30), '30 м');
+    expect(formatDistanceMeters(400), '400 м');
+    expect(formatDistanceMeters(1200), '1.2 км');
+    expect(formatDistanceMeters(5, directBaselineMeters: 300), '300 м');
+    expect(formatDistanceMeters(0, directBaselineMeters: 30), '30 м');
+  });
+
+  test('route sanity заменяет невозможную дистанцию на direct fallback', () {
+    const sanity = RouteSanityService();
+    const from = LatLng(40.2800, 69.6200);
+    const to = LatLng(40.2827, 69.6200);
+
+    TajGoRoute road(double distanceKm, List<LatLng> points) => TajGoRoute(
+      points: points,
+      distanceKm: distanceKm,
+      etaMinutes: 1,
+      isRoadRouteApproximation: false,
+      providerName: 'osrm',
+      routeQuality: RouteQuality.road,
+      createdAt: DateTime.now().toUtc(),
+    );
+
+    final zero = sanity.sanitize(
+      candidate: road(0, const [from, to]),
+      from: from,
+      to: to,
+      mode: RouteMode.bicycle,
+    );
+    expect(zero.usedFallback, isTrue);
+    expect(zero.route.distanceKm, greaterThan(0.25));
+
+    final fiveMeters = sanity.sanitize(
+      candidate: road(0.005, const [from, to]),
+      from: from,
+      to: to,
+      mode: RouteMode.bicycle,
+    );
+    expect(fiveMeters.usedFallback, isTrue);
+
+    final implausiblyLong = sanity.sanitize(
+      candidate: road(2, const [from, to]),
+      from: from,
+      to: to,
+      mode: RouteMode.bicycle,
+    );
+    expect(implausiblyLong.usedFallback, isTrue);
+
+    final emptyGeometry = sanity.sanitize(
+      candidate: road(0.3, const [from]),
+      from: from,
+      to: to,
+      mode: RouteMode.bicycle,
+    );
+    expect(emptyGeometry.usedFallback, isTrue);
+
+    final missing = sanity.sanitize(
+      candidate: null,
+      from: from,
+      to: to,
+      mode: RouteMode.bicycle,
+    );
+    expect(missing.usedFallback, isTrue);
+
+    final validRoad = sanity.sanitize(
+      candidate: road(0.35, const [from, to]),
+      from: from,
+      to: to,
+      mode: RouteMode.bicycle,
+    );
+    expect(validRoad.providerAccepted, isTrue);
+    expect(validRoad.route.routeQuality, RouteQuality.road);
+
+    final directCandidate = const DirectRouteProvider().buildSync(
+      from: from,
+      to: to,
+      mode: RouteMode.bicycle,
+    );
+    final validFallback = sanity.sanitize(
+      candidate: directCandidate,
+      from: from,
+      to: to,
+      mode: RouteMode.bicycle,
+    );
+    expect(validFallback.usedFallback, isTrue);
+    expect(validFallback.providerAccepted, isFalse);
+    expect(validFallback.route.routeQuality, RouteQuality.directFallback);
+  });
+
   test('route display quality честно отличает road от fallback', () {
     final road = TajGoRoute(
       points: const [LatLng(40.28, 69.62), LatLng(40.29, 69.63)],
@@ -477,6 +580,12 @@ void main() {
     final current = formatMapAddress('Точка на карте', currentLocation: true);
     expect(current.primary, 'Ваше местоположение');
     expect(current.secondary, 'Худжанд');
+
+    final human = formatMapAddress(
+      '7JM5+9C8, ул. Асири, Худжанд, Таджикистан, Худжанд',
+    );
+    expect(human.primary, 'ул. Асири');
+    expect(human.secondary, 'Худжанд');
   });
 
   test('collapsed карта занимает больше половины экрана 360x800', () {
@@ -567,4 +676,56 @@ void main() {
     expect(panelRect.contains(confirmRect.center), isTrue);
     expect(find.text('Использовать моё местоположение'), findsNothing);
   });
+
+  testWidgets(
+    'details A/B показывает маршрут, GPS и bottom panel без overflow',
+    (tester) async {
+      tester.view.physicalSize = const Size(360, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          debugShowCheckedModeBanner: false,
+          home: MediaQuery(
+            data: const MediaQueryData(
+              size: Size(360, 800),
+              textScaler: TextScaler.linear(1.3),
+            ),
+            child: Scaffold(body: buildNewOrderDetailsMapLayoutForTest()),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(tester.takeException(), isNull);
+      expect(find.byType(FlutterMap), findsOneWidget);
+      expect(find.textContaining('400 м · ≈ 3 мин'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('new-order-map-route-overview')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('new-order-map-gps')), findsOneWidget);
+      expect(find.textContaining('Откуда: ул. Асири'), findsOneWidget);
+      expect(find.textContaining('7JM5+9C8'), findsNothing);
+      expect(find.text('Использовать моё местоположение'), findsNothing);
+      expect(find.text('GPS'), findsNothing);
+      expect(find.byType(Banner), findsNothing);
+
+      final panelRect = tester.getRect(
+        find.byKey(const ValueKey('new-order-map-bottom-panel')),
+      );
+      final routeRect = tester.getRect(
+        find.byKey(const ValueKey('new-order-map-route-overview')),
+      );
+      final gpsRect = tester.getRect(
+        find.byKey(const ValueKey('new-order-map-gps')),
+      );
+      expect(panelRect.top, 480);
+      expect(panelRect.bottom, 800);
+      expect(routeRect.bottom, lessThan(panelRect.top));
+      expect(gpsRect.bottom, lessThan(panelRect.top));
+    },
+  );
 }

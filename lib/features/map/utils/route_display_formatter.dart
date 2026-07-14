@@ -1,13 +1,22 @@
 import '../models/tajgo_route.dart';
 
-String formatRouteDistance(double distanceKm) {
-  if (distanceKm < 1) {
-    final meters = (distanceKm * 1000).round();
-    if (meters < 10) return 'менее 10 м';
-    return '$meters м';
-  }
-  return '${distanceKm.toStringAsFixed(1)} км';
+String formatDistanceMeters(double meters, {double? directBaselineMeters}) {
+  final safeMeters = (!meters.isFinite || meters < 0) ? 0.0 : meters;
+  final baseline = directBaselineMeters;
+  final validBaseline = baseline != null && baseline.isFinite && baseline >= 0;
+  final displayMeters = validBaseline && baseline >= 10 && safeMeters < 10
+      ? baseline
+      : safeMeters;
+  if (displayMeters < 10) return 'менее 10 м';
+  if (displayMeters < 950) return '${displayMeters.round()} м';
+  return '${(displayMeters / 1000).toStringAsFixed(1)} км';
 }
+
+String formatRouteDistance(double distanceKm, {double? directBaselineMeters}) =>
+    formatDistanceMeters(
+      distanceKm * 1000,
+      directBaselineMeters: directBaselineMeters,
+    );
 
 String formatRouteEta(int etaMinutes) => '≈ ${etaMinutes.clamp(1, 999)} мин';
 

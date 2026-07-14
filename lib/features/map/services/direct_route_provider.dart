@@ -25,7 +25,9 @@ class DirectRouteProvider implements RouteProvider {
     String? errorMessage,
     RouteQuality quality = RouteQuality.directFallback,
   }) {
-    final distance = pricing.distanceKm(from, to);
+    // Preserve metre-level precision; 0.1 km rounding made routes below 50 m
+    // become 0.0 km before they reached the UI.
+    final distance = pricing.haversineDistanceKm(from, to);
     final speedKmH = switch (mode) {
       RouteMode.walking => 4.5,
       RouteMode.bicycle => 18,
