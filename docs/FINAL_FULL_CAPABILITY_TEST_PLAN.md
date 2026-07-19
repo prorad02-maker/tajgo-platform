@@ -1,6 +1,6 @@
-# TajGo 1.4.0 — финальная проверка всех возможностей
+# TajGo 1.5.0 — финальная проверка всех возможностей
 
-Этот план проверяет сборку `1.4.0+29` (`tj.tajgo.app`) от чистого входа до завершённого заказа. Проверка должна выполняться минимум на двух физических Android-устройствах: клиент и курьер. Для admin удобнее использовать третью сессию или отдельный профиль.
+Этот план проверяет сборку `1.5.0+30` (`tj.tajgo.app`) от чистого входа до завершённого заказа. Проверка должна выполняться минимум на двух физических Android-устройствах: клиент и курьер. Для admin удобнее использовать третью сессию или отдельный профиль.
 
 ## 1. Перед тестом
 
@@ -16,7 +16,9 @@ firebase.cmd deploy --only firestore:indexes
 
 5. Назначить один UID администратором: `users/{uid}.role = "admin"`.
 6. Подготовить минимум один approved courier: в `users/{uid}` должны быть `roles: ["customer", "courier"]`, `courierStatus: "approved"`, `courierOnboardingCompleted: true`.
-7. Для локального debug smoke-test открыть Demo Tools и нажать `Тест · Создать demo marketplace`. Это создаёт 3 тестовых партнёра и 6 товаров. Операция требует admin-role по актуальным Rules.
+7. При пустой базе проверить локальные preview-карточки. Затем в админке нажать
+   `Опубликовать примеры`: операция создаёт 6 тестовых партнёров и 18 товаров и
+   требует admin-role по актуальным Rules.
 
 ## 2. Автоматические проверки
 
@@ -27,7 +29,7 @@ flutter clean
 flutter pub get
 flutter analyze
 flutter test
-flutter build apk --debug --dart-define-from-file=tool/routing.local.json
+flutter build apk --debug --dart-define-from-file=tool/routing.pilot.json
 ```
 
 Ожидается: analyze без ошибок, все тесты зелёные, APK находится в `build/app/outputs/flutter-apk/app-debug.apk`.
@@ -64,6 +66,8 @@ flutter build apk --debug --dart-define-from-file=tool/routing.local.json
    - `price = deliveryFee`, `priceNegotiable = false`;
    - A = адрес партнёра, B = адрес клиента.
 9. В tracking должны быть видны партнёр, товары и итог. Корзина после успешного создания очищается.
+10. На карте проверить поиск адреса, синий маркер своего GPS, зелёную дорожную
+    линию и кнопку обзора всего маршрута.
 
 ## 6. Курьер и заказ
 
@@ -84,6 +88,9 @@ flutter build apk --debug --dart-define-from-file=tool/routing.local.json
 - Courier applications: approve/reject/suspend пишут `admin_logs` и не уничтожают customer-доступ.
 - Dispatch map показывает только предусмотренные данные и умеет открыть детали заказа.
 - В `Партнёры и товары` admin создаёт/редактирует партнёра и товар, закрывает партнёра, выключает/скрывает товар. Физического удаления из UI нет.
+- Карточка партнёра открывает отдельный список ассортимента; JSON import сначала
+  проходит dry-run и не пишет данные до подтверждения.
+- Неактивный партнёр и скрытый товар не читаются обычным клиентом.
 - Изменения создают append-only запись `admin_logs`.
 - Обычный customer/courier не может изменить `partners`, `products`, чужие `users`, `couriers`, `orders` или `admin_logs`.
 

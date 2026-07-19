@@ -850,6 +850,7 @@ void main() {
     );
     expect(uri.queryParameters['geometries'], 'geojson');
     expect(uri.queryParameters['steps'], 'true');
+    expect(uri.queryParameters, isNot(contains('language')));
   });
 
   test('provider disabled даёт fallback и обновляет health', () async {

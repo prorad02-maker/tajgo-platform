@@ -22,6 +22,7 @@ class MarketplaceProduct {
     this.isAvailable = true,
     this.hidden = false,
     this.popularity = 0,
+    this.sortOrder = 0,
     this.isTest = false,
     this.createdAt,
     this.updatedAt,
@@ -38,6 +39,7 @@ class MarketplaceProduct {
   final bool isAvailable;
   final bool hidden;
   final int popularity;
+  final int sortOrder;
   final bool isTest;
   final DateTime? createdAt;
   final DateTime? updatedAt;
@@ -61,6 +63,7 @@ class MarketplaceProduct {
         isAvailable: data['isAvailable'] as bool? ?? true,
         hidden: data['hidden'] as bool? ?? false,
         popularity: (data['popularity'] as num? ?? 0).toInt(),
+        sortOrder: (data['sortOrder'] as num? ?? 0).toInt(),
         isTest: data['isTest'] as bool? ?? false,
         createdAt: _date(data['createdAt']),
         updatedAt: _date(data['updatedAt']),
@@ -77,6 +80,7 @@ class MarketplaceProduct {
     'isAvailable': isAvailable,
     'hidden': hidden,
     'popularity': popularity,
+    'sortOrder': sortOrder,
     'isTest': isTest,
   };
 }

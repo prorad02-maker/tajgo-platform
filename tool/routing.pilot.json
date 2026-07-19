@@ -1,0 +1,9 @@
+{
+  "ROUTING_ENABLED": "true",
+  "ROUTING_PROVIDER": "osrm",
+  "ROUTING_BASE_URL": "https://routing.openstreetmap.de/routed-bike",
+  "ROUTING_API_KEY": "",
+  "ROUTING_TIMEOUT_SECONDS": "7",
+  "ROUTING_MODE": "bicycle",
+  "ROUTING_PROFILE": "driving"
+}

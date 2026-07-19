@@ -22,10 +22,12 @@ class MarketplacePartner {
     this.deliveryFee = 10,
     this.rating = 5,
     this.preparationMinutes = 20,
+    this.sortOrder = 0,
     this.workingHours = '',
     this.isOpen = true,
     this.isActive = true,
     this.isTest = false,
+    this.isPreview = false,
     this.createdAt,
     this.updatedAt,
   });
@@ -41,10 +43,12 @@ class MarketplacePartner {
   final num deliveryFee;
   final double rating;
   final int preparationMinutes;
+  final int sortOrder;
   final String workingHours;
   final bool isOpen;
   final bool isActive;
   final bool isTest;
+  final bool isPreview;
   final DateTime? createdAt;
   final DateTime? updatedAt;
 
@@ -66,10 +70,12 @@ class MarketplacePartner {
         deliveryFee: data['deliveryFee'] as num? ?? 10,
         rating: (data['rating'] as num? ?? 5).toDouble(),
         preparationMinutes: (data['preparationMinutes'] as num? ?? 20).toInt(),
+        sortOrder: (data['sortOrder'] as num? ?? 0).toInt(),
         workingHours: data['workingHours'] as String? ?? '',
         isOpen: data['isOpen'] as bool? ?? true,
         isActive: data['isActive'] as bool? ?? true,
         isTest: data['isTest'] as bool? ?? false,
+        isPreview: false,
         createdAt: _date(data['createdAt']),
         updatedAt: _date(data['updatedAt']),
       );
@@ -85,6 +91,7 @@ class MarketplacePartner {
     'deliveryFee': deliveryFee,
     'rating': rating,
     'preparationMinutes': preparationMinutes,
+    'sortOrder': sortOrder,
     'workingHours': workingHours.trim(),
     'isOpen': isOpen,
     'isActive': isActive,
@@ -103,10 +110,12 @@ class MarketplacePartner {
     num? deliveryFee,
     double? rating,
     int? preparationMinutes,
+    int? sortOrder,
     String? workingHours,
     bool? isOpen,
     bool? isActive,
     bool? isTest,
+    bool? isPreview,
   }) => MarketplacePartner(
     id: id ?? this.id,
     name: name ?? this.name,
@@ -119,10 +128,12 @@ class MarketplacePartner {
     deliveryFee: deliveryFee ?? this.deliveryFee,
     rating: rating ?? this.rating,
     preparationMinutes: preparationMinutes ?? this.preparationMinutes,
+    sortOrder: sortOrder ?? this.sortOrder,
     workingHours: workingHours ?? this.workingHours,
     isOpen: isOpen ?? this.isOpen,
     isActive: isActive ?? this.isActive,
     isTest: isTest ?? this.isTest,
+    isPreview: isPreview ?? this.isPreview,
     createdAt: createdAt,
     updatedAt: updatedAt,
   );

@@ -7,6 +7,7 @@ import '../../core/constants/tajgo_colors.dart';
 import '../../core/models/marketplace_partner.dart';
 import '../../core/models/marketplace_product.dart';
 import '../../shared/widgets/tajgo_scope.dart';
+import 'admin_marketplace_import_screen.dart';
 import 'widgets/admin_access_gate.dart';
 
 class AdminMarketplaceScreen extends StatelessWidget {
@@ -19,6 +20,23 @@ class AdminMarketplaceScreen extends StatelessWidget {
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Партнёры и товары'),
+          actions: [
+            IconButton(
+              tooltip: 'Загрузить примеры в Firestore',
+              onPressed: () => _publishSamples(context),
+              icon: const Icon(Icons.auto_awesome_rounded),
+            ),
+            IconButton(
+              tooltip: 'Импорт JSON',
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) => const AdminMarketplaceImportScreen(),
+                ),
+              ),
+              icon: const Icon(Icons.data_object_rounded),
+            ),
+          ],
           bottom: const TabBar(
             tabs: [
               Tab(text: 'Партнёры'),
@@ -75,13 +93,135 @@ class _PartnersTab extends StatelessWidget {
                   icon: const Icon(Icons.edit_rounded),
                   onPressed: () => _editPartner(context, partner),
                 ),
-                onTap: () => _editPartner(context, partner),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) =>
+                        AdminPartnerAssortmentScreen(partner: partner),
+                  ),
+                ),
               ),
             ),
         ],
       ),
     );
   }
+}
+
+class AdminPartnerAssortmentScreen extends StatelessWidget {
+  const AdminPartnerAssortmentScreen({super.key, required this.partner});
+
+  final MarketplacePartner partner;
+
+  @override
+  Widget build(BuildContext context) => AdminAccessGate(
+    child: Scaffold(
+      appBar: AppBar(
+        title: Text(partner.name),
+        actions: [
+          IconButton(
+            tooltip: 'Изменить карточку',
+            onPressed: () => _editPartner(context, partner),
+            icon: const Icon(Icons.edit_rounded),
+          ),
+        ],
+      ),
+      body: StreamBuilder<List<MarketplaceProduct>>(
+        stream: TajGoScope.of(
+          context,
+        ).marketplaceRepository.productsStream(partner.id, includeHidden: true),
+        builder: (context, snapshot) {
+          final products = snapshot.data ?? const <MarketplaceProduct>[];
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
+            children: [
+              Card(
+                color: TajGoColors.mint,
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        marketplaceCategoryLabel(partner.category),
+                        style: const TextStyle(
+                          color: TajGoColors.darkGreen,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(partner.address),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${partner.isActive ? 'Показывается клиентам' : 'Скрыт'} · '
+                        '${partner.isOpen ? 'открыт' : 'закрыт'} · '
+                        '${products.length} позиций',
+                        style: const TextStyle(color: TajGoColors.muted),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                'Ассортимент',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
+              ),
+              const SizedBox(height: 8),
+              if (snapshot.connectionState == ConnectionState.waiting)
+                const Center(child: CircularProgressIndicator())
+              else if (snapshot.hasError)
+                const _Message(
+                  icon: Icons.cloud_off_rounded,
+                  text: 'Не удалось загрузить ассортимент.',
+                )
+              else if (products.isEmpty)
+                const _Message(
+                  icon: Icons.inventory_2_outlined,
+                  text: 'У этого партнёра пока нет товаров.',
+                )
+              else
+                for (final product in products)
+                  Card(
+                    child: ListTile(
+                      leading: CircleAvatar(
+                        backgroundColor: product.isAvailable && !product.hidden
+                            ? TajGoColors.mint
+                            : TajGoColors.soonBg,
+                        child: const Icon(
+                          Icons.inventory_2_rounded,
+                          color: TajGoColors.darkGreen,
+                        ),
+                      ),
+                      title: Text(
+                        product.name,
+                        style: const TextStyle(fontWeight: FontWeight.w900),
+                      ),
+                      subtitle: Text(
+                        '${product.price} TJS / '
+                        '${marketplaceUnitLabel(product.unit)}'
+                        '${product.hidden ? ' · скрыт' : ''}'
+                        '${!product.isAvailable ? ' · нет в наличии' : ''}',
+                      ),
+                      trailing: const Icon(Icons.edit_rounded),
+                      onTap: () => _editProduct(
+                        context,
+                        product: product,
+                        initialPartner: partner,
+                      ),
+                    ),
+                  ),
+            ],
+          );
+        },
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => _editProduct(context, initialPartner: partner),
+        icon: const Icon(Icons.add_rounded),
+        label: const Text('Добавить товар'),
+      ),
+    ),
+  );
 }
 
 class _ProductsTab extends StatelessWidget {
@@ -123,9 +263,9 @@ class _ProductsTab extends StatelessWidget {
                 trailing: IconButton(
                   tooltip: 'Изменить',
                   icon: const Icon(Icons.edit_rounded),
-                  onPressed: () => _editProduct(context, product),
+                  onPressed: () => _editProduct(context, product: product),
                 ),
-                onTap: () => _editProduct(context, product),
+                onTap: () => _editProduct(context, product: product),
               ),
             ),
         ],
@@ -224,9 +364,10 @@ Future<void> _editPartner(
 }
 
 Future<void> _editProduct(
-  BuildContext context, [
+  BuildContext context, {
   MarketplaceProduct? product,
-]) async {
+  MarketplacePartner? initialPartner,
+}) async {
   final scope = TajGoScope.of(context);
   late final List<MarketplacePartner> partners;
   try {
@@ -242,9 +383,21 @@ Future<void> _editProduct(
   }
   final value = await showDialog<MarketplaceProduct>(
     context: context,
-    builder: (_) => _ProductEditorDialog(product: product, partners: partners),
+    builder: (_) => _ProductEditorDialog(
+      product: product,
+      partners: partners,
+      initialPartnerId: initialPartner?.id,
+    ),
   );
   if (value == null || !context.mounted) return;
+  if (product != null && product.partnerId != value.partnerId) {
+    final confirmed = await _confirmDanger(
+      context,
+      'Перенести товар к другому партнёру?',
+      'Товар сразу исчезнет из старого ассортимента и появится в новом.',
+    );
+    if (!confirmed || !context.mounted) return;
+  }
   if (product != null &&
       ((!product.hidden && value.hidden) ||
           (product.isAvailable && !value.isAvailable))) {
@@ -271,6 +424,29 @@ void _showError(BuildContext context, Object error) =>
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(error.toString().replaceFirst('Bad state: ', ''))),
     );
+
+Future<void> _publishSamples(BuildContext context) async {
+  final confirmed = await _confirmDanger(
+    context,
+    'Загрузить примеры в Firestore?',
+    'Будут созданы или обновлены 6 демонстрационных заведений и их '
+        'ассортимент. Повторный запуск безопасно обновляет те же записи.',
+  );
+  if (!confirmed || !context.mounted) return;
+  final scope = TajGoScope.of(context);
+  try {
+    await scope.marketplaceRepository.publishSampleCatalog(
+      adminId: scope.authService.currentUser!.uid,
+    );
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Примерный каталог записан в Firestore.')),
+      );
+    }
+  } catch (error) {
+    if (context.mounted) _showError(context, error);
+  }
+}
 
 Future<bool> _confirmDanger(
   BuildContext context,
@@ -313,6 +489,8 @@ class _PartnerEditorDialogState extends State<_PartnerEditorDialog> {
   late final TextEditingController _minimum;
   late final TextEditingController _fee;
   late final TextEditingController _preparation;
+  late final TextEditingController _rating;
+  late final TextEditingController _sortOrder;
   late final TextEditingController _hours;
   late String _category;
   late bool _open;
@@ -332,6 +510,8 @@ class _PartnerEditorDialogState extends State<_PartnerEditorDialog> {
     _preparation = TextEditingController(
       text: '${item?.preparationMinutes ?? 20}',
     );
+    _rating = TextEditingController(text: '${item?.rating ?? 5}');
+    _sortOrder = TextEditingController(text: '${item?.sortOrder ?? 0}');
     _hours = TextEditingController(text: item?.workingHours ?? '09:00–22:00');
     _category = item?.category ?? 'food';
     _open = item?.isOpen ?? true;
@@ -349,6 +529,8 @@ class _PartnerEditorDialogState extends State<_PartnerEditorDialog> {
       _minimum,
       _fee,
       _preparation,
+      _rating,
+      _sortOrder,
       _hours,
     ]) {
       controller.dispose();
@@ -390,10 +572,7 @@ class _PartnerEditorDialogState extends State<_PartnerEditorDialog> {
                 maxLines: 2,
               ),
               const SizedBox(height: 10),
-              TextFormField(
-                controller: _image,
-                decoration: const InputDecoration(labelText: 'URL изображения'),
-              ),
+              _httpsUrlField(_image, 'URL изображения'),
               const SizedBox(height: 10),
               Row(
                 children: [
@@ -403,7 +582,27 @@ class _PartnerEditorDialogState extends State<_PartnerEditorDialog> {
                 ],
               ),
               const SizedBox(height: 10),
-              _numberField(_preparation, 'Приготовление, минут'),
+              _numberField(
+                _preparation,
+                'Приготовление, минут',
+                max: 240,
+                integer: true,
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(child: _numberField(_rating, 'Рейтинг 0–5', max: 5)),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _numberField(
+                      _sortOrder,
+                      'Порядок показа',
+                      max: 10000,
+                      integer: true,
+                    ),
+                  ),
+                ],
+              ),
               const SizedBox(height: 10),
               TextFormField(
                 controller: _hours,
@@ -466,10 +665,11 @@ class _PartnerEditorDialogState extends State<_PartnerEditorDialog> {
         location: _location,
         minimumOrder: num.parse(_minimum.text.replaceAll(',', '.')),
         deliveryFee: num.parse(_fee.text.replaceAll(',', '.')),
-        rating: old?.rating ?? 5,
+        rating: num.parse(_rating.text.replaceAll(',', '.')).toDouble(),
         preparationMinutes: num.parse(
           _preparation.text.replaceAll(',', '.'),
         ).toInt(),
+        sortOrder: num.parse(_sortOrder.text).toInt(),
         workingHours: _hours.text,
         isOpen: _open,
         isActive: _active,
@@ -490,9 +690,14 @@ class _PartnerEditorDialogState extends State<_PartnerEditorDialog> {
 }
 
 class _ProductEditorDialog extends StatefulWidget {
-  const _ProductEditorDialog({required this.partners, this.product});
+  const _ProductEditorDialog({
+    required this.partners,
+    this.product,
+    this.initialPartnerId,
+  });
   final List<MarketplacePartner> partners;
   final MarketplaceProduct? product;
+  final String? initialPartnerId;
 
   @override
   State<_ProductEditorDialog> createState() => _ProductEditorDialogState();
@@ -504,6 +709,9 @@ class _ProductEditorDialogState extends State<_ProductEditorDialog> {
   late final TextEditingController _description;
   late final TextEditingController _image;
   late final TextEditingController _price;
+  late final TextEditingController _oldPrice;
+  late final TextEditingController _popularity;
+  late final TextEditingController _sortOrder;
   late String _partnerId;
   late String _unit;
   late bool _available;
@@ -517,7 +725,11 @@ class _ProductEditorDialogState extends State<_ProductEditorDialog> {
     _description = TextEditingController(text: item?.description);
     _image = TextEditingController(text: item?.imageUrl);
     _price = TextEditingController(text: '${item?.price ?? 0}');
-    _partnerId = item?.partnerId ?? widget.partners.first.id;
+    _oldPrice = TextEditingController(text: '${item?.oldPrice ?? ''}');
+    _popularity = TextEditingController(text: '${item?.popularity ?? 0}');
+    _sortOrder = TextEditingController(text: '${item?.sortOrder ?? 0}');
+    _partnerId =
+        item?.partnerId ?? widget.initialPartnerId ?? widget.partners.first.id;
     _unit = item?.unit ?? 'item';
     _available = item?.isAvailable ?? true;
     _hidden = item?.hidden ?? false;
@@ -525,7 +737,15 @@ class _ProductEditorDialogState extends State<_ProductEditorDialog> {
 
   @override
   void dispose() {
-    for (final controller in [_name, _description, _image, _price]) {
+    for (final controller in [
+      _name,
+      _description,
+      _image,
+      _price,
+      _oldPrice,
+      _popularity,
+      _sortOrder,
+    ]) {
       controller.dispose();
     }
     super.dispose();
@@ -563,14 +783,18 @@ class _ProductEditorDialogState extends State<_ProductEditorDialog> {
                 maxLines: 2,
               ),
               const SizedBox(height: 10),
-              TextFormField(
-                controller: _image,
-                decoration: const InputDecoration(labelText: 'URL изображения'),
-              ),
+              _httpsUrlField(_image, 'URL изображения'),
               const SizedBox(height: 10),
               Row(
                 children: [
-                  Expanded(child: _numberField(_price, 'Цена, TJS')),
+                  Expanded(
+                    child: _numberField(
+                      _price,
+                      'Цена, TJS',
+                      min: 0.01,
+                      max: 100000,
+                    ),
+                  ),
                   const SizedBox(width: 10),
                   Expanded(
                     child: DropdownButtonFormField<String>(
@@ -587,6 +811,36 @@ class _ProductEditorDialogState extends State<_ProductEditorDialog> {
                     ),
                   ),
                 ],
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: _optionalNumberField(
+                      _oldPrice,
+                      'Старая цена',
+                      minProvider: () =>
+                          num.tryParse(_price.text.replaceAll(',', '.')) ?? 0,
+                      max: 100000,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _numberField(
+                      _popularity,
+                      'Популярность',
+                      max: 1000000,
+                      integer: true,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              _numberField(
+                _sortOrder,
+                'Порядок показа',
+                max: 10000,
+                integer: true,
               ),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
@@ -628,11 +882,14 @@ class _ProductEditorDialogState extends State<_ProductEditorDialog> {
         description: _description.text,
         imageUrl: _image.text,
         price: num.parse(_price.text.replaceAll(',', '.')),
-        oldPrice: old?.oldPrice,
+        oldPrice: _oldPrice.text.trim().isEmpty
+            ? null
+            : num.parse(_oldPrice.text.replaceAll(',', '.')),
         unit: _unit,
         isAvailable: _available,
         hidden: _hidden,
-        popularity: old?.popularity ?? 0,
+        popularity: num.parse(_popularity.text).toInt(),
+        sortOrder: num.parse(_sortOrder.text).toInt(),
         isTest: old?.isTest ?? false,
       ),
     );
@@ -647,14 +904,64 @@ TextFormField _requiredField(TextEditingController controller, String label) =>
           value == null || value.trim().isEmpty ? 'Заполните поле' : null,
     );
 
-TextFormField _numberField(TextEditingController controller, String label) =>
+TextFormField _numberField(
+  TextEditingController controller,
+  String label, {
+  num min = 0,
+  num? max,
+  bool integer = false,
+}) => TextFormField(
+  controller: controller,
+  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+  decoration: InputDecoration(labelText: label),
+  validator: (value) {
+    final number = num.tryParse((value ?? '').replaceAll(',', '.'));
+    if (number == null ||
+        !number.isFinite ||
+        number < min ||
+        (max != null && number > max)) {
+      return max == null ? 'Минимум $min' : 'От $min до $max';
+    }
+    if (integer && number != number.roundToDouble()) {
+      return 'Только целое число';
+    }
+    return null;
+  },
+);
+
+TextFormField _optionalNumberField(
+  TextEditingController controller,
+  String label, {
+  num Function()? minProvider,
+  num? max,
+}) => TextFormField(
+  controller: controller,
+  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+  decoration: InputDecoration(labelText: label),
+  validator: (value) {
+    if (value == null || value.trim().isEmpty) return null;
+    final number = num.tryParse(value.replaceAll(',', '.'));
+    final min = minProvider?.call() ?? 0;
+    if (number == null || !number.isFinite || number < min) {
+      return 'Не меньше $min';
+    }
+    if (max != null && number > max) return 'Не больше $max';
+    return null;
+  },
+);
+
+TextFormField _httpsUrlField(TextEditingController controller, String label) =>
     TextFormField(
       controller: controller,
-      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      keyboardType: TextInputType.url,
       decoration: InputDecoration(labelText: label),
       validator: (value) {
-        final number = num.tryParse((value ?? '').replaceAll(',', '.'));
-        return number == null || number < 0 ? 'Введите число' : null;
+        final raw = value?.trim() ?? '';
+        if (raw.isEmpty) return null;
+        final uri = Uri.tryParse(raw);
+        return uri == null || uri.scheme != 'https' || uri.host.isEmpty
+            ? 'Нужен HTTPS URL'
+            : null;
       },
     );
 

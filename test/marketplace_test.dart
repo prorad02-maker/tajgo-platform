@@ -3,8 +3,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tajgo/core/models/marketplace_cart.dart';
 import 'package:tajgo/core/models/marketplace_partner.dart';
 import 'package:tajgo/core/models/marketplace_product.dart';
+import 'package:tajgo/core/models/marketplace_sample_catalog.dart';
 import 'package:tajgo/core/models/tajgo_order.dart';
 import 'package:tajgo/core/services/courier_offer_repository.dart';
+import 'package:tajgo/core/services/marketplace_import_service.dart';
 
 void main() {
   const point = GeoPoint(40.2833, 69.6222);
@@ -155,5 +157,69 @@ void main() {
       ),
       isFalse,
     );
+  });
+
+  group('marketplace admin import', () {
+    const service = MarketplaceImportService();
+
+    test('template passes dry-run and preserves sortable catalog fields', () {
+      final catalog = service.parse(
+        service.template(),
+        newPartnerId: () => 'generated-partner',
+        newProductId: () => 'generated-product',
+      );
+
+      expect(catalog.partner.id, 'demo-cafe-khujand');
+      expect(catalog.partner.category, 'food');
+      expect(catalog.partner.sortOrder, 10);
+      expect(catalog.products, hasLength(1));
+      expect(catalog.products.single.oldPrice, 36);
+      expect(catalog.products.single.sortOrder, 10);
+      expect(catalog.warnings, isEmpty);
+    });
+
+    test('rejects unsupported categories and insecure image URLs', () {
+      expect(
+        () => service.parse(
+          service.template().replaceFirst('"food"', '"taxi"'),
+          newPartnerId: () => 'partner',
+          newProductId: () => 'product',
+        ),
+        throwsA(isA<MarketplaceImportException>()),
+      );
+      expect(
+        () => service.parse(
+          service.template().replaceFirst(
+            '"imageUrl": ""',
+            '"imageUrl": "http://example.com/image.png"',
+          ),
+          newPartnerId: () => 'partner',
+          newProductId: () => 'product',
+        ),
+        throwsA(isA<MarketplaceImportException>()),
+      );
+    });
+
+    test('warns when establishment coordinates are outside Khujand', () {
+      final catalog = service.parse(
+        service.template().replaceFirst('40.2833', '39.0000'),
+        newPartnerId: () => 'partner',
+        newProductId: () => 'product',
+      );
+      expect(catalog.warnings.single, contains('за пределами'));
+    });
+
+    test('preview catalog covers all three primary categories', () {
+      expect(marketplaceSamplePartners, hasLength(6));
+      expect(marketplaceSampleProducts, hasLength(18));
+      for (final category in marketplaceCategories) {
+        expect(samplePartnersForCategory(category), hasLength(2));
+      }
+      for (final partner in marketplaceSamplePartners) {
+        expect(partner.isPreview, isTrue);
+        expect(sampleProductsForPartner(partner.id), hasLength(3));
+        expect(partner.toWriteMap(), isNot(contains('isPreview')));
+      }
+    });
   });
 }

@@ -37,12 +37,34 @@ class MarketplacePartnersScreen extends StatelessWidget {
               subtitle: 'Мы подключаем проверенные места Худжанда.',
             );
           }
+          final preview = partners.any((partner) => partner.isPreview);
           return ListView.separated(
             padding: const EdgeInsets.all(16),
-            itemCount: partners.length,
+            itemCount: partners.length + (preview ? 1 : 0),
             separatorBuilder: (_, _) => const SizedBox(height: 10),
             itemBuilder: (context, index) {
-              final partner = partners[index];
+              if (preview && index == 0) {
+                return const Card(
+                  color: Color(0xFFFFF8E1),
+                  child: Padding(
+                    padding: EdgeInsets.all(12),
+                    child: Row(
+                      children: [
+                        Icon(Icons.auto_awesome_rounded),
+                        SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'Пока база заполняется, показываем временные '
+                            'примеры заведений Худжанда.',
+                            style: TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }
+              final partner = partners[index - (preview ? 1 : 0)];
               return Card(
                 clipBehavior: Clip.antiAlias,
                 child: InkWell(
@@ -59,7 +81,7 @@ class MarketplacePartnersScreen extends StatelessWidget {
                         height: 112,
                         child: _MarketplaceImage(
                           imageUrl: partner.imageUrl,
-                          icon: Icons.storefront_rounded,
+                          icon: _categoryIcon(partner.category),
                         ),
                       ),
                       Expanded(
@@ -125,6 +147,13 @@ class MarketplacePartnersScreen extends StatelessWidget {
     );
   }
 }
+
+IconData _categoryIcon(String category) => switch (category) {
+  'food' => Icons.restaurant_rounded,
+  'groceries' => Icons.shopping_basket_rounded,
+  'flowers' => Icons.local_florist_rounded,
+  _ => Icons.storefront_rounded,
+};
 
 class _Message extends StatelessWidget {
   const _Message({

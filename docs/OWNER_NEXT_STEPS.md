@@ -1,8 +1,8 @@
 # TajGo — следующие шаги владельца
 
-## После v1.4.0 Full Pilot Completion
+## После v1.5.0 Marketplace & Admin Expansion
 
-Актуальное дополнение: клиентская витрина `Еда / Продукты / Цветы`, корзина одного партнёра, checkout на карте, catalog-заказ, admin CRUD партнёров/товаров и demo seed реализованы. Перед реальным тестом новые `firestore.rules` необходимо отдельно проверить и задеплоить с разрешения владельца. Полный сценарий находится в `docs/FINAL_FULL_CAPABILITY_TEST_PLAN.md`.
+Актуальное дополнение: клиентская витрина `Еда / Продукты / Цветы`, 6 preview-заведений, 18 товаров, admin CRUD ассортимента, JSON dry-run/import и улучшенная карта реализованы. Перед реальным тестом новые `firestore.rules` необходимо отдельно проверить и задеплоить с разрешения владельца. Полный сценарий находится в `docs/FINAL_FULL_CAPABILITY_TEST_PLAN.md`, наполнение — в `docs/MARKETPLACE_ADMIN_GUIDE.md`.
 
 1. В Firebase Console убедиться, что Phone provider включён и Android-приложение
    зарегистрировано как `tj.tajgo.app` с актуальными debug SHA-1/SHA-256.
@@ -21,7 +21,7 @@
 - v0.7.0 Customer, Courier, Navigation, Admin/Dispatch и debug-only Demo Tools сохранены.
 - Android launcher name приведён к `TajGo`.
 - Финальный Android package применён: `tj.tajgo.app`.
-- Интегрированная версия проекта подготовлена как `1.2.0+27`.
+- Интегрированная версия проекта подготовлена как `1.5.0+30`.
 - Реализованы анкета курьера, draft/pending/approved/rejected/suspended,
   admin-модерация и одноразовый onboarding.
 - Gradle поддерживает локальный release keystore через `android/key.properties`, не раскрывая секреты.

@@ -54,7 +54,10 @@ class PartnerCatalogScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: Text(partner.name)),
       body: StreamBuilder<List<MarketplaceProduct>>(
-        stream: scope.marketplaceRepository.productsStream(partner.id),
+        stream: scope.marketplaceRepository.productsStream(
+          partner.id,
+          previewFallback: partner.isPreview,
+        ),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting &&
               !snapshot.hasData) {
@@ -70,6 +73,21 @@ class PartnerCatalogScreen extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
             children: [
               _PartnerHeader(partner: partner),
+              if (partner.isPreview) ...[
+                const SizedBox(height: 10),
+                const Card(
+                  color: Color(0xFFFFF8E1),
+                  child: Padding(
+                    padding: EdgeInsets.all(12),
+                    child: Text(
+                      'Это временный пример ассортимента. Администратор может '
+                      'загрузить готовые примеры в Firestore или заменить их '
+                      'реальными заведениями.',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ),
+              ],
               const SizedBox(height: 12),
               if (products.isEmpty)
                 const Card(

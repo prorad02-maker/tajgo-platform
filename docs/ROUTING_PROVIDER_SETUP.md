@@ -38,10 +38,12 @@ flutter run -d <DEVICE_ID> --dart-define-from-file=tool/routing.local.json
 Пилотная debug APK с тем же конфигом:
 
 ```powershell
-flutter build apk --debug --dart-define-from-file=tool/routing.local.json
+flutter build apk --debug --dart-define-from-file=tool/routing.pilot.json
 ```
 
-`routing.local.json` игнорируется Git. Ключи нельзя помещать в исходники,
+`tool/routing.pilot.json` — публичная конфигурация лёгкого тестового OSRM без
+секрета. `routing.local.json` игнорируется Git и предназначен для частного или
+договорного endpoint. Ключи нельзя помещать в исходники,
 скриншоты, issue или документацию.
 
 Если приложение запустить обычной командой `flutter run`, внешний provider
@@ -51,7 +53,9 @@ flutter build apk --debug --dart-define-from-file=tool/routing.local.json
 ## OSRM-совместимость
 
 Запрос использует координаты строго `longitude,latitude`, `overview=full`,
-`geometries=geojson`, `steps=true`, `language=ru`. Ответ разбирает geometry,
+`geometries=geojson`, `steps=true`. Русские подсказки манёвров формируются
+локально: параметр `language` намеренно не отправляется, потому что публичный
+FOSSGIS OSRM отвечает HTTP 400 на неподдерживаемые query-параметры. Ответ разбирает geometry,
 distance, duration, legs, steps и maneuver. Неуспешный HTTP, timeout, плохой
 JSON или OSRM code не `Ok` переводятся в безопасный fallback.
 

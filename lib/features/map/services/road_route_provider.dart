@@ -115,7 +115,6 @@ class RoadRouteProvider implements RouteProvider {
         'overview': 'full',
         'geometries': 'geojson',
         'steps': 'true',
-        'language': 'ru',
         if (config.apiKey.isNotEmpty) 'key': config.apiKey,
       },
     );

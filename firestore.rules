@@ -856,20 +856,57 @@ service cloud.firestore {
     match /partners/{partnerId} {
       function partnerDataIsValid(data) {
         return data.get('name', null) is string
+          && data.name.size() > 0
+          && data.name.size() <= 120
           && data.get('category', null) in ['food', 'groceries', 'flowers']
+          && data.get('description', '') is string
+          && data.get('imageUrl', '') is string
           && data.get('address', null) is string
+          && data.address.size() > 0
+          && data.address.size() <= 300
           && data.get('location', null) is latlng
           && data.get('minimumOrder', null) is number
           && data.get('minimumOrder', -1) >= 0
+          && data.get('minimumOrder', 0) <= 100000
           && data.get('deliveryFee', null) is number
           && data.get('deliveryFee', -1) >= 0
+          && data.get('deliveryFee', 0) <= 10000
+          && data.get('rating', 5) is number
+          && data.get('rating', 5) >= 0
+          && data.get('rating', 5) <= 5
           && data.get('preparationMinutes', 20) is int
           && data.get('preparationMinutes', 20) >= 0
+          && data.get('preparationMinutes', 20) <= 240
+          && data.get('sortOrder', 0) is int
+          && data.get('sortOrder', 0) >= -10000
+          && data.get('sortOrder', 0) <= 10000
+          && data.get('workingHours', '') is string
           && data.get('isOpen', null) is bool
-          && data.get('isActive', null) is bool;
+          && data.get('isActive', null) is bool
+          && data.get('isTest', false) is bool
+          && data.keys().hasOnly([
+            'name',
+            'category',
+            'description',
+            'imageUrl',
+            'address',
+            'location',
+            'minimumOrder',
+            'deliveryFee',
+            'rating',
+            'preparationMinutes',
+            'sortOrder',
+            'workingHours',
+            'isOpen',
+            'isActive',
+            'isTest',
+            'createdAt',
+            'updatedAt'
+          ]);
       }
 
-      allow get, list: if signedIn();
+      allow get, list: if signedIn()
+        && (isAdmin() || resource.data.get('isActive', false) == true);
       allow create: if isAdmin()
         && partnerDataIsValid(request.resource.data)
         && request.resource.data.createdAt == request.time
@@ -882,20 +919,65 @@ service cloud.firestore {
     }
 
     match /products/{productId} {
+      function productPartnerIsActive(data) {
+        return data.get('partnerId', null) is string
+          && exists(
+            /databases/$(database)/documents/partners/$(data.partnerId)
+          )
+          && get(
+            /databases/$(database)/documents/partners/$(data.partnerId)
+          ).data.get('isActive', false) == true;
+      }
+
       function productDataIsValid(data) {
         return data.get('partnerId', null) is string
           && existsAfter(
             /databases/$(database)/documents/partners/$(data.partnerId)
           )
           && data.get('name', null) is string
+          && data.name.size() > 0
+          && data.name.size() <= 160
+          && data.get('description', '') is string
+          && data.get('imageUrl', '') is string
           && data.get('price', null) is number
           && data.get('price', -1) >= 0
+          && data.get('price', 0) <= 100000
+          && (data.get('oldPrice', null) == null
+            || (data.oldPrice is number
+              && data.oldPrice >= data.price
+              && data.oldPrice <= 100000))
           && data.get('unit', null) in ['item', 'kg', 'portion', 'bouquet']
           && data.get('isAvailable', null) is bool
-          && data.get('hidden', null) is bool;
+          && data.get('hidden', null) is bool
+          && data.get('popularity', 0) is int
+          && data.get('popularity', 0) >= 0
+          && data.get('popularity', 0) <= 1000000
+          && data.get('sortOrder', 0) is int
+          && data.get('sortOrder', 0) >= -10000
+          && data.get('sortOrder', 0) <= 10000
+          && data.get('isTest', false) is bool
+          && data.keys().hasOnly([
+            'partnerId',
+            'name',
+            'description',
+            'imageUrl',
+            'price',
+            'oldPrice',
+            'unit',
+            'isAvailable',
+            'hidden',
+            'popularity',
+            'sortOrder',
+            'isTest',
+            'createdAt',
+            'updatedAt'
+          ]);
       }
 
-      allow get, list: if signedIn();
+      allow get, list: if signedIn()
+        && (isAdmin()
+          || (resource.data.get('hidden', true) == false
+            && productPartnerIsActive(resource.data)));
       allow create: if isAdmin()
         && productDataIsValid(request.resource.data)
         && request.resource.data.createdAt == request.time

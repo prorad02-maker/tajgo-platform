@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -13,6 +15,7 @@ import '../map/models/place_suggestion.dart';
 import '../map/models/tajgo_route.dart';
 import '../map/services/place_search_service.dart';
 import '../map/widgets/tajgo_location_widgets.dart';
+import '../map/widgets/place_search_sheet.dart';
 import '../map/widgets/tajgo_route_summary_card.dart';
 
 class MarketplaceDeliverySelection {
@@ -147,6 +150,21 @@ class _MarketplaceCheckoutScreenState extends State<MarketplaceCheckoutScreen> {
                     ),
                     const SizedBox(height: 10),
                     _TotalsCard(cart: cart, partner: partner),
+                    if (partner.isPreview) ...[
+                      const SizedBox(height: 10),
+                      const Card(
+                        color: Color(0xFFFFF8E1),
+                        child: Padding(
+                          padding: EdgeInsets.all(12),
+                          child: Text(
+                            'Демо-карточка ещё не опубликована в базе. '
+                            'Оформление станет доступно после публикации '
+                            'каталога администратором.',
+                            style: TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 12),
                     Card(
                       child: ListTile(
@@ -185,9 +203,15 @@ class _MarketplaceCheckoutScreenState extends State<MarketplaceCheckoutScreen> {
               : SafeArea(
                   minimum: const EdgeInsets.all(12),
                   child: FilledButton(
-                    onPressed: _busy ? null : () => _submit(cart),
+                    onPressed: _busy || partner.isPreview
+                        ? null
+                        : () => _submit(cart),
                     child: Text(
-                      _busy ? 'Оформляем…' : 'Оформить · ${cart.total} TJS',
+                      partner.isPreview
+                          ? 'Пример · публикация через админку'
+                          : _busy
+                          ? 'Оформляем…'
+                          : 'Оформить · ${cart.total} TJS',
                     ),
                   ),
                 ),
@@ -307,6 +331,8 @@ class _MarketplaceDeliveryPointScreenState
   bool _loading = true;
   bool _locating = false;
   int _requestId = 0;
+  LatLng? _currentPosition;
+  Timer? _moveDebounce;
 
   LatLng get _pickup => LatLng(
     widget.partner.location.latitude,
@@ -320,6 +346,12 @@ class _MarketplaceDeliveryPointScreenState
     WidgetsBinding.instance.addPostFrameCallback((_) => _prepare());
   }
 
+  @override
+  void dispose() {
+    _moveDebounce?.cancel();
+    super.dispose();
+  }
+
   Future<void> _prepare() async {
     final position = await TajGoScope.of(
       context,
@@ -328,8 +360,9 @@ class _MarketplaceDeliveryPointScreenState
     final point = position == null
         ? LatLng(_pickup.latitude + 0.008, _pickup.longitude + 0.006)
         : LatLng(position.latitude, position.longitude);
+    _currentPosition = position == null ? null : point;
     _map.move(point, 15);
-    await _refresh();
+    await _refresh(fitRoute: true);
   }
 
   Future<void> _locate() async {
@@ -340,7 +373,9 @@ class _MarketplaceDeliveryPointScreenState
         context,
       ).locationService.determineCurrentPosition();
       if (!mounted) return;
-      _map.move(LatLng(position.latitude, position.longitude), 16);
+      final point = LatLng(position.latitude, position.longitude);
+      setState(() => _currentPosition = point);
+      _map.move(point, 16);
       await _refresh();
     } catch (error) {
       if (mounted) {
@@ -353,7 +388,25 @@ class _MarketplaceDeliveryPointScreenState
     }
   }
 
-  Future<void> _refresh() async {
+  void _scheduleRefresh() {
+    _moveDebounce?.cancel();
+    _moveDebounce = Timer(const Duration(milliseconds: 450), _refresh);
+  }
+
+  Future<void> _searchAddress() async {
+    final selected = await showPlaceSearchSheet(
+      context: context,
+      service: _places,
+      title: 'Найти адрес доставки',
+      near: _map.camera.center,
+      recentType: 'marketplaceDelivery',
+    );
+    if (selected == null || !mounted) return;
+    _map.move(selected.point, 16);
+    await _refresh();
+  }
+
+  Future<void> _refresh({bool fitRoute = false}) async {
     final request = ++_requestId;
     final point = _map.camera.center;
     setState(() {
@@ -371,11 +424,34 @@ class _MarketplaceDeliveryPointScreenState
     ]);
     if (!mounted || request != _requestId) return;
     final place = results[0] as PlaceSuggestion;
+    final route = results[1] as TajGoRoute;
     setState(() {
       _address = place.address;
-      _route = results[1] as TajGoRoute;
+      _route = route;
       _loading = false;
     });
+    if (fitRoute && route.points.length > 1) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _map.fitCamera(
+          CameraFit.coordinates(
+            coordinates: route.points,
+            padding: const EdgeInsets.fromLTRB(44, 90, 44, 230),
+          ),
+        );
+      });
+    }
+  }
+
+  void _showEntireRoute() {
+    final points = _route?.points;
+    if (points == null || points.length < 2) return;
+    _map.fitCamera(
+      CameraFit.coordinates(
+        coordinates: points,
+        padding: const EdgeInsets.fromLTRB(44, 90, 44, 230),
+      ),
+    );
   }
 
   void _confirm() {
@@ -395,7 +471,16 @@ class _MarketplaceDeliveryPointScreenState
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Куда доставить?')),
+    appBar: AppBar(
+      title: const Text('Куда доставить?'),
+      actions: [
+        IconButton(
+          onPressed: _searchAddress,
+          tooltip: 'Найти адрес',
+          icon: const Icon(Icons.search_rounded),
+        ),
+      ],
+    ),
     body: Stack(
       children: [
         Positioned.fill(
@@ -407,7 +492,7 @@ class _MarketplaceDeliveryPointScreenState
               minZoom: 3,
               maxZoom: 19,
               onMapEvent: (event) {
-                if (event is MapEventMoveEnd) _refresh();
+                if (event is MapEventMoveEnd) _scheduleRefresh();
               },
             ),
             children: [
@@ -439,6 +524,13 @@ class _MarketplaceDeliveryPointScreenState
                     height: 44,
                     child: const _MapPoint(label: 'A'),
                   ),
+                  if (_currentPosition != null)
+                    Marker(
+                      point: _currentPosition!,
+                      width: 44,
+                      height: 44,
+                      child: const TajGoCurrentLocationMarker(),
+                    ),
                 ],
               ),
               RichAttributionWidget(
@@ -486,7 +578,11 @@ class _MarketplaceDeliveryPointScreenState
                       style: const TextStyle(fontWeight: FontWeight.w800),
                     ),
                     const SizedBox(height: 8),
-                    TajGoRouteSummaryCard(route: _route, loading: _loading),
+                    TajGoRouteSummaryCard(
+                      route: _route,
+                      loading: _loading,
+                      onShowEntireRoute: _showEntireRoute,
+                    ),
                     const SizedBox(height: 8),
                     FilledButton(
                       onPressed: _loading ? null : _confirm,

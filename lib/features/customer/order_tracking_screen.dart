@@ -235,7 +235,12 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
   }
 
   void _showEntireRoute(LatLng? from, LatLng? to) {
-    final points = _route?.points ?? <LatLng>[?from, ?to];
+    final points = <LatLng>{
+      ...?_route?.points,
+      ...?_liveRoute?.points,
+      ?from,
+      ?to,
+    }.toList(growable: false);
     if (points.length < 2) return;
     _mapController.fitCamera(
       CameraFit.coordinates(
@@ -399,6 +404,21 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
                         ),
                       ],
                     ),
+                  if (_liveRoute != null && courierPoint != null)
+                    PolylineLayer(
+                      polylines: [
+                        Polyline(
+                          points: _liveRoute!.points,
+                          color: Colors.blue,
+                          strokeWidth: 5,
+                          borderColor: Colors.white,
+                          borderStrokeWidth: 2,
+                          pattern: _liveRoute!.isFallback
+                              ? StrokePattern.dashed(segments: const [9, 7])
+                              : const StrokePattern.solid(),
+                        ),
+                      ],
+                    ),
                   MarkerLayer(
                     markers: [
                       if (from != null)
@@ -509,7 +529,9 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
           subtitle: _subtitle(order, courierNearby: courierNearby),
           route: _route,
           routeLoading: _routeLoading,
+          liveDistanceKm: liveDistance,
           liveEtaMinutes: liveEta,
+          courierLocationUpdatedAt: courier?.locationUpdatedAt,
           courierNearby: courierNearby,
           onShowRoute: from == null || to == null
               ? null
@@ -534,7 +556,9 @@ class _StatusPanel extends StatelessWidget {
     required this.subtitle,
     required this.route,
     required this.routeLoading,
+    required this.liveDistanceKm,
     required this.liveEtaMinutes,
+    required this.courierLocationUpdatedAt,
     required this.courierNearby,
     required this.onShowRoute,
   });
@@ -551,7 +575,9 @@ class _StatusPanel extends StatelessWidget {
   final String? subtitle;
   final TajGoRoute? route;
   final bool routeLoading;
+  final double? liveDistanceKm;
   final int? liveEtaMinutes;
+  final DateTime? courierLocationUpdatedAt;
   final bool courierNearby;
   final VoidCallback? onShowRoute;
 
@@ -589,10 +615,25 @@ class _StatusPanel extends StatelessWidget {
               ] else if (liveEtaMinutes != null) ...[
                 const SizedBox(height: 4),
                 Text(
-                  'Осталось примерно $liveEtaMinutes мин',
+                  'До цели ${_liveDistanceLabel(liveDistanceKm)} · примерно $liveEtaMinutes мин',
                   style: const TextStyle(
                     color: TajGoColors.darkGreen,
                     fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+              if (courier != null && courierLocationUpdatedAt != null) ...[
+                const SizedBox(height: 3),
+                Text(
+                  _gpsFreshness(courierLocationUpdatedAt!),
+                  style: TextStyle(
+                    color:
+                        DateTime.now().difference(courierLocationUpdatedAt!) >
+                            const Duration(minutes: 2)
+                        ? TajGoColors.warning
+                        : TajGoColors.muted,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
               ],
@@ -752,6 +793,25 @@ class _CatalogOrderSummary extends StatelessWidget {
 String _catalogQuantity(double value) => value == value.roundToDouble()
     ? value.toInt().toString()
     : value.toStringAsFixed(1);
+
+String _liveDistanceLabel(double? distanceKm) {
+  if (distanceKm == null) return '—';
+  if (distanceKm < 1) {
+    return '${(distanceKm * 1000).round()} м';
+  }
+  return '${distanceKm.toStringAsFixed(1)} км';
+}
+
+String _gpsFreshness(DateTime updatedAt) {
+  final age = DateTime.now().difference(updatedAt);
+  if (age < const Duration(seconds: 45)) {
+    return 'GPS курьера обновлён сейчас';
+  }
+  if (age < const Duration(minutes: 2)) {
+    return 'GPS курьера обновлён минуту назад';
+  }
+  return 'Позиция курьера временно не обновляется';
+}
 
 class _OffersSection extends StatelessWidget {
   const _OffersSection({required this.order, required this.onShowMap});
