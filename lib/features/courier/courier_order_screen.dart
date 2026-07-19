@@ -1,14 +1,13 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/constants/tajgo_colors.dart';
 import '../../core/models/tajgo_order.dart';
+import '../../core/services/external_navigator_service.dart';
 import '../../core/services/pricing.dart' as pricing;
 import '../../shared/widgets/tajgo_action_button.dart';
 import '../../shared/widgets/tajgo_order_progress.dart';
@@ -364,21 +363,39 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
       : pricing.courierNavigationEtaMinutes(distanceKm);
 
   Future<void> _openNavigator(LatLng target) async {
-    final latitude = target.latitude;
-    final longitude = target.longitude;
-    final native = defaultTargetPlatform == TargetPlatform.iOS
-        ? Uri.parse('https://maps.apple.com/?daddr=$latitude,$longitude')
-        : Uri.parse('geo:$latitude,$longitude?q=$latitude,$longitude(TajGo)');
-    final fallback = Uri.parse(
-      'https://www.google.com/maps/dir/?api=1&destination=$latitude,$longitude',
-    );
+    final service = TajGoScope.of(context).externalNavigatorService;
+    final preference = await service.load();
+    var selected = preference.navigator;
+    if (preference.askEveryTime && mounted) {
+      selected =
+          await showModalBottomSheet<ExternalNavigator>(
+            context: context,
+            builder: (context) => SafeArea(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: ExternalNavigator.values
+                    .map(
+                      (value) => ListTile(
+                        title: Text(_navigatorLabel(value)),
+                        onTap: () => Navigator.pop(context, value),
+                      ),
+                    )
+                    .toList(growable: false),
+              ),
+            ),
+          ) ??
+          selected;
+    }
+    if (selected == ExternalNavigator.tajgo) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Навигация TajGo уже открыта.')),
+        );
+      }
+      return;
+    }
     try {
-      final opened = await launchUrl(
-        native,
-        mode: LaunchMode.externalApplication,
-      );
-      if (!opened &&
-          !await launchUrl(fallback, mode: LaunchMode.externalApplication)) {
+      if (!await service.open(navigator: selected, destination: target)) {
         throw StateError('Не удалось открыть навигатор.');
       }
     } catch (error) {
@@ -389,6 +406,14 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
       }
     }
   }
+
+  String _navigatorLabel(ExternalNavigator value) => switch (value) {
+    ExternalNavigator.tajgo => 'TajGo',
+    ExternalNavigator.yandex => 'Яндекс Навигатор',
+    ExternalNavigator.google => 'Google Maps',
+    ExternalNavigator.twoGis => '2GIS',
+    ExternalNavigator.system => 'Системный навигатор',
+  };
 
   Future<void> _showCompletionDialog(TajGoOrder order, double distance) async {
     final controller = TextEditingController();
@@ -995,7 +1020,7 @@ class _OrderPanel extends StatelessWidget {
                     const SizedBox(width: 8),
                     OutlinedButton(
                       onPressed: onNavigate,
-                      child: const Text('Навигатор'),
+                      child: const Text('Открыть в навигаторе'),
                     ),
                     const SizedBox(width: 8),
                     Expanded(

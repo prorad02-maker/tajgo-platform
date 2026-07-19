@@ -141,7 +141,33 @@ class AccountProfileScreen extends StatelessWidget {
   Future<void> _switchMode(BuildContext context, AppUser user) async {
     final scope = TajGoScope.of(context);
     try {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Сменить режим?'),
+          content: Text(
+            currentMode == AppUserRole.courier
+                ? 'Перейти в интерфейс клиента?'
+                : 'Перейти в интерфейс курьера?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Отмена'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Перейти'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !context.mounted) return;
       if (currentMode == AppUserRole.courier) {
+        final courier = await scope.courierRepository.getCourier(user.uid);
+        if (courier?.activeOrderId != null || courier?.isBusy == true) {
+          throw StateError('Сначала завершите текущий заказ.');
+        }
         try {
           await scope.courierRepository.setOnline(
             uid: user.uid,
@@ -156,6 +182,10 @@ class AccountProfileScreen extends StatelessWidget {
         _replaceRoot(context, const CustomerHomeScreen());
         return;
       }
+      if (await scope.orderRepository.hasActiveOrder(user.uid)) {
+        throw StateError('Сначала завершите текущий заказ.');
+      }
+      if (!context.mounted) return;
       if (!user.courierApproved) {
         Navigator.push(
           context,
@@ -175,6 +205,11 @@ class AccountProfileScreen extends StatelessWidget {
       }
       await scope.accountModeService.switchToCourier();
       if (context.mounted) _replaceRoot(context, const CourierHomeScreen());
+    } on StateError catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.message)));
     } catch (_) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

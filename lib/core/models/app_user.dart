@@ -11,6 +11,8 @@ class AppUser {
     required this.phoneVerified,
     required this.profileComplete,
     required this.courierOnboardingCompleted,
+    this.onboardingCompleted = true,
+    this.selectedRole = AppUserRole.customer,
     required this.city,
     required this.language,
     required this.createdAt,
@@ -30,6 +32,8 @@ class AppUser {
   final bool phoneVerified;
   final bool profileComplete;
   final bool courierOnboardingCompleted;
+  final bool onboardingCompleted;
+  final String selectedRole;
   final String city;
   final String language;
   final DateTime? createdAt;
@@ -84,6 +88,13 @@ class AppUser {
           (displayName.trim().isNotEmpty && displayName != 'Пользователь'),
       courierOnboardingCompleted:
           data['courierOnboardingCompleted'] as bool? ?? legacyCourier,
+      onboardingCompleted:
+          data['onboardingCompleted'] as bool? ?? data.containsKey('role'),
+      selectedRole: _safeMode(
+        data['selectedRole'] as String? ??
+            data['targetRole'] as String? ??
+            legacyRole,
+      ),
       city: data['city'] as String? ?? 'Худжанд',
       language: data['language'] as String? ?? 'ru',
       createdAt: _date(data['createdAt']),

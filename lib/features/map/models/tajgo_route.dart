@@ -2,7 +2,14 @@ import 'package:latlong2/latlong.dart';
 
 import 'tajgo_navigation_step.dart';
 
-enum RouteMode { walking, bicycle, scooter, car }
+enum RouteMode { bicycle, scooter, car }
+
+/// Старые значения walking/foot/pedestrian безопасно переводятся на велосипед.
+RouteMode routeModeFromString(String? value) => switch (value) {
+  'scooter' => RouteMode.scooter,
+  'car' => RouteMode.car,
+  _ => RouteMode.bicycle,
+};
 
 enum RouteQuality {
   road,

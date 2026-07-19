@@ -16,6 +16,8 @@ class TajGoCourier {
     this.activeOrderId,
     this.ordersToday = 0,
     this.score = 100,
+    this.isBusy = false,
+    this.locationAccuracy,
   });
   final String uid, displayName, city, transport;
   final String? phoneNumber;
@@ -28,6 +30,8 @@ class TajGoCourier {
   final String? activeOrderId;
   final int ordersToday;
   final int score;
+  final bool isBusy;
+  final double? locationAccuracy;
 
   /// Legacy aliases used by the existing Courier MVP widgets.
   String get name => displayName;
@@ -51,6 +55,8 @@ class TajGoCourier {
       activeOrderId: data['activeOrderId'] as String?,
       ordersToday: (data['ordersToday'] as num? ?? 0).toInt(),
       score: (data['score'] as num? ?? 100).toInt(),
+      isBusy: data['isBusy'] as bool? ?? data['activeOrderId'] != null,
+      locationAccuracy: (data['locationAccuracy'] as num?)?.toDouble(),
     );
   }
 

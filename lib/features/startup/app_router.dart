@@ -5,8 +5,10 @@ import '../../shared/widgets/tajgo_scope.dart';
 import '../auth/profile_completion_screen.dart';
 import '../courier/courier_home_screen.dart';
 import '../courier/courier_onboarding_screen.dart';
+import '../courier/courier_application_status_screen.dart';
 import '../customer/customer_home_screen.dart';
 import 'intent_selection_screen.dart';
+import 'role_onboarding_screen.dart';
 import 'startup_decision.dart';
 
 class AppStartupRouter extends StatefulWidget {
@@ -99,6 +101,7 @@ class _AppStartupRouterState extends State<AppStartupRouter> {
       final state = snapshot.data!;
       return switch (state.destination) {
         StartupDestination.intent => const IntentSelectionScreen(),
+        StartupDestination.roleOnboarding => const RoleOnboardingScreen(),
         StartupDestination.profileCompletion => ProfileCompletionScreen(
           initialIntent: state.profile?.courierStatus == CourierStatus.draft
               ? AppUserRole.courier
@@ -106,6 +109,10 @@ class _AppStartupRouterState extends State<AppStartupRouter> {
         ),
         StartupDestination.customerHome => const CustomerHomeScreen(),
         StartupDestination.courierOnboarding => const CourierOnboardingScreen(),
+        StartupDestination.courierApplicationStatus =>
+          CourierApplicationStatusScreen(
+            status: state.profile?.courierStatus ?? CourierStatus.draft,
+          ),
         StartupDestination.courierHome => const CourierHomeScreen(),
       };
     },

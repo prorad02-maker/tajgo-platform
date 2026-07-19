@@ -3,17 +3,19 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:latlong2/latlong.dart';
 
 import '../../core/constants/tajgo_colors.dart';
 import '../../core/models/tajgo_courier.dart';
 import '../../core/models/tajgo_order.dart';
 import '../../core/models/app_user.dart';
+import '../../core/services/courier_repository.dart';
+import '../../core/services/external_navigator_service.dart';
+import '../../core/services/pricing.dart';
 import '../map/services/tajgo_location_service.dart';
-import '../../shared/widgets/tajgo_action_button.dart';
 import '../../shared/widgets/tajgo_order_card.dart';
 import '../../shared/widgets/tajgo_order_progress.dart';
 import '../../shared/widgets/tajgo_scope.dart';
-import '../../shared/widgets/tajgo_stat_card.dart';
 import '../../shared/widgets/tajgo_status_pill.dart';
 import 'courier_order_screen.dart';
 import 'courier_application_status_screen.dart';
@@ -178,29 +180,67 @@ class _CourierHomeScreenState extends State<CourierHomeScreen>
     );
   }
 
-  Future<void> _acceptOrder(TajGoOrder order) async {
-    if (_busy) {
-      return;
+  Future<void> _submitOffer(TajGoOrder order, {required bool custom}) async {
+    final clientPrice = order.clientPrice ?? order.price;
+    num proposedPrice = clientPrice;
+    if (custom) {
+      final controller = TextEditingController(
+        text: (clientPrice.toInt() + 1).toString(),
+      );
+      final value = await showDialog<int>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Предложить свою цену'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            keyboardType: TextInputType.number,
+            decoration: InputDecoration(
+              labelText: 'Цена, TJS',
+              helperText: 'Цена клиента: ${clientPrice.toInt()} TJS',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Отмена'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(
+                dialogContext,
+                int.tryParse(controller.text.trim()),
+              ),
+              child: const Text('Отправить'),
+            ),
+          ],
+        ),
+      );
+      controller.dispose();
+      if (value == null) return;
+      if (value <= clientPrice) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Своя цена должна быть выше цены клиента.'),
+            ),
+          );
+        }
+        return;
+      }
+      proposedPrice = value;
     }
-    setState(() => _busy = true);
-    try {
-      await TajGoScope.of(
-        context,
-      ).courierRepository.acceptOrder(orderId: order.id, courierId: _uid);
+    await _run(() async {
+      await TajGoScope.of(context).courierOfferRepository.submitCourierOffer(
+        orderId: order.id,
+        courierId: _uid,
+        proposedPrice: proposedPrice,
+      );
       if (mounted) {
-        _openOrder(order.id);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Предложение отправлено клиенту.')),
+        );
       }
-    } on StateError catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(error.message)));
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _busy = false);
-      }
-    }
+    });
   }
 
   Future<void> _resetTestOrder() async {
@@ -372,244 +412,388 @@ class _CourierHomeScreenState extends State<CourierHomeScreen>
   @override
   Widget build(BuildContext context) {
     final repository = TajGoScope.of(context).courierRepository;
-    return Scaffold(
-      body: StreamBuilder<TajGoCourier?>(
-        stream: repository.courierStream(_uid),
-        builder: (context, courierSnapshot) {
-          final courier = courierSnapshot.data;
-          final online = courier?.online ?? false;
-          _lastOnline = online && _profileReady;
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted) {
-              _syncLocationBroadcast(online && _profileReady);
-            }
-          });
-          return StreamBuilder<TajGoOrder?>(
-            stream: courier?.activeOrderId == null
-                ? Stream<TajGoOrder?>.value(null)
-                : repository.orderStream(courier!.activeOrderId!),
-            builder: (context, activeSnapshot) {
-              final activeOrder = activeSnapshot.data;
-              return ListView(
-                padding: EdgeInsets.zero,
-                children: [
-                  _CourierHeader(
-                    online: online,
-                    broadcasting: _broadcasting,
-                    busy: _busy || !_profileReady,
-                    onToggle: () => _setOnline(!online),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 18, 16, 28),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        if (_locationIssue != null ||
-                            _locationWriteError != null) ...[
-                          _LocationIssueCard(
-                            message:
-                                _locationIssue?.message ??
-                                'GPS определён, но позиция не отправлена: $_locationWriteError',
-                            settingsRequired:
-                                _locationIssue?.requiresSettings ?? false,
-                            onRetry: online
-                                ? _retryLocation
-                                : () => _setOnline(true),
-                            onSettings: _openLocationSettings,
-                          ),
-                          const SizedBox(height: 14),
-                        ],
-                        _StatsGrid(courier: courier),
-                        const SizedBox(height: 24),
-                        if (activeOrder != null) ...[
-                          const Text(
-                            'Мой активный заказ',
-                            style: TextStyle(
-                              fontSize: 22,
-                              fontWeight: FontWeight.w900,
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          TajGoOrderCard(
-                            order: activeOrder,
-                            backgroundColor: TajGoColors.mint,
-                            onTap: () => _openOrder(activeOrder.id),
-                            actions: Column(
-                              children: [
-                                TajGoOrderProgress(
-                                  currentStep: switch (activeOrder.status) {
-                                    OrderStatus.accepted
-                                        when activeOrder.arrivedAtPickupAt !=
-                                            null =>
-                                      1,
-                                    OrderStatus.accepted => 0,
-                                    OrderStatus.pickedUp => 3,
-                                    OrderStatus.delivered ||
-                                    OrderStatus.completed ||
-                                    OrderStatus.disputed => 4,
-                                    _ => 0,
-                                  },
-                                ),
-                                const SizedBox(height: 10),
-                                Text(
-                                  switch (activeOrder.status) {
-                                    OrderStatus.accepted
-                                        when activeOrder.arrivedAtPickupAt !=
-                                            null =>
-                                      'Курьер на месте',
-                                    OrderStatus.accepted =>
-                                      'Едем к точке забора',
-                                    OrderStatus.pickedUp =>
-                                      'Доставляем клиенту',
-                                    OrderStatus.delivered =>
-                                      'Ждём подтверждения клиента',
-                                    OrderStatus.disputed =>
-                                      'Доставка на проверке',
-                                    OrderStatus.completed => 'Заказ завершён',
-                                    _ => 'Активный заказ',
-                                  },
-                                  style: const TextStyle(
-                                    color: TajGoColors.darkGreen,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          if (kDebugMode)
-                            Align(
-                              alignment: Alignment.centerLeft,
-                              child: TextButton.icon(
-                                onPressed: _busy ? null : _resetTestOrder,
-                                icon: const Icon(Icons.restart_alt_rounded),
-                                label: const Text(
-                                  'Тест · Сбросить тестовый заказ',
-                                ),
-                              ),
-                            ),
-                          const Padding(
-                            padding: EdgeInsets.symmetric(vertical: 12),
-                            child: Center(
-                              child: Text(
-                                'Завершите текущий заказ, чтобы принять следующий',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(color: TajGoColors.muted),
-                              ),
-                            ),
-                          ),
-                        ] else ...[
-                          if (kDebugMode && courier?.activeOrderId != null) ...[
-                            Align(
-                              alignment: Alignment.centerLeft,
-                              child: TextButton.icon(
-                                onPressed: _busy ? null : _resetTestOrder,
-                                icon: const Icon(Icons.restart_alt_rounded),
-                                label: const Text(
-                                  'Тест · Сбросить тестовый заказ',
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                          ],
-                          const Text(
-                            'Ожидающие заказы',
-                            style: TextStyle(
-                              fontSize: 22,
-                              fontWeight: FontWeight.w900,
-                            ),
-                          ),
-                          const SizedBox(height: 10),
+    return DefaultTabController(
+      length: 3,
+      child: Scaffold(
+        body: StreamBuilder<TajGoCourier?>(
+          stream: repository.courierStream(_uid),
+          builder: (context, courierSnapshot) {
+            final courier = courierSnapshot.data;
+            final online = courier?.online ?? false;
+            _lastOnline = online && _profileReady;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) {
+                _syncLocationBroadcast(online && _profileReady);
+              }
+            });
+            return StreamBuilder<TajGoOrder?>(
+              stream: courier?.activeOrderId == null
+                  ? Stream<TajGoOrder?>.value(null)
+                  : repository.orderStream(courier!.activeOrderId!),
+              builder: (context, activeSnapshot) {
+                final activeOrder = activeSnapshot.data;
+                return Column(
+                  children: [
+                    _CourierHeader(
+                      online: online,
+                      broadcasting: _broadcasting,
+                      busy: _busy || !_profileReady,
+                      onToggle: () => _setOnline(!online),
+                    ),
+                    if (_locationIssue != null || _locationWriteError != null)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                        child: _LocationIssueCard(
+                          message:
+                              _locationIssue?.message ??
+                              'GPS определён, но позиция не отправлена: $_locationWriteError',
+                          settingsRequired:
+                              _locationIssue?.requiresSettings ?? false,
+                          onRetry: online
+                              ? _retryLocation
+                              : () => _setOnline(true),
+                          onSettings: _openLocationSettings,
+                        ),
+                      ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                      child: _PilotStats(courier: courier),
+                    ),
+                    const TabBar(
+                      tabs: [
+                        Tab(text: 'Рядом'),
+                        Tab(text: 'Дальше'),
+                        Tab(text: 'Мой заказ'),
+                      ],
+                    ),
+                    Expanded(
+                      child: TabBarView(
+                        children: [
                           if (!online)
                             const _EmptyFeed(
                               icon: '🛵',
                               text: 'Выйдите на линию, чтобы видеть заказы',
                             )
                           else
-                            StreamBuilder<List<TajGoOrder>>(
-                              stream: repository.waitingOrdersStream(),
-                              builder: (context, snapshot) {
-                                final orders =
-                                    (snapshot.data ?? const <TajGoOrder>[])
-                                        .where(
-                                          (order) =>
-                                              order.customerId != _uid &&
-                                              !order.declinedBy.contains(_uid),
-                                        )
-                                        .toList();
-                                if (orders.isEmpty) {
-                                  return const _EmptyFeed(
-                                    icon: '📭',
-                                    text: 'Пока заказов нет',
-                                  );
-                                }
-                                return Column(
-                                  children: orders
-                                      .map(
-                                        (order) => TajGoOrderCard(
-                                          order: order,
-                                          actions: Row(
-                                            children: [
-                                              Expanded(
-                                                flex: 2,
-                                                child: SizedBox(
-                                                  height: 52,
-                                                  child: FilledButton(
-                                                    style:
-                                                        FilledButton.styleFrom(
-                                                          backgroundColor:
-                                                              TajGoColors
-                                                                  .secondaryBtn,
-                                                          foregroundColor:
-                                                              TajGoColors
-                                                                  .darkGreen,
-                                                        ),
-                                                    onPressed: _busy
-                                                        ? null
-                                                        : () => _run(
-                                                            () => repository
-                                                                .declineOrder(
-                                                                  orderId:
-                                                                      order.id,
-                                                                  courierId:
-                                                                      _uid,
-                                                                ),
-                                                          ),
-                                                    child: const Text(
-                                                      'Отказаться',
-                                                    ),
-                                                  ),
-                                                ),
-                                              ),
-                                              const SizedBox(width: 8),
-                                              Expanded(
-                                                flex: 3,
-                                                child: TajGoActionButton(
-                                                  label: 'Принять ✓',
-                                                  busy: _busy,
-                                                  onPressed: () =>
-                                                      _acceptOrder(order),
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      )
-                                      .toList(),
-                                );
-                              },
+                            _PilotOrdersFeed(
+                              courier: courier,
+                              repository: repository,
+                              courierId: _uid,
+                              nearby: true,
+                              busy: _busy,
+                              onAcceptPrice: (order) =>
+                                  _submitOffer(order, custom: false),
+                              onCustomPrice: (order) =>
+                                  _submitOffer(order, custom: true),
                             ),
+                          if (!online)
+                            const _EmptyFeed(
+                              icon: '📍',
+                              text:
+                                  'Выйдите на линию, чтобы обновить расстояния',
+                            )
+                          else
+                            _PilotOrdersFeed(
+                              courier: courier,
+                              repository: repository,
+                              courierId: _uid,
+                              nearby: false,
+                              busy: _busy,
+                              onAcceptPrice: (order) =>
+                                  _submitOffer(order, custom: false),
+                              onCustomPrice: (order) =>
+                                  _submitOffer(order, custom: true),
+                            ),
+                          ListView(
+                            padding: const EdgeInsets.all(16),
+                            children: [
+                              if (_locationIssue != null ||
+                                  _locationWriteError != null)
+                                const SizedBox.shrink(),
+                              if (activeOrder != null) ...[
+                                TajGoOrderCard(
+                                  order: activeOrder,
+                                  backgroundColor: TajGoColors.mint,
+                                  onTap: () => _openOrder(activeOrder.id),
+                                  actions: Column(
+                                    children: [
+                                      TajGoOrderProgress(
+                                        currentStep:
+                                            switch (activeOrder.status) {
+                                              OrderStatus.accepted
+                                                  when activeOrder
+                                                          .arrivedAtPickupAt !=
+                                                      null =>
+                                                1,
+                                              OrderStatus.accepted => 0,
+                                              OrderStatus.pickedUp => 3,
+                                              OrderStatus.delivered ||
+                                              OrderStatus.completed ||
+                                              OrderStatus.disputed => 4,
+                                              _ => 0,
+                                            },
+                                      ),
+                                      const SizedBox(height: 10),
+                                      Text(
+                                        switch (activeOrder.status) {
+                                          OrderStatus.accepted
+                                              when activeOrder
+                                                      .arrivedAtPickupAt !=
+                                                  null =>
+                                            'Курьер на месте',
+                                          OrderStatus.accepted =>
+                                            'Едем к точке забора',
+                                          OrderStatus.pickedUp =>
+                                            'Доставляем клиенту',
+                                          OrderStatus.delivered =>
+                                            'Ждём подтверждения клиента',
+                                          OrderStatus.disputed =>
+                                            'Доставка на проверке',
+                                          OrderStatus.completed =>
+                                            'Заказ завершён',
+                                          _ => 'Активный заказ',
+                                        },
+                                        style: const TextStyle(
+                                          color: TajGoColors.darkGreen,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                if (kDebugMode)
+                                  Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: TextButton.icon(
+                                      onPressed: _busy ? null : _resetTestOrder,
+                                      icon: const Icon(
+                                        Icons.restart_alt_rounded,
+                                      ),
+                                      label: const Text(
+                                        'Тест · Сбросить тестовый заказ',
+                                      ),
+                                    ),
+                                  ),
+                                const Padding(
+                                  padding: EdgeInsets.symmetric(vertical: 12),
+                                  child: Center(
+                                    child: Text(
+                                      'Завершите текущий заказ, чтобы принять следующий',
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        color: TajGoColors.muted,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ] else ...[
+                                const _EmptyFeed(
+                                  icon: '📭',
+                                  text: 'Активного заказа пока нет',
+                                ),
+                              ],
+                            ],
+                          ),
                         ],
-                      ],
+                      ),
                     ),
-                  ),
-                ],
-              );
-            },
-          );
-        },
+                  ],
+                );
+              },
+            );
+          },
+        ),
       ),
     );
   }
+}
+
+class _PilotStats extends StatelessWidget {
+  const _PilotStats({required this.courier});
+  final TajGoCourier? courier;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: [
+      Expanded(
+        child: _MiniStat(
+          label: 'GPS',
+          value: courier?.location == null
+              ? 'выключен'
+              : (courier?.locationAccuracy ?? 999) <= 50
+              ? 'точный'
+              : 'слабый',
+        ),
+      ),
+      Expanded(
+        child: _MiniStat(
+          label: 'Транспорт',
+          value: courier?.transport ?? 'велосипед',
+        ),
+      ),
+      Expanded(
+        child: FutureBuilder<NavigatorPreference>(
+          future: TajGoScope.of(context).externalNavigatorService.load(),
+          builder: (context, snapshot) => _MiniStat(
+            label: 'Навигатор',
+            value: snapshot.data?.navigator.name ?? 'TajGo',
+          ),
+        ),
+      ),
+      Expanded(
+        child: _MiniStat(
+          label: 'Сегодня',
+          value:
+              '${courier?.ordersToday ?? 0} · ${courier?.earningsToday ?? 0} TJS',
+        ),
+      ),
+    ],
+  );
+}
+
+class _MiniStat extends StatelessWidget {
+  const _MiniStat({required this.label, required this.value});
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 3),
+    child: Column(
+      children: [
+        Text(
+          label,
+          style: const TextStyle(color: TajGoColors.muted, fontSize: 10),
+        ),
+        Text(
+          value,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 11),
+        ),
+      ],
+    ),
+  );
+}
+
+class _PilotOrdersFeed extends StatelessWidget {
+  const _PilotOrdersFeed({
+    required this.courier,
+    required this.repository,
+    required this.courierId,
+    required this.nearby,
+    required this.busy,
+    required this.onAcceptPrice,
+    required this.onCustomPrice,
+  });
+
+  final TajGoCourier? courier;
+  final CourierRepository repository;
+  final String courierId;
+  final bool nearby;
+  final bool busy;
+  final ValueChanged<TajGoOrder> onAcceptPrice;
+  final ValueChanged<TajGoOrder> onCustomPrice;
+
+  double? _distance(TajGoOrder order) {
+    final location = courier?.location;
+    final pickup = order.fromLocation;
+    if (location == null || pickup == null) return null;
+    return haversineDistanceKm(
+          LatLng(location.latitude, location.longitude),
+          LatLng(pickup.latitude, pickup.longitude),
+        ) *
+        1000;
+  }
+
+  @override
+  Widget build(BuildContext context) => StreamBuilder<List<TajGoOrder>>(
+    stream: repository.waitingOrdersStream(),
+    builder: (context, snapshot) {
+      final orders =
+          (snapshot.data ?? const <TajGoOrder>[])
+              .where(
+                (order) =>
+                    order.customerId != courierId &&
+                    !order.declinedBy.contains(courierId) &&
+                    (_distance(order) == null
+                        ? !nearby
+                        : nearby
+                        ? _distance(order)! < 1000
+                        : _distance(order)! >= 1000),
+              )
+              .toList()
+            ..sort((a, b) {
+              final distance = (_distance(a) ?? double.infinity).compareTo(
+                _distance(b) ?? double.infinity,
+              );
+              if (distance != 0) return distance;
+              return (a.createdAt ?? DateTime(2100)).compareTo(
+                b.createdAt ?? DateTime(2100),
+              );
+            });
+      if (orders.isEmpty) {
+        return _EmptyFeed(
+          icon: nearby ? '📭' : '📍',
+          text: nearby
+              ? 'Рядом пока нет доступных заказов'
+              : 'Дальних заказов пока нет',
+        );
+      }
+      return ListView.builder(
+        padding: const EdgeInsets.all(12),
+        itemCount: orders.length,
+        itemBuilder: (context, index) {
+          final order = orders[index];
+          final meters = _distance(order);
+          return TajGoOrderCard(
+            order: order,
+            actions: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  meters == null
+                      ? 'Обновляем ваше местоположение…'
+                      : '${meters.round()} м до точки A',
+                  style: const TextStyle(fontWeight: FontWeight.w800),
+                ),
+                if (!nearby)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 6),
+                    child: Text(
+                      'Заказ пока далеко. Приблизьтесь к точке забора на расстояние меньше 1 км.',
+                      style: TextStyle(color: TajGoColors.muted),
+                    ),
+                  )
+                else ...[
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: busy ? null : () => onCustomPrice(order),
+                          child: const Text('Предложить свою'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: FilledButton(
+                          onPressed: busy ? null : () => onAcceptPrice(order),
+                          child: Text(
+                            'Принять ${order.clientPrice ?? order.price} TJS',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          );
+        },
+      );
+    },
+  );
 }
 
 class _LocationIssueCard extends StatelessWidget {
@@ -762,51 +946,6 @@ class _CourierHeader extends StatelessWidget {
       ],
     ),
   );
-}
-
-class _StatsGrid extends StatelessWidget {
-  const _StatsGrid({required this.courier});
-
-  final TajGoCourier? courier;
-
-  @override
-  Widget build(BuildContext context) {
-    final wideLayout = MediaQuery.sizeOf(context).width >= 700;
-    final cards = <Widget>[
-      TajGoStatCard(
-        icon: '💰',
-        value: '${courier?.earningsToday ?? 0} TJS',
-        label: 'Сегодня',
-      ),
-      TajGoStatCard(
-        icon: '📦',
-        value: '${courier?.ordersToday ?? 0}',
-        label: 'Заказов',
-      ),
-      TajGoStatCard(
-        icon: '⭐',
-        value: (courier?.rating ?? 5).toStringAsFixed(1),
-        label: 'Рейтинг',
-      ),
-      TajGoStatCard(
-        icon: '🏆',
-        value: '${courier?.score ?? 100}',
-        label: 'TajGo Score',
-      ),
-    ];
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: cards.length,
-      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: wideLayout ? 4 : 2,
-        mainAxisExtent: 126,
-        mainAxisSpacing: 8,
-        crossAxisSpacing: 8,
-      ),
-      itemBuilder: (context, index) => cards[index],
-    );
-  }
 }
 
 class _EmptyFeed extends StatelessWidget {

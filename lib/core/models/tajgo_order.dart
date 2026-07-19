@@ -12,12 +12,13 @@ enum OrderStatus {
 
 OrderStatus orderStatusFromString(String? value) {
   return switch (value) {
-    'accepted' => OrderStatus.accepted,
-    'pickedUp' => OrderStatus.pickedUp,
+    'courierSelected' || 'accepted' || 'arrivedPickup' => OrderStatus.accepted,
+    'pickedUp' || 'arrivedDropoff' => OrderStatus.pickedUp,
     'delivered' => OrderStatus.delivered,
     'completed' => OrderStatus.completed,
     'disputed' => OrderStatus.disputed,
     'cancelled' => OrderStatus.cancelled,
+    'draft' || 'waiting' || 'waitingOffers' || null => OrderStatus.waiting,
     _ => OrderStatus.waiting,
   };
 }
@@ -67,6 +68,17 @@ class TajGoOrder {
     this.adminNote,
     this.comment,
     this.isTestOrder = false,
+    this.rawStatus = 'waiting',
+    this.orderType = 'customDelivery',
+    this.suggestedPrice,
+    this.clientPrice,
+    this.finalPrice,
+    this.priceNegotiable = true,
+    this.offersCount = 0,
+    this.selectedOfferId,
+    this.selectedCourierId,
+    this.offerExpiresAt,
+    this.pricingVersion = 'v2',
   });
 
   final String id,
@@ -81,6 +93,14 @@ class TajGoOrder {
   final OrderStatus status;
   final num price;
   final bool isTestOrder;
+  final String rawStatus;
+  final String orderType;
+  final num? suggestedPrice, clientPrice, finalPrice;
+  final bool priceNegotiable;
+  final int offersCount;
+  final String? selectedOfferId, selectedCourierId;
+  final DateTime? offerExpiresAt;
+  final String pricingVersion;
   final num? distanceKm;
   final int? etaMinutes;
   final GeoPoint? fromLocation, toLocation;
@@ -137,18 +157,40 @@ class TajGoOrder {
       adminNote: data['adminNote'] as String?,
       comment: data['comment'] as String?,
       isTestOrder: data['isTestOrder'] as bool? ?? false,
+      rawStatus: data['status'] as String? ?? 'waiting',
+      orderType: data['orderType'] as String? ?? 'customDelivery',
+      suggestedPrice: data['suggestedPrice'] as num?,
+      clientPrice: data['clientPrice'] as num? ?? data['price'] as num?,
+      finalPrice: data['finalPrice'] as num?,
+      priceNegotiable: data['priceNegotiable'] as bool? ?? true,
+      offersCount: (data['offersCount'] as num? ?? 0).toInt(),
+      selectedOfferId: data['selectedOfferId'] as String?,
+      selectedCourierId:
+          data['selectedCourierId'] as String? ?? data['courierId'] as String?,
+      offerExpiresAt: date('offerExpiresAt'),
+      pricingVersion: data['pricingVersion'] as String? ?? 'legacy',
     );
   }
 
   Map<String, dynamic> toCreateMap() => {
     'customerId': customerId,
     'customerName': customerName,
-    'status': 'waiting',
+    'status': 'waitingOffers',
+    'orderType': orderType,
     'type': type,
     'city': city,
     'fromText': fromText,
     'toText': toText,
     'price': price,
+    'suggestedPrice': suggestedPrice ?? price,
+    'clientPrice': clientPrice ?? price,
+    if (finalPrice != null) 'finalPrice': finalPrice,
+    'priceNegotiable': priceNegotiable,
+    'offersCount': offersCount,
+    if (selectedOfferId != null) 'selectedOfferId': selectedOfferId,
+    if (selectedCourierId != null) 'selectedCourierId': selectedCourierId,
+    if (offerExpiresAt != null) 'offerExpiresAt': offerExpiresAt,
+    'pricingVersion': pricingVersion,
     'currency': currency,
     if (confirmationCode != null) 'confirmationCode': confirmationCode,
     if (fromLocation != null) 'fromLocation': fromLocation,

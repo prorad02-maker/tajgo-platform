@@ -44,6 +44,7 @@ service cloud.firestore {
         let roles = data.get('roles', ['customer']);
         let status = data.get('courierStatus', 'none');
         let mode = data.get('lastMode', 'customer');
+        let selectedRole = data.get('selectedRole', mode);
         return roles is list
           && roles.hasOnly(['customer', 'courier'])
           && 'customer' in roles
@@ -51,6 +52,8 @@ service cloud.firestore {
             'none', 'draft', 'pending', 'approved', 'rejected', 'suspended'
           ]
           && mode in ['customer', 'courier']
+          && selectedRole in ['customer', 'courier']
+          && data.get('onboardingCompleted', false) is bool
           && data.get('phoneVerified', false) == (authPhone() != null)
           && data.get('profileComplete', false) is bool
           && data.get('courierOnboardingCompleted', false) is bool
@@ -135,6 +138,9 @@ service cloud.firestore {
           'phoneVerified',
           'profileComplete',
           'courierOnboardingCompleted',
+          'onboardingCompleted',
+          'selectedRole',
+          'roleSelectedAt',
           'targetRole',
           'role',
           'city',
@@ -157,8 +163,8 @@ service cloud.firestore {
           && data.get('currentStep', 0) is int
           && data.get('currentStep', 0) >= 0
           && data.get('currentStep', 0) <= 4
-          && data.get('transport', 'electric_bike') in [
-            'walking', 'bicycle', 'electric_bike', 'scooter'
+          && data.get('transport', 'bicycle') in [
+            'bicycle', 'electric_bike', 'scooter', 'car'
           ]
           && data.get('termsAccepted', false) is bool
           && data.get('dataConsent', false) is bool
@@ -255,6 +261,7 @@ service cloud.firestore {
           && request.resource.data.updatedAt == request.time
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             'activeOrderId',
+            'isBusy',
             'updatedAt'
           ]);
       }
@@ -268,12 +275,14 @@ service cloud.firestore {
           && orderAfter.data.courierId == uid
           && orderAfter.data.status == 'completed'
           && request.resource.data.get('activeOrderId', null) == null
+          && request.resource.data.get('isBusy', false) == false
           && request.resource.data.earningsToday
             == resource.data.earningsToday + orderAfter.data.price
           && request.resource.data.ordersToday == resource.data.ordersToday + 1
           && request.resource.data.updatedAt == request.time
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             'activeOrderId',
+            'isBusy',
             'earningsToday',
             'ordersToday',
             'updatedAt'
@@ -289,6 +298,27 @@ service cloud.firestore {
           && orderId is string
           && orderAfter.data.customerId == request.auth.uid
           && completionStatsUpdateIsValid();
+      }
+
+      function assignedCustomerSelectsOffer() {
+        let orderId = request.resource.data.get('activeOrderId', null);
+        let orderAfter = getAfter(
+          /databases/$(database)/documents/orders/$(orderId)
+        );
+        return signedIn()
+          && resource.data.get('activeOrderId', null) == null
+          && resource.data.get('isBusy', false) == false
+          && orderId is string
+          && orderAfter.data.customerId == request.auth.uid
+          && orderAfter.data.courierId == uid
+          && orderAfter.data.status == 'accepted'
+          && request.resource.data.get('isBusy', false) == true
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'activeOrderId',
+            'isBusy',
+            'updatedAt'
+          ]);
       }
 
       allow get: if owns(uid) || isAdmin();
@@ -308,6 +338,7 @@ service cloud.firestore {
         || ownerAcceptUpdateIsValid()
         || (owns(uid) && completionStatsUpdateIsValid())
         || assignedCustomerCompletesOrder()
+        || assignedCustomerSelectsOffer()
         || isAdmin();
 
       allow delete: if false;
@@ -393,7 +424,6 @@ service cloud.firestore {
           && request.resource.data.city == resource.data.city
           && request.resource.data.fromText == resource.data.fromText
           && request.resource.data.toText == resource.data.toText
-          && request.resource.data.price == resource.data.price
           && request.resource.data.currency == resource.data.currency
           && request.resource.data.get('fromLocation', null)
             == resource.data.get('fromLocation', null)
@@ -414,7 +444,7 @@ service cloud.firestore {
 
       function customerCancels() {
         return resource.data.customerId == request.auth.uid
-          && resource.data.status == 'waiting'
+          && resource.data.status in ['waiting', 'waitingOffers']
           && request.resource.data.status == 'cancelled'
           && request.resource.data.updatedAt == request.time
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
@@ -439,6 +469,7 @@ service cloud.firestore {
           && request.resource.data.updatedAt == request.time
           && courierBefore.data.get('activeOrderId', null) == orderId
           && courierAfter.data.get('activeOrderId', null) == null
+          && courierAfter.data.get('isBusy', false) == false
           && courierAfter.data.earningsToday
             == courierBefore.data.earningsToday + resource.data.price
           && courierAfter.data.ordersToday
@@ -465,8 +496,8 @@ service cloud.firestore {
 
       function courierDeclines() {
         return isCourier()
-          && resource.data.status == 'waiting'
-          && request.resource.data.status == 'waiting'
+          && resource.data.status in ['waiting', 'waitingOffers']
+          && request.resource.data.status == resource.data.status
           && request.auth.uid in request.resource.data.declinedBy
           && request.resource.data.declinedBy.size()
             <= resource.data.declinedBy.size() + 1
@@ -482,10 +513,11 @@ service cloud.firestore {
           /databases/$(database)/documents/couriers/$(request.auth.uid)
         );
         return isCourier()
-          && resource.data.status == 'waiting'
+          && resource.data.status in ['waiting', 'waitingOffers']
           && request.resource.data.status == 'accepted'
           && request.resource.data.courierId == request.auth.uid
           && courierAfter.data.get('activeOrderId', null) == orderId
+          && courierAfter.data.get('isBusy', false) == true
           && request.resource.data.acceptedAt == request.time
           && request.resource.data.updatedAt == request.time
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
@@ -500,6 +532,60 @@ service cloud.firestore {
         return isCourier()
           && resource.data.courierId == request.auth.uid
           && request.resource.data.courierId == request.auth.uid;
+      }
+
+      function customerSelectsOffer() {
+        let courierId = request.resource.data.get('selectedCourierId', null);
+        let offerId = request.resource.data.get('selectedOfferId', null);
+        let offerAfter = getAfter(
+          /databases/$(database)/documents/orders/$(orderId)/offers/$(offerId)
+        );
+        let courierAfter = getAfter(
+          /databases/$(database)/documents/couriers/$(courierId)
+        );
+        return resource.data.customerId == request.auth.uid
+          && resource.data.status in ['waiting', 'waitingOffers']
+          && request.resource.data.status == 'accepted'
+          && courierId is string
+          && offerId is string
+          && request.resource.data.courierId == courierId
+          && offerAfter.data.courierId == courierId
+          && offerAfter.data.status == 'accepted'
+          && request.resource.data.finalPrice == offerAfter.data.proposedPrice
+          && request.resource.data.price == offerAfter.data.proposedPrice
+          && courierAfter.data.get('activeOrderId', null) == orderId
+          && courierAfter.data.get('isBusy', false) == true
+          && request.resource.data.acceptedAt == request.time
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'status',
+            'courierId',
+            'selectedCourierId',
+            'selectedOfferId',
+            'finalPrice',
+            'price',
+            'acceptedAt',
+            'updatedAt'
+          ]);
+      }
+
+      function courierUpdatesOfferCounter() {
+        let offerAfter = getAfter(
+          /databases/$(database)/documents/orders/$(orderId)/offers/$(request.auth.uid)
+        );
+        return isCourier()
+          && resource.data.status in ['waiting', 'waitingOffers']
+          && request.resource.data.status == resource.data.status
+          && offerAfter.data.courierId == request.auth.uid
+          && offerAfter.data.status == 'pending'
+          && request.resource.data.offersCount
+            == resource.data.get('offersCount', 0) + 1
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'offersCount',
+            'offerExpiresAt',
+            'updatedAt'
+          ]);
       }
 
       function courierArrives() {
@@ -562,9 +648,9 @@ service cloud.firestore {
 
       allow create: if signedIn()
         && request.resource.data.customerId == request.auth.uid
-        && request.resource.data.status == 'waiting'
+        && request.resource.data.status == 'waitingOffers'
         && request.resource.data.price is number
-        && request.resource.data.price >= 0
+        && request.resource.data.price >= 10
         && request.resource.data.currency == 'TJS'
         && request.resource.data.get('courierId', null) == null
         && (authPhone() != null
@@ -580,6 +666,16 @@ service cloud.firestore {
           'fromText',
           'toText',
           'price',
+          'orderType',
+          'suggestedPrice',
+          'clientPrice',
+          'finalPrice',
+          'priceNegotiable',
+          'offersCount',
+          'selectedOfferId',
+          'selectedCourierId',
+          'offerExpiresAt',
+          'pricingVersion',
           'currency',
           'confirmationCode',
           'fromLocation',
@@ -596,7 +692,7 @@ service cloud.firestore {
       allow get, list: if signedIn()
         && (isAdmin()
           || resource.data.customerId == request.auth.uid
-          || (isCourier() && resource.data.status == 'waiting')
+          || (isCourier() && resource.data.status in ['waiting', 'waitingOffers'])
           || resource.data.get('courierId', null) == request.auth.uid);
 
       allow update: if isAdmin()
@@ -605,12 +701,46 @@ service cloud.firestore {
           && (customerCancels()
             || customerCompletes()
             || customerDisputes()
+            || customerSelectsOffer()
+            || courierUpdatesOfferCounter()
             || courierDeclines()
             || courierAccepts()
             || courierArrives()
             || courierPicksUp()
             || courierDelivers()
             || courierCompletesWithCode()));
+
+      match /offers/{offerId} {
+        function parentOrder() {
+          return get(/databases/$(database)/documents/orders/$(orderId));
+        }
+
+        function customerOwnsParent() {
+          return signedIn() && parentOrder().data.customerId == request.auth.uid;
+        }
+
+        allow get, list: if isAdmin()
+          || customerOwnsParent()
+          || (isCourier() && resource.data.courierId == request.auth.uid);
+
+        allow create: if isCourier()
+          && offerId == request.auth.uid
+          && request.resource.data.courierId == request.auth.uid
+          && request.resource.data.status == 'pending'
+          && request.resource.data.proposedPrice >= request.resource.data.originalClientPrice
+          && parentOrder().data.status in ['waiting', 'waitingOffers'];
+
+        allow update: if isAdmin()
+          || (isCourier()
+            && offerId == request.auth.uid
+            && request.resource.data.courierId == resource.data.courierId
+            && request.resource.data.status in ['pending', 'withdrawn'])
+          || (customerOwnsParent()
+            && request.resource.data.courierId == resource.data.courierId
+            && request.resource.data.status in ['accepted', 'rejected', 'expired']);
+
+        allow delete: if false;
+      }
 
       allow delete: if false;
     }

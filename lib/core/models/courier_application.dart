@@ -69,7 +69,7 @@ class CourierApplication {
       termsAccepted &&
       dataConsent;
 
-  bool get needsTransportPhoto => transport != CourierTransport.walking;
+  bool get needsTransportPhoto => true;
 
   factory CourierApplication.empty({
     required String uid,
@@ -81,7 +81,7 @@ class CourierApplication {
     phoneNumber: phoneNumber,
     status: CourierStatus.draft,
     currentStep: 0,
-    transport: CourierTransport.electricBike,
+    transport: CourierTransport.bicycle,
     documentType: CourierDocumentType.passport,
     documentNumber: '',
     city: 'Худжанд',
@@ -110,7 +110,7 @@ class CourierApplication {
     currentStep: ((data['currentStep'] as num?)?.toInt() ?? 0).clamp(0, 4),
     birthDate: data['birthDate'] as String?,
     profilePhotoUrl: data['profilePhotoUrl'] as String?,
-    transport: data['transport'] as String? ?? CourierTransport.electricBike,
+    transport: CourierTransport.normalize(data['transport'] as String?),
     documentType:
         data['documentType'] as String? ?? CourierDocumentType.passport,
     documentNumber: data['documentNumber'] as String? ?? '',
@@ -176,15 +176,23 @@ const bool courierStorageEnabled = bool.fromEnvironment(
 );
 
 abstract final class CourierTransport {
+  /// Legacy only: never show this value in the UI.
   static const walking = 'walking';
   static const bicycle = 'bicycle';
   static const electricBike = 'electric_bike';
   static const scooter = 'scooter';
   static const car = 'car';
-  static const values = {walking, bicycle, electricBike, scooter};
+  static const values = {bicycle, scooter, car};
+
+  static String normalize(String? value) => switch (value) {
+    walking || 'pedestrian' || 'foot' => bicycle,
+    electricBike => bicycle,
+    bicycle || scooter || car => value!,
+    _ => bicycle,
+  };
 
   static String label(String value) => switch (value) {
-    walking => 'Пешком',
+    walking => 'Велосипед',
     bicycle => 'Велосипед',
     electricBike => 'Электровелосипед',
     scooter => 'Скутер',

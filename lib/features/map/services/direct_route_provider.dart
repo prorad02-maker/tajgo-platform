@@ -29,7 +29,6 @@ class DirectRouteProvider implements RouteProvider {
     // become 0.0 km before they reached the UI.
     final distance = pricing.haversineDistanceKm(from, to);
     final speedKmH = switch (mode) {
-      RouteMode.walking => 4.5,
       RouteMode.bicycle => 18,
       RouteMode.scooter => 24,
       RouteMode.car => 28,

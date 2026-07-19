@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:tajgo/core/models/courier_offer.dart';
 import 'package:tajgo/core/models/tajgo_order.dart';
 import 'package:tajgo/core/models/app_user.dart';
 import 'package:tajgo/core/models/courier_application.dart';
@@ -11,7 +12,11 @@ import 'package:tajgo/core/services/account_migration_service.dart';
 import 'package:tajgo/core/services/account_mode_service.dart';
 import 'package:tajgo/core/services/auth_service.dart';
 import 'package:tajgo/core/services/courier_application_repository.dart';
+import 'package:tajgo/core/services/courier_offer_repository.dart';
+import 'package:tajgo/core/services/courier_order_eligibility.dart';
+import 'package:tajgo/core/services/external_navigator_service.dart';
 import 'package:tajgo/core/services/pricing.dart';
+import 'package:tajgo/core/services/role_preference_service.dart';
 import 'package:tajgo/features/map/models/place_suggestion.dart';
 import 'package:tajgo/features/map/models/tajgo_route.dart';
 import 'package:tajgo/features/map/services/address_normalizer.dart';
@@ -35,6 +40,182 @@ import 'package:tajgo/features/startup/intent_selection_screen.dart';
 import 'package:tajgo/features/startup/startup_decision.dart';
 
 void main() {
+  group('v0.9 Pilot Core offline acceptance', () {
+    test('1 role onboarding нужен старому пользователю без выбора', () {
+      final user = AppUser.fromMap({
+        'displayName': 'Рахим',
+        'profileComplete': true,
+        'onboardingCompleted': false,
+      }, uid: 'owner');
+      expect(
+        resolveStartupDestination(authenticated: true, profile: user),
+        StartupDestination.roleOnboarding,
+      );
+    });
+
+    test('2 role persistence сохраняет exact keys', () async {
+      final service = RolePreferenceService(storage: _TestRoleStore());
+      await service.save(AppUserRole.courier);
+      final snapshot = await service.load();
+      expect(snapshot.selectedRole, AppUserRole.courier);
+      expect(snapshot.onboardingCompleted, isTrue);
+    });
+
+    test('3 walking удалён из UI и legacy fallback bicycle', () {
+      expect(
+        CourierTransport.values,
+        isNot(contains(CourierTransport.walking)),
+      );
+      expect(CourierTransport.normalize('walking'), CourierTransport.bicycle);
+      expect(routeModeFromString('foot'), RouteMode.bicycle);
+      expect(routeModeFromString('pedestrian'), RouteMode.bicycle);
+    });
+
+    test('4 расстояние 999 м доступно', () {
+      expect(
+        const CourierOrderEligibilityService().canAcceptDistance(999),
+        isTrue,
+      );
+    });
+
+    test('5 расстояние 1000 и 1001 м недоступно', () {
+      const service = CourierOrderEligibilityService();
+      expect(service.canAcceptDistance(1000), isFalse);
+      expect(service.canAcceptDistance(1001), isFalse);
+    });
+
+    test('6 устаревший GPS отклоняется', () {
+      final now = DateTime(2026, 1, 1, 12);
+      final result = const CourierOrderEligibilityService().evaluate(
+        courierLocation: LatLng(40.2833, 69.6222),
+        locationUpdatedAt: now.subtract(const Duration(seconds: 16)),
+        accuracyMeters: 10,
+        pickup: const LatLng(40.2834, 69.6222),
+        hasActiveOrder: false,
+        now: now,
+      );
+      expect(result.issue, CourierEligibilityIssue.locationStale);
+    });
+
+    test('7 один активный заказ блокирует принятие', () {
+      final now = DateTime(2026, 1, 1, 12);
+      final result = const CourierOrderEligibilityService().evaluate(
+        courierLocation: const LatLng(40.2833, 69.6222),
+        locationUpdatedAt: now,
+        accuracyMeters: 10,
+        pickup: const LatLng(40.2834, 69.6222),
+        hasActiveOrder: true,
+        now: now,
+      );
+      expect(result.issue, CourierEligibilityIssue.activeOrder);
+    });
+
+    test('8 custom price принимает только целые TJS не ниже минимума', () {
+      expect(
+        validateClientPrice(rawValue: '9', recommendedPrice: 12).isValid,
+        isFalse,
+      );
+      expect(
+        validateClientPrice(rawValue: '12.5', recommendedPrice: 12).isValid,
+        isFalse,
+      );
+      expect(
+        validateClientPrice(
+          rawValue: '24',
+          recommendedPrice: 12,
+        ).requiresConfirmation,
+        isTrue,
+      );
+    });
+
+    test('9 повторное offer обновляется без роста счётчика', () {
+      expect(shouldIncrementOffersCount(null), isTrue);
+      expect(shouldIncrementOffersCount('rejected'), isTrue);
+      expect(shouldIncrementOffersCount('pending'), isFalse);
+      expect(
+        isCourierOfferPriceValid(proposedPrice: 15, clientPrice: 15),
+        isTrue,
+      );
+    });
+
+    test('10 offer выбирается только у свободного курьера', () {
+      expect(
+        canSelectCourierOffer(
+          orderStatus: 'waitingOffers',
+          offerStatus: CourierOfferStatus.pending,
+          courierBusy: false,
+          expired: false,
+        ),
+        isTrue,
+      );
+    });
+
+    test('11 остальные pending offers закрываются', () {
+      expect(
+        offerStatusAfterSelection(
+          current: CourierOfferStatus.pending,
+          selected: false,
+        ),
+        CourierOfferStatus.rejected,
+      );
+      expect(
+        offerStatusAfterSelection(
+          current: CourierOfferStatus.pending,
+          selected: true,
+        ),
+        CourierOfferStatus.accepted,
+      );
+    });
+
+    test('12 navigator URI ведёт к точкам A и B', () {
+      final a = navigatorUri(
+        ExternalNavigator.yandex,
+        const LatLng(40.28, 69.62),
+      );
+      final b = navigatorUri(
+        ExternalNavigator.yandex,
+        const LatLng(40.29, 69.63),
+      );
+      expect(a.toString(), contains('lat_to=40.28'));
+      expect(b.toString(), contains('lon_to=69.63'));
+      expect(a, isNot(b));
+    });
+
+    test('13 navigator fallback использует безопасный geo URI', () {
+      final uri = navigatorFallbackUri(const LatLng(40.28, 69.62));
+      expect(uri.scheme, 'geo');
+      expect(uri.toString(), isNot(contains('phone')));
+      expect(uri.toString(), isNot(contains('code')));
+    });
+
+    test('14 старый waiting совместим с waitingOffers', () {
+      expect(isWaitingOrderStatus('waiting'), isTrue);
+      expect(isWaitingOrderStatus('waitingOffers'), isTrue);
+      expect(orderStatusFromString('waitingOffers'), OrderStatus.waiting);
+    });
+
+    test('15 двойное принятие не проходит', () {
+      expect(
+        canSelectCourierOffer(
+          orderStatus: 'waitingOffers',
+          offerStatus: CourierOfferStatus.pending,
+          courierBusy: true,
+          expired: false,
+        ),
+        isFalse,
+      );
+      expect(
+        canSelectCourierOffer(
+          orderStatus: 'accepted',
+          offerStatus: CourierOfferStatus.pending,
+          courierBusy: false,
+          expired: false,
+        ),
+        isFalse,
+      );
+    });
+  });
+
   test('legacy customer account migrates without deleting fields', () {
     final patch = buildLegacyAccountPatch({
       'role': 'customer',
@@ -89,6 +270,7 @@ void main() {
           'lastMode': mode,
           'courierStatus': status,
           'courierOnboardingCompleted': true,
+          'onboardingCompleted': true,
         }, uid: 'same-uid');
 
     expect(
@@ -120,6 +302,7 @@ void main() {
       'lastMode': 'courier',
       'courierStatus': 'approved',
       'courierOnboardingCompleted': false,
+      'onboardingCompleted': true,
     }, uid: 'same-uid');
     expect(
       resolveStartupDestination(authenticated: true, profile: needsOnboarding),
@@ -305,31 +488,27 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(const MaterialApp(home: IntentSelectionScreen()));
-    expect(find.text('Что вы хотите сделать?'), findsOneWidget);
-    expect(find.text('Заказать доставку'), findsOneWidget);
-    expect(find.text('Зарабатывать с TajGo'), findsOneWidget);
-    expect(find.textContaining('Админ'), findsNothing);
-    expect(find.textContaining('Выберите роль'), findsNothing);
+    expect(find.text('Как вы хотите использовать TajGo?'), findsOneWidget);
+    expect(find.text('Я клиент'), findsOneWidget);
+    expect(find.text('Я курьер'), findsOneWidget);
+    expect(find.text('Продолжить как клиент'), findsOneWidget);
+    expect(find.text('Продолжить как курьер'), findsOneWidget);
   });
 
-  testWidgets('customer intent opens phone auth in customer mode', (
+  testWidgets('customer role action is visible without admin action', (
     tester,
   ) async {
     await tester.pumpWidget(const MaterialApp(home: IntentSelectionScreen()));
-    await tester.tap(find.text('Заказать доставку'));
-    await tester.pumpAndSettle();
-    final screen = tester.widget<PhoneAuthScreen>(find.byType(PhoneAuthScreen));
-    expect(screen.initialIntent, AppUserRole.customer);
+    expect(find.text('Продолжить как клиент'), findsOneWidget);
+    expect(find.text('Продолжить как администратор'), findsNothing);
   });
 
-  testWidgets('courier intent opens phone auth without granting courier mode', (
+  testWidgets('courier role action does not expose admin selection', (
     tester,
   ) async {
     await tester.pumpWidget(const MaterialApp(home: IntentSelectionScreen()));
-    await tester.tap(find.text('Зарабатывать с TajGo'));
-    await tester.pumpAndSettle();
-    final screen = tester.widget<PhoneAuthScreen>(find.byType(PhoneAuthScreen));
-    expect(screen.initialIntent, AppUserRole.courier);
+    expect(find.text('Продолжить как курьер'), findsOneWidget);
+    expect(find.text('Продолжить как администратор'), findsNothing);
   });
 
   test('неизвестный статус заказа считается ожидающим', () {
@@ -476,7 +655,7 @@ void main() {
     );
     cache.put(from, to, RouteMode.bicycle, route);
     expect(cache.get(almostSameFrom, to, RouteMode.bicycle), same(route));
-    expect(cache.get(from, to, RouteMode.walking), isNull);
+    expect(cache.get(from, to, RouteMode.scooter), isNull);
   });
 
   test('русские инструкции форматируют основные манёвры', () {
@@ -1051,4 +1230,24 @@ void main() {
       expect(gpsRect.bottom, lessThan(panelRect.top));
     },
   );
+}
+
+class _TestRoleStore implements RolePreferenceStorage {
+  final Map<String, Object> _values = {};
+
+  @override
+  Future<bool?> getBool(String key) async => _values[key] as bool?;
+
+  @override
+  Future<String?> getString(String key) async => _values[key] as String?;
+
+  @override
+  Future<void> remove(String key) async => _values.remove(key);
+
+  @override
+  Future<void> setBool(String key, bool value) async => _values[key] = value;
+
+  @override
+  Future<void> setString(String key, String value) async =>
+      _values[key] = value;
 }

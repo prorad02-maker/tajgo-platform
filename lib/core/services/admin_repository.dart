@@ -90,6 +90,7 @@ class AdminRepository {
       if (courierId != null) {
         transaction.update(_db.collection('couriers').doc(courierId), {
           'activeOrderId': null,
+          'isBusy': false,
           'updatedAt': FieldValue.serverTimestamp(),
         });
       }
@@ -117,8 +118,11 @@ class AdminRepository {
       }
       final courierId = data?['courierId'] as String?;
       transaction.update(orderRef, {
-        'status': 'waiting',
+        'status': 'waitingOffers',
         'courierId': FieldValue.delete(),
+        'selectedCourierId': FieldValue.delete(),
+        'selectedOfferId': FieldValue.delete(),
+        'finalPrice': FieldValue.delete(),
         'acceptedAt': FieldValue.delete(),
         'arrivedAtPickupAt': FieldValue.delete(),
         'pickedUpAt': FieldValue.delete(),
@@ -130,6 +134,7 @@ class AdminRepository {
       if (courierId != null) {
         transaction.update(_db.collection('couriers').doc(courierId), {
           'activeOrderId': null,
+          'isBusy': false,
           'updatedAt': FieldValue.serverTimestamp(),
         });
       }
@@ -169,6 +174,7 @@ class AdminRepository {
       });
       transaction.update(_db.collection('couriers').doc(courierId), {
         'activeOrderId': null,
+        'isBusy': false,
         'earningsToday': FieldValue.increment((data?['price'] ?? 0) as num),
         'ordersToday': FieldValue.increment(1),
         'updatedAt': FieldValue.serverTimestamp(),
@@ -252,6 +258,7 @@ class AdminRepository {
       }
       transaction.update(courierRef, {
         'activeOrderId': null,
+        'isBusy': false,
         'updatedAt': FieldValue.serverTimestamp(),
       });
       _writeLog(
@@ -289,7 +296,7 @@ class AdminRepository {
   Future<int> cancelWaitingTestOrders({required String adminId}) async {
     final snapshot = await _db
         .collection('orders')
-        .where('status', isEqualTo: 'waiting')
+        .where('status', whereIn: const ['waiting', 'waitingOffers'])
         .limit(100)
         .get();
     final refs = snapshot.docs
@@ -307,7 +314,7 @@ class AdminRepository {
           documents.add(await transaction.get(ref));
         }
         for (final doc in documents) {
-          if (doc.data()?['status'] == 'waiting') {
+          if ({'waiting', 'waitingOffers'}.contains(doc.data()?['status'])) {
             transaction.update(doc.reference, {
               'status': 'cancelled',
               'cancelledAt': FieldValue.serverTimestamp(),

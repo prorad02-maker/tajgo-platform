@@ -2,9 +2,11 @@ import 'dart:math' as math;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
+import 'package:latlong2/latlong.dart';
 
 import '../models/tajgo_courier.dart';
 import '../models/tajgo_order.dart';
+import 'courier_order_eligibility.dart';
 import 'pricing.dart';
 
 class CourierRepository {
@@ -23,6 +25,11 @@ class CourierRepository {
       .snapshots()
       .map((doc) => doc.exists ? TajGoCourier.fromDoc(doc) : null);
 
+  Future<TajGoCourier?> getCourier(String uid) async {
+    final doc = await _db.collection('couriers').doc(uid).get();
+    return doc.exists ? TajGoCourier.fromDoc(doc) : null;
+  }
+
   Stream<TajGoCourier?> publicCourierStream(String uid) => _db
       .collection('courier_public')
       .doc(uid)
@@ -37,8 +44,8 @@ class CourierRepository {
 
   Stream<List<TajGoOrder>> waitingOrdersStream() => _db
       .collection('orders')
-      .where('status', isEqualTo: 'waiting')
-      .limit(10)
+      .where('status', whereIn: const ['waiting', 'waitingOffers'])
+      .limit(50)
       .snapshots()
       .map((snapshot) => snapshot.docs.map(TajGoOrder.fromDoc).toList());
 
@@ -104,7 +111,7 @@ class CourierRepository {
       'online': online,
       'rating': existing['rating'] ?? 5.0,
       'score': existing['score'] ?? 100,
-      'transport': existing['transport'] ?? 'electric_bike',
+      'transport': existing['transport'] ?? 'bicycle',
       'earningsToday': existing['earningsToday'] ?? 0,
       'ordersToday': existing['ordersToday'] ?? 0,
       'activeOrderId': existing['activeOrderId'],
@@ -159,7 +166,7 @@ class CourierRepository {
       data.addAll({
         'rating': 5.0,
         'score': 100,
-        'transport': 'electric_bike',
+        'transport': 'bicycle',
         'earningsToday': 0,
         'ordersToday': 0,
         'activeOrderId': null,
@@ -327,9 +334,12 @@ class CourierRepository {
 
       if (orderDoc.exists) {
         transaction.update(orderRef, {
-          'status': 'waiting',
+          'status': 'waitingOffers',
           'courierId': FieldValue.delete(),
           'courierName': FieldValue.delete(),
+          'selectedCourierId': FieldValue.delete(),
+          'selectedOfferId': FieldValue.delete(),
+          'finalPrice': FieldValue.delete(),
           'acceptedAt': FieldValue.delete(),
           'arrivedAtPickupAt': FieldValue.delete(),
           'updatedAt': FieldValue.serverTimestamp(),
@@ -346,10 +356,28 @@ class CourierRepository {
     final courierRef = _db.collection('couriers').doc(courierId);
     final orderDoc = await transaction.get(orderRef);
     final courierDoc = await transaction.get(courierRef);
-    if (courierDoc.data()?['activeOrderId'] != null) {
-      throw StateError('Сначала завершите текущий заказ.');
+    final courier = courierDoc.data();
+    final order = orderDoc.data();
+    if (courier == null || order == null) {
+      throw StateError('Заказ или профиль курьера не найден.');
     }
-    if (orderDoc.data()?['status'] != 'waiting') {
+    final pickup = order['fromLocation'] as GeoPoint?;
+    final location = courier['location'] as GeoPoint?;
+    if (pickup == null) throw StateError('У заказа не указана точка забора.');
+    final eligibility = const CourierOrderEligibilityService().evaluate(
+      courierLocation: location == null
+          ? null
+          : LatLng(location.latitude, location.longitude),
+      locationUpdatedAt: (courier['locationUpdatedAt'] as Timestamp?)?.toDate(),
+      accuracyMeters: (courier['locationAccuracy'] as num?)?.toDouble(),
+      pickup: LatLng(pickup.latitude, pickup.longitude),
+      hasActiveOrder:
+          courier['activeOrderId'] != null || courier['isBusy'] == true,
+    );
+    if (!eligibility.allowed) throw StateError(eligibility.message);
+    if (!{'waiting', 'waitingOffers'}.contains(order['status']) ||
+        order['courierId'] != null ||
+        order['selectedCourierId'] != null) {
       throw StateError('Заказ уже забрал другой курьер.');
     }
     transaction.update(orderRef, {
@@ -360,6 +388,7 @@ class CourierRepository {
     });
     transaction.set(courierRef, {
       'activeOrderId': orderId,
+      'isBusy': true,
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
   });
@@ -438,6 +467,7 @@ class CourierRepository {
       });
       transaction.update(courierRef, {
         'activeOrderId': null,
+        'isBusy': false,
         'earningsToday': FieldValue.increment((data?['price'] ?? 0) as num),
         'ordersToday': FieldValue.increment(1),
         'updatedAt': FieldValue.serverTimestamp(),

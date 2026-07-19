@@ -1,14 +1,16 @@
 import '../models/app_user.dart';
 import 'auth_service.dart';
 import 'user_repository.dart';
+import 'role_preference_service.dart';
 
 enum ResolvedAccountMode { customer, courier }
 
 class AccountModeService {
-  AccountModeService(this._auth, this._users);
+  AccountModeService(this._auth, this._users, this._rolePreferences);
 
   final AuthService _auth;
   final UserRepository _users;
+  final RolePreferenceService _rolePreferences;
 
   Future<void> switchToCustomer() => _switch(AppUserRole.customer);
 
@@ -21,6 +23,7 @@ class AccountModeService {
     final uid = _auth.currentUser?.uid;
     if (uid == null) throw StateError('Сначала войдите в TajGo.');
     await _users.setLastMode(uid, mode);
+    await _rolePreferences.save(mode);
   }
 }
 

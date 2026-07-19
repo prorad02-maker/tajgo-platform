@@ -94,8 +94,7 @@ class _CourierApplicationFlowScreenState
     verificationMethod:
         courierStorageEnabled &&
             widget.initialApplication.documentPhotoUrl != null &&
-            (_transport == CourierTransport.walking ||
-                widget.initialApplication.transportPhotoUrl != null)
+            widget.initialApplication.transportPhotoUrl != null
         ? 'storage'
         : 'personalMeeting',
     history: widget.initialApplication.history,
@@ -318,10 +317,9 @@ class _CourierApplicationFlowScreenState
     children: [
       _heading('Как вы будете доставлять?', 'Выберите основной транспорт.'),
       ...[
-        CourierTransport.walking,
         CourierTransport.bicycle,
-        CourierTransport.electricBike,
         CourierTransport.scooter,
+        CourierTransport.car,
       ].map(
         (value) => Card(
           color: _transport == value ? TajGoColors.mint : null,
@@ -336,12 +334,6 @@ class _CourierApplicationFlowScreenState
             onTap: () => setState(() => _transport = value),
           ),
         ),
-      ),
-      const ListTile(
-        enabled: false,
-        leading: Icon(Icons.directions_car_rounded),
-        title: Text('Автомобиль'),
-        trailing: Chip(label: Text('Позже')),
       ),
     ],
   );
@@ -397,15 +389,12 @@ class _CourierApplicationFlowScreenState
         title: Text('Фото документа'),
         subtitle: Text('Проверим оригинал и сделаем фото при личной встрече'),
       ),
-      if (_transport != CourierTransport.walking)
-        const ListTile(
-          contentPadding: EdgeInsets.zero,
-          leading: Icon(Icons.pedal_bike_rounded),
-          title: Text('Фото транспорта'),
-          subtitle: Text(
-            'Проверим транспорт и сделаем фото при личной встрече',
-          ),
-        ),
+      const ListTile(
+        contentPadding: EdgeInsets.zero,
+        leading: Icon(Icons.pedal_bike_rounded),
+        title: Text('Фото транспорта'),
+        subtitle: Text('Проверим транспорт и сделаем фото при личной встрече'),
+      ),
       CheckboxListTile(
         contentPadding: EdgeInsets.zero,
         value: _dataConsent,

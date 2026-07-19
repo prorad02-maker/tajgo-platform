@@ -34,14 +34,7 @@ class NewOrderMapScreen extends StatefulWidget {
 
 class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
   static const _center = LatLng(40.2833, 69.6222);
-  static const _types = {
-    'package': 'Посылка',
-    'food': 'Еда',
-    'shops': 'Магазины',
-    'pharmacy': 'Аптеки',
-    'flowers': 'Цветы',
-    'docs': 'Документы',
-  };
+  static const _types = {'package': 'Посылка'};
   final _map = MapController();
   final _camera = TajGoMapCamera();
   final _price = TextEditingController();
@@ -436,13 +429,44 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
   }
 
   Future<void> _createOrder() async {
-    final amount = num.tryParse(_price.text.replaceAll(',', '.'));
-    if (amount == null || amount <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Укажите положительную цену.')),
-      );
+    final km =
+        _route?.distanceKm ??
+        pricing.distanceKm(_from!.toLatLng(), _to!.toLatLng());
+    final recommended = pricing.suggestedPrice(km);
+    final validation = pricing.validateClientPrice(
+      rawValue: _price.text,
+      recommendedPrice: recommended,
+    );
+    if (!validation.isValid) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(validation.message!)));
       return;
     }
+    if (validation.requiresConfirmation) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Подтвердить цену?'),
+          content: Text(
+            'Вы указали ${validation.value} TJS при рекомендации $recommended TJS.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Изменить'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Опубликовать'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+    }
+    final amount = validation.value!;
+    if (!mounted) return;
     setState(() => _busy = true);
     try {
       final scope = TajGoScope.of(context);
@@ -460,9 +484,6 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
         }
         return;
       }
-      final km =
-          _route?.distanceKm ??
-          pricing.distanceKm(_from!.toLatLng(), _to!.toLatLng());
       final orderId = await scope.orderRepository.createOrder(
         customerId: user.uid,
         customerName: profile?.name ?? 'Клиент',
@@ -470,6 +491,10 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
         toText: _to!.address,
         type: _type,
         price: amount,
+        suggestedPrice: recommended,
+        clientPrice: amount,
+        orderType: 'customDelivery',
+        priceNegotiable: true,
         fromLocation: _from!.toGeoPoint(),
         toLocation: _to!.toGeoPoint(),
         distanceKm: km,
@@ -1191,12 +1216,23 @@ class _DetailsPanel extends StatelessWidget {
                   Row(
                     children: [
                       Expanded(
-                        child: Text(
-                          'Итого: ${price.text} TJS',
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w800,
-                          ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Рекомендуем: ${pricing.suggestedPrice(route?.distanceKm ?? 0)} TJS',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            const Text(
+                              'Курьеры могут принять её или предложить свою.',
+                              style: TextStyle(
+                                color: TajGoColors.muted,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                       SizedBox(
@@ -1204,11 +1240,10 @@ class _DetailsPanel extends StatelessWidget {
                         child: TextField(
                           controller: price,
                           onChanged: onPrice,
-                          keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true,
-                          ),
+                          keyboardType: TextInputType.number,
                           decoration: const InputDecoration(
-                            labelText: 'Цена, TJS',
+                            labelText: 'Ваша цена',
+                            suffixText: 'TJS',
                             isDense: true,
                           ),
                         ),
@@ -1226,9 +1261,7 @@ class _DetailsPanel extends StatelessWidget {
               height: 48,
               child: FilledButton(
                 onPressed: busy ? null : onSubmit,
-                child: Text(
-                  busy ? 'Создаём...' : 'Найти курьера · ${price.text} TJS',
-                ),
+                child: Text(busy ? 'Публикуем...' : 'Опубликовать заказ'),
               ),
             ),
           ),

@@ -101,7 +101,6 @@ class RoadRouteProvider implements RouteProvider {
 
   Uri _osrmUri(LatLng from, LatLng to, RouteMode mode) {
     final modeProfile = switch (mode) {
-      RouteMode.walking => 'foot',
       RouteMode.bicycle || RouteMode.scooter => 'bike',
       RouteMode.car => 'driving',
     };
@@ -124,7 +123,6 @@ class RoadRouteProvider implements RouteProvider {
 
   Uri _graphHopperUri(LatLng from, LatLng to, RouteMode mode) {
     final profile = switch (mode) {
-      RouteMode.walking => 'foot',
       RouteMode.bicycle => 'bike',
       RouteMode.scooter => 'bike',
       RouteMode.car => 'car',

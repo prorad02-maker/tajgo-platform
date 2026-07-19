@@ -68,12 +68,15 @@ class _DemoToolsScreenState extends State<DemoToolsScreen> {
     }
   }
 
-  Future<void> _createTestOrder({required bool nearby}) async {
+  Future<void> _createTestOrder({required bool nearby, double? meters}) async {
     final scope = TajGoScope.of(context);
     GeoPoint from = const GeoPoint(40.2833, 69.6222);
-    if (nearby) {
+    if (nearby || meters != null) {
       final courier = await scope.adminRepository.courier(_uid);
       if (courier?.location != null) from = courier!.location!;
+    }
+    if (meters != null) {
+      from = GeoPoint(from.latitude + meters / 111320, from.longitude);
     }
     final to = GeoPoint(from.latitude + 0.006, from.longitude + 0.007);
     final route = scope.routeService.directRoute(
@@ -93,7 +96,65 @@ class _DemoToolsScreenState extends State<DemoToolsScreen> {
       distanceKm: route.distanceKm,
       etaMinutes: route.etaMinutes,
       comment: '[TEST] Демо-заказ v0.7.0',
+      isTestOrder: true,
+      orderType: 'customDelivery',
+      suggestedPrice: pricing.suggestedPrice(route.distanceKm),
+      clientPrice: pricing.suggestedPrice(route.distanceKm),
     );
+  }
+
+  Future<void> _seedOffers() async {
+    final orderId = _selectedOrderId;
+    if (orderId == null) throw StateError('Сначала выберите заказ.');
+    final orderRef = FirebaseFirestore.instance
+        .collection('orders')
+        .doc(orderId);
+    final batch = FirebaseFirestore.instance.batch();
+    for (var index = 0; index < 3; index++) {
+      final ref = orderRef
+          .collection('offers')
+          .doc('demo-courier-${index + 1}');
+      batch.set(ref, {
+        'courierId': 'demo-courier-${index + 1}',
+        'courierName': 'Тестовый курьер ${index + 1}',
+        'courierRating': 4.7 + index / 10,
+        'courierTransport': index == 0 ? 'bicycle' : 'electric_bike',
+        'courierDistanceMeters': 250 + index * 220,
+        'proposedPrice': 15 + index * 2,
+        'originalClientPrice': 15,
+        'status': 'pending',
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+        'expiresAt': Timestamp.fromDate(
+          DateTime.now().add(const Duration(minutes: 30)),
+        ),
+        'isTest': true,
+      });
+    }
+    batch.update(orderRef, {
+      'offersCount': 3,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+    await batch.commit();
+  }
+
+  Future<void> _clearOffers() async {
+    final orderId = _selectedOrderId;
+    if (orderId == null) throw StateError('Сначала выберите заказ.');
+    final orderRef = FirebaseFirestore.instance
+        .collection('orders')
+        .doc(orderId);
+    final offers = await orderRef.collection('offers').get();
+    final batch = FirebaseFirestore.instance.batch();
+    for (final offer in offers.docs) {
+      batch.delete(offer.reference);
+    }
+    batch.update(orderRef, {
+      'offersCount': 0,
+      'selectedOfferId': FieldValue.delete(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+    await batch.commit();
   }
 
   Future<void> _probeRoutingProvider() async {
@@ -297,6 +358,24 @@ class _DemoToolsScreenState extends State<DemoToolsScreen> {
                     ),
                   ),
                   _ToolButton(
+                    label: 'Тест · Создать заказ в 999 м',
+                    busy: _busy,
+                    onPressed: () => _confirm(
+                      'Создать заказ на границе?',
+                      'Точка A будет примерно в 999 м от текущего курьера.',
+                      () => _createTestOrder(nearby: false, meters: 999),
+                    ),
+                  ),
+                  _ToolButton(
+                    label: 'Тест · Создать заказ в 1000 м',
+                    busy: _busy,
+                    onPressed: () => _confirm(
+                      'Создать недоступный заказ?',
+                      'Точка A будет примерно в 1000 м от текущего курьера.',
+                      () => _createTestOrder(nearby: false, meters: 1000),
+                    ),
+                  ),
+                  _ToolButton(
                     label: 'Тест · Сбросить activeOrderId',
                     busy: _busy || courier?.activeOrderId == null,
                     onPressed: () => _confirm(
@@ -342,6 +421,24 @@ class _DemoToolsScreenState extends State<DemoToolsScreen> {
                         orderId: selected!,
                         adminId: _uid,
                       ),
+                    ),
+                  ),
+                  _ToolButton(
+                    label: 'Тест · Создать 3 demo offers',
+                    busy: _busy || selected == null,
+                    onPressed: () => _confirm(
+                      'Создать предложения?',
+                      'У выбранного заказа появятся 3 тестовых предложения.',
+                      _seedOffers,
+                    ),
+                  ),
+                  _ToolButton(
+                    label: 'Тест · Очистить offers',
+                    busy: _busy || selected == null,
+                    onPressed: () => _confirm(
+                      'Очистить предложения?',
+                      'Все offers выбранного заказа будут удалены.',
+                      _clearOffers,
                     ),
                   ),
                   _ToolButton(

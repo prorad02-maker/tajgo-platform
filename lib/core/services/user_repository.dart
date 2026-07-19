@@ -46,6 +46,7 @@ class UserRepository {
         'profileComplete': existing['profileComplete'] ?? false,
         'courierOnboardingCompleted':
             existing['courierOnboardingCompleted'] ?? false,
+        'onboardingCompleted': existing['onboardingCompleted'] ?? false,
         'courierStatus':
             existing['courierStatus'] ??
             (mode == AppUserRole.courier
@@ -100,6 +101,9 @@ class UserRepository {
             ? existing['lastMode'] ?? AppUserRole.courier
             : AppUserRole.customer,
         'profileComplete': true,
+        'onboardingCompleted': true,
+        'roleSelectedAt':
+            existing['roleSelectedAt'] ?? FieldValue.serverTimestamp(),
         'courierStatus': status,
         'role': previousRole == AppUserRole.admin
             ? AppUserRole.admin
@@ -130,9 +134,36 @@ class UserRepository {
     }
     await _db.collection('users').doc(uid).update({
       'lastMode': mode,
+      'selectedRole': mode,
+      'onboardingCompleted': true,
       if (!user.isAdmin) 'role': mode,
       'updatedAt': FieldValue.serverTimestamp(),
     });
+  }
+
+  Future<void> completeRoleOnboarding(String uid, String role) async {
+    if (!AppUserRole.userModes.contains(role)) {
+      throw ArgumentError.value(role, 'role');
+    }
+    final user = await getUser(uid);
+    final courierAllowed = user?.courierApproved == true;
+    final courierStatus = user?.courierStatus ?? CourierStatus.none;
+    final effectiveMode = role == AppUserRole.courier && !courierAllowed
+        ? AppUserRole.customer
+        : role;
+    await _db.collection('users').doc(uid).set({
+      'selectedRole': role,
+      'onboardingCompleted': true,
+      'roleSelectedAt': FieldValue.serverTimestamp(),
+      'targetRole': role,
+      'lastMode': effectiveMode,
+      if (user?.isAdmin != true) 'role': effectiveMode,
+      if (role == AppUserRole.courier && !courierAllowed)
+        'courierStatus': courierStatus == CourierStatus.none
+            ? CourierStatus.draft
+            : courierStatus,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
   }
 
   Future<AppUser?> getUser(String uid) async {

@@ -14,6 +14,10 @@ class OrderRepository {
     required String toText,
     required String type,
     required num price,
+    num? suggestedPrice,
+    num? clientPrice,
+    String orderType = 'customDelivery',
+    bool priceNegotiable = true,
     GeoPoint? fromLocation,
     GeoPoint? toLocation,
     num? distanceKm,
@@ -40,6 +44,11 @@ class OrderRepository {
       confirmationCode: generateConfirmationCode(),
       comment: comment,
       isTestOrder: isTestOrder,
+      orderType: orderType,
+      suggestedPrice: suggestedPrice ?? price,
+      clientPrice: clientPrice ?? price,
+      priceNegotiable: priceNegotiable,
+      pricingVersion: 'v2',
     );
     await ref.set(order.toCreateMap());
     return ref.id;
@@ -66,6 +75,26 @@ class OrderRepository {
         }
         return null;
       });
+
+  Future<bool> hasActiveOrder(String customerId) async {
+    final snapshot = await _db
+        .collection('orders')
+        .where('customerId', isEqualTo: customerId)
+        .orderBy('createdAt', descending: true)
+        .limit(5)
+        .get();
+    return snapshot.docs
+        .map(TajGoOrder.fromDoc)
+        .any(
+          (order) => const {
+            OrderStatus.waiting,
+            OrderStatus.accepted,
+            OrderStatus.pickedUp,
+            OrderStatus.delivered,
+            OrderStatus.disputed,
+          }.contains(order.status),
+        );
+  }
 
   /// Один заказ по id — для экрана отслеживания.
   Stream<TajGoOrder?> orderStream(String orderId) => _db
@@ -100,7 +129,7 @@ class OrderRepository {
       _db.runTransaction((transaction) async {
         final ref = _db.collection('orders').doc(orderId);
         final doc = await transaction.get(ref);
-        if (doc.data()?['status'] != 'waiting') {
+        if (!{'waiting', 'waitingOffers'}.contains(doc.data()?['status'])) {
           throw StateError('Отменить можно только ожидающий заказ.');
         }
         transaction.update(ref, {
@@ -128,6 +157,7 @@ class OrderRepository {
         });
         transaction.update(_db.collection('couriers').doc(courierId), {
           'activeOrderId': null,
+          'isBusy': false,
           'earningsToday': FieldValue.increment((data?['price'] ?? 0) as num),
           'ordersToday': FieldValue.increment(1),
           'updatedAt': FieldValue.serverTimestamp(),

@@ -121,6 +121,11 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
         phoneVerified: !user.isAnonymous && user.phoneNumber != null,
         initialMode: widget.initialIntent,
       );
+      await scope.rolePreferenceService.save(widget.initialIntent);
+      await scope.userRepository.completeRoleOnboarding(
+        user.uid,
+        widget.initialIntent,
+      );
       final profile = await scope.userRepository.getUser(user.uid);
       if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(

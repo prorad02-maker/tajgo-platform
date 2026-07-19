@@ -69,12 +69,7 @@ class RoutingConfig {
             ? timeoutSeconds * 1000
             : legacyTimeoutMs,
       ),
-      mode: switch (modeValue) {
-        'walking' => RouteMode.walking,
-        'scooter' => RouteMode.scooter,
-        'car' => RouteMode.car,
-        _ => RouteMode.bicycle,
-      },
+      mode: routeModeFromString(modeValue),
       debugLogging: kDebugMode,
       profileOverride: const String.fromEnvironment('ROUTING_PROFILE'),
     );
