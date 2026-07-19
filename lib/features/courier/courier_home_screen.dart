@@ -182,6 +182,12 @@ class _CourierHomeScreenState extends State<CourierHomeScreen>
 
   Future<void> _submitOffer(TajGoOrder order, {required bool custom}) async {
     final clientPrice = order.clientPrice ?? order.price;
+    if (custom && !order.priceNegotiable) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Для этого заказа цена фиксирована.')),
+      );
+      return;
+    }
     num proposedPrice = clientPrice;
     if (custom) {
       final controller = TextEditingController(
@@ -769,13 +775,15 @@ class _PilotOrdersFeed extends StatelessWidget {
                   const SizedBox(height: 10),
                   Row(
                     children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: busy ? null : () => onCustomPrice(order),
-                          child: const Text('Предложить свою'),
+                      if (order.priceNegotiable) ...[
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: busy ? null : () => onCustomPrice(order),
+                            child: const Text('Предложить свою'),
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 8),
+                        const SizedBox(width: 8),
+                      ],
                       Expanded(
                         child: FilledButton(
                           onPressed: busy ? null : () => onAcceptPrice(order),

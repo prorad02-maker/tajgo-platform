@@ -8,6 +8,7 @@ import '../../shared/widgets/tajgo_order_history_tile.dart';
 import '../account/account_profile_screen.dart';
 import '../auth/phone_auth_screen.dart';
 import '../map/screens/new_order_map_screen.dart';
+import '../marketplace/marketplace_partners_screen.dart';
 import 'order_tracking_screen.dart';
 
 class CustomerHomeScreen extends StatefulWidget {
@@ -45,8 +46,11 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
     );
   }
 
-  void _soon() => ScaffoldMessenger.of(context).showSnackBar(
-    const SnackBar(content: Text('Скоро здесь появятся партнёры TajGo.')),
+  Future<void> _openMarketplace(String category) => Navigator.push(
+    context,
+    MaterialPageRoute<void>(
+      builder: (_) => MarketplacePartnersScreen(category: category),
+    ),
   );
 
   void _selectTab(int index) {
@@ -199,7 +203,7 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
             ),
             const SizedBox(height: 18),
             const Text(
-              'Скоро с партнёрами',
+              'Партнёры рядом',
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
             ),
             const SizedBox(height: 10),
@@ -209,7 +213,7 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
                   child: _CategoryCard(
                     icon: Icons.restaurant_rounded,
                     title: 'Еда',
-                    onTap: _soon,
+                    onTap: () => _openMarketplace('food'),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -217,7 +221,7 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
                   child: _CategoryCard(
                     icon: Icons.shopping_basket_rounded,
                     title: 'Продукты',
-                    onTap: _soon,
+                    onTap: () => _openMarketplace('groceries'),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -225,7 +229,7 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
                   child: _CategoryCard(
                     icon: Icons.local_florist_rounded,
                     title: 'Цветы',
-                    onTap: _soon,
+                    onTap: () => _openMarketplace('flowers'),
                   ),
                 ),
               ],

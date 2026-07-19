@@ -157,6 +157,134 @@ class _DemoToolsScreenState extends State<DemoToolsScreen> {
     await batch.commit();
   }
 
+  Future<void> _seedMarketplace() async {
+    final db = FirebaseFirestore.instance;
+    final batch = db.batch();
+    final partners = <String, Map<String, dynamic>>{
+      'demo-food': {
+        'name': 'TajGo Kitchen',
+        'category': 'food',
+        'description': 'Горячие блюда и быстрые обеды',
+        'address': 'проспект Исмоили Сомони, Худжанд',
+        'location': const GeoPoint(40.2833, 69.6222),
+        'minimumOrder': 30,
+        'deliveryFee': 12,
+        'rating': 4.9,
+        'preparationMinutes': 25,
+        'workingHours': '09:00–22:00',
+      },
+      'demo-groceries': {
+        'name': 'Сабзавот Маркет',
+        'category': 'groceries',
+        'description': 'Свежие продукты на каждый день',
+        'address': 'улица Камоли Худжанди, Худжанд',
+        'location': const GeoPoint(40.2874, 69.6184),
+        'minimumOrder': 25,
+        'deliveryFee': 10,
+        'rating': 4.8,
+        'preparationMinutes': 15,
+        'workingHours': '08:00–21:00',
+      },
+      'demo-flowers': {
+        'name': 'Гулҳои Суғд',
+        'category': 'flowers',
+        'description': 'Букеты и цветы с быстрой доставкой',
+        'address': 'улица Рахмон Набиев, Худжанд',
+        'location': const GeoPoint(40.2798, 69.6268),
+        'minimumOrder': 50,
+        'deliveryFee': 15,
+        'rating': 5.0,
+        'preparationMinutes': 20,
+        'workingHours': '08:00–23:00',
+      },
+    };
+    for (final entry in partners.entries) {
+      batch.set(db.collection('partners').doc(entry.key), {
+        ...entry.value,
+        'imageUrl': '',
+        'isOpen': true,
+        'isActive': true,
+        'isTest': true,
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    }
+    final products = <String, Map<String, dynamic>>{
+      'demo-food-plov': {
+        'partnerId': 'demo-food',
+        'name': 'Оши палав',
+        'description': 'Порция традиционного плова',
+        'price': 32,
+        'unit': 'portion',
+        'popularity': 100,
+      },
+      'demo-food-sambusa': {
+        'partnerId': 'demo-food',
+        'name': 'Самбӯса',
+        'description': 'Самса из тандыра',
+        'price': 8,
+        'unit': 'item',
+        'popularity': 80,
+      },
+      'demo-grocery-apples': {
+        'partnerId': 'demo-groceries',
+        'name': 'Яблоки',
+        'description': 'Свежие яблоки',
+        'price': 12,
+        'unit': 'kg',
+        'popularity': 70,
+      },
+      'demo-grocery-bread': {
+        'partnerId': 'demo-groceries',
+        'name': 'Лепёшка',
+        'description': 'Горячий хлеб',
+        'price': 4,
+        'unit': 'item',
+        'popularity': 90,
+      },
+      'demo-flower-roses': {
+        'partnerId': 'demo-flowers',
+        'name': 'Букет роз',
+        'description': '7 свежих роз',
+        'price': 85,
+        'unit': 'bouquet',
+        'popularity': 100,
+      },
+      'demo-flower-tulips': {
+        'partnerId': 'demo-flowers',
+        'name': 'Букет тюльпанов',
+        'description': '9 сезонных тюльпанов',
+        'price': 65,
+        'unit': 'bouquet',
+        'popularity': 75,
+      },
+    };
+    for (final entry in products.entries) {
+      batch.set(db.collection('products').doc(entry.key), {
+        ...entry.value,
+        'imageUrl': '',
+        'isAvailable': true,
+        'hidden': false,
+        'isTest': true,
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    }
+    batch.set(db.collection('admin_logs').doc(), {
+      'adminId': _uid,
+      'action': 'marketplace.demo.seed',
+      'entityType': 'marketplace',
+      'entityId': 'demo-marketplace',
+      'before': null,
+      'after': {
+        'partners': partners.keys.toList(),
+        'products': products.keys.toList(),
+      },
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+    await batch.commit();
+  }
+
   Future<void> _probeRoutingProvider() async {
     setState(() {
       _busy = true;
@@ -339,6 +467,15 @@ class _DemoToolsScreenState extends State<DemoToolsScreen> {
                     },
                   ),
                   const SizedBox(height: 14),
+                  _ToolButton(
+                    label: 'Тест · Создать demo marketplace',
+                    busy: _busy,
+                    onPressed: () => _confirm(
+                      'Создать тестовую витрину?',
+                      'Будут созданы 3 партнёра и 6 товаров. Повторный запуск обновит их.',
+                      _seedMarketplace,
+                    ),
+                  ),
                   _ToolButton(
                     label: 'Тест · Создать заказ в Худжанде',
                     busy: _busy,

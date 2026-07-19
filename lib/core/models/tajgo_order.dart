@@ -10,6 +10,34 @@ enum OrderStatus {
   cancelled,
 }
 
+class CatalogOrderItem {
+  const CatalogOrderItem({
+    required this.productId,
+    required this.name,
+    required this.unit,
+    required this.unitPrice,
+    required this.quantity,
+    required this.lineTotal,
+  });
+
+  final String productId;
+  final String name;
+  final String unit;
+  final num unitPrice;
+  final double quantity;
+  final num lineTotal;
+
+  factory CatalogOrderItem.fromMap(Map<String, dynamic> data) =>
+      CatalogOrderItem(
+        productId: data['productId'] as String? ?? '',
+        name: data['name'] as String? ?? 'Товар',
+        unit: data['unit'] as String? ?? 'item',
+        unitPrice: data['unitPrice'] as num? ?? 0,
+        quantity: (data['quantity'] as num? ?? 0).toDouble(),
+        lineTotal: data['lineTotal'] as num? ?? 0,
+      );
+}
+
 OrderStatus orderStatusFromString(String? value) {
   return switch (value) {
     'courierSelected' || 'accepted' || 'arrivedPickup' => OrderStatus.accepted,
@@ -79,6 +107,12 @@ class TajGoOrder {
     this.selectedCourierId,
     this.offerExpiresAt,
     this.pricingVersion = 'v2',
+    this.partnerId,
+    this.partnerName,
+    this.items = const [],
+    this.subtotal,
+    this.deliveryFee,
+    this.total,
   });
 
   final String id,
@@ -101,6 +135,9 @@ class TajGoOrder {
   final String? selectedOfferId, selectedCourierId;
   final DateTime? offerExpiresAt;
   final String pricingVersion;
+  final String? partnerId, partnerName;
+  final List<CatalogOrderItem> items;
+  final num? subtotal, deliveryFee, total;
   final num? distanceKm;
   final int? etaMinutes;
   final GeoPoint? fromLocation, toLocation;
@@ -169,6 +206,15 @@ class TajGoOrder {
           data['selectedCourierId'] as String? ?? data['courierId'] as String?,
       offerExpiresAt: date('offerExpiresAt'),
       pricingVersion: data['pricingVersion'] as String? ?? 'legacy',
+      partnerId: data['partnerId'] as String?,
+      partnerName: data['partnerName'] as String?,
+      items: (data['items'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(CatalogOrderItem.fromMap)
+          .toList(growable: false),
+      subtotal: data['subtotal'] as num?,
+      deliveryFee: data['deliveryFee'] as num?,
+      total: data['total'] as num?,
     );
   }
 
@@ -191,6 +237,24 @@ class TajGoOrder {
     if (selectedCourierId != null) 'selectedCourierId': selectedCourierId,
     if (offerExpiresAt != null) 'offerExpiresAt': offerExpiresAt,
     'pricingVersion': pricingVersion,
+    if (partnerId != null) 'partnerId': partnerId,
+    if (partnerName != null) 'partnerName': partnerName,
+    if (items.isNotEmpty)
+      'items': items
+          .map(
+            (item) => {
+              'productId': item.productId,
+              'name': item.name,
+              'unit': item.unit,
+              'unitPrice': item.unitPrice,
+              'quantity': item.quantity,
+              'lineTotal': item.lineTotal,
+            },
+          )
+          .toList(growable: false),
+    if (subtotal != null) 'subtotal': subtotal,
+    if (deliveryFee != null) 'deliveryFee': deliveryFee,
+    if (total != null) 'total': total,
     'currency': currency,
     if (confirmationCode != null) 'confirmationCode': confirmationCode,
     if (fromLocation != null) 'fromLocation': fromLocation,

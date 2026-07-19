@@ -158,6 +158,43 @@ class _AdminOrderDetailsBodyState extends State<_AdminOrderDetailsBody> {
                       'Цена: ${order.price} TJS · Расстояние: ${order.distanceKm?.toStringAsFixed(1) ?? '—'} км',
                       style: const TextStyle(color: TajGoColors.muted),
                     ),
+                    if (order.orderType == 'catalogOrder' &&
+                        order.items.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: TajGoColors.mint,
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Партнёр: ${order.partnerName ?? order.partnerId ?? '—'}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                            for (final item in order.items)
+                              Text(
+                                '${item.name} × ${item.quantity} · '
+                                '${item.lineTotal} TJS',
+                              ),
+                            const Divider(),
+                            Text(
+                              'Товары ${order.subtotal ?? 0} + доставка '
+                              '${order.deliveryFee ?? order.price} = '
+                              '${order.total ?? 0} TJS',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                     const Text(
                       'Маршрут предварительный — показана прямая линия.',
                       style: TextStyle(

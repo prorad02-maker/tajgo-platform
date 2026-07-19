@@ -904,7 +904,8 @@ class _OrderPanel extends StatelessWidget {
                     fontWeight: FontWeight.w700,
                   ),
                 ),
-              if ((order.comment ?? '').isNotEmpty ||
+              if (order.items.isNotEmpty ||
+                  (order.comment ?? '').isNotEmpty ||
                   order.status == OrderStatus.pickedUp) ...[
                 const SizedBox(height: 8),
                 Container(
@@ -930,6 +931,12 @@ class _OrderPanel extends StatelessWidget {
                         Text(
                           'Ориентир / комментарий: ${order.comment}',
                           maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      if (order.items.isNotEmpty)
+                        Text(
+                          'Состав: ${order.items.map((item) => '${item.name} × ${item.quantity}').join(', ')}',
+                          maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                         ),
                       if (order.status == OrderStatus.pickedUp)

@@ -2,7 +2,7 @@
 
 Финальный Android `applicationId` и namespace подтверждены владельцем: `tj.tajgo.app`.
 
-На этапе v0.8.1 исходный `android/app/google-services.json` всё ещё относится к прежнему package `com.example.tajgo`. Это намеренно: Firebase-проект не изменяется автоматически. До получения нового файла Android debug/release build может завершаться ошибкой Google Services о том, что подходящий client для `tj.tajgo.app` не найден.
+Текущий `android/app/google-services.json` содержит Android client для `tj.tajgo.app` (Firebase app id `1:784873463457:android:0ac2e36af2d8c1a0c91ae0`) и совместимый legacy-client `com.example.tajgo`. Локальный `firebase.json` также указывает на новый client. При повторном скачивании конфигурации из Firebase Console обязательно сохранить client `tj.tajgo.app` и проверить fingerprints.
 
 ## 1. Authentication
 
@@ -66,6 +66,8 @@ flutter build apk --debug
 - безопасную публичную GPS-проекцию `courier_public` без телефона, activeOrderId и заработка;
 - admin-доступ через `users/{uid}.role == "admin"`;
 - append-only `admin_logs` для admin;
+- авторизованное чтение витрины `partners`/`products`, а изменение — только admin;
+- создание `catalogOrder` только владельцем заказа, с неизменяемым snapshot товаров и фиксированной стоимостью доставки;
 - deny-all для неизвестных коллекций.
 
 Составной индекс `orders(customerId ASC, createdAt DESC)` уже описан в `firestore.indexes.json`. Он нужен клиентскому списку заказов; дополнительные составные индексы текущим RC-запросам не требуются.

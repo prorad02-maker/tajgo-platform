@@ -1,6 +1,8 @@
 # TajGo — следующие шаги владельца
 
-## После v1.2.0 Courier Product Completion
+## После v1.4.0 Full Pilot Completion
+
+Актуальное дополнение: клиентская витрина `Еда / Продукты / Цветы`, корзина одного партнёра, checkout на карте, catalog-заказ, admin CRUD партнёров/товаров и demo seed реализованы. Перед реальным тестом новые `firestore.rules` необходимо отдельно проверить и задеплоить с разрешения владельца. Полный сценарий находится в `docs/FINAL_FULL_CAPABILITY_TEST_PLAN.md`.
 
 1. В Firebase Console убедиться, что Phone provider включён и Android-приложение
    зарегистрировано как `tj.tajgo.app` с актуальными debug SHA-1/SHA-256.
@@ -31,7 +33,7 @@
 
 ### 1. Зарегистрировать финальный package в Firebase
 
-Gradle namespace/applicationId, Kotlin `MainActivity` и Android runtime-ссылки уже переведены на `tj.tajgo.app`. Текущий `google-services.json` относится к старому `com.example.tajgo` и должен быть заменён файлом из Firebase Console.
+Gradle namespace/applicationId, Kotlin `MainActivity` и Android runtime-ссылки уже переведены на `tj.tajgo.app`. Текущий `google-services.json` уже содержит client `tj.tajgo.app`; перед полевым тестом остаётся проверить его SHA-1/SHA-256 в Firebase Console.
 
 Смена package создаёт для Android отдельное приложение. Установленная версия `com.example.tajgo` не обновится поверх `tj.tajgo.app`: перед установкой нужно вручную удалить старое приложение либо оставить обе версии как отдельные приложения. Локальные данные старого Android package автоматически не переносятся.
 

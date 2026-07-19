@@ -437,9 +437,76 @@ service cloud.firestore {
             == resource.data.get('confirmationCode', null)
           && request.resource.data.get('comment', null)
             == resource.data.get('comment', null)
+          && request.resource.data.get('orderType', 'customDelivery')
+            == resource.data.get('orderType', 'customDelivery')
+          && request.resource.data.get('suggestedPrice', null)
+            == resource.data.get('suggestedPrice', null)
+          && request.resource.data.get('clientPrice', null)
+            == resource.data.get('clientPrice', null)
+          && request.resource.data.get('priceNegotiable', true)
+            == resource.data.get('priceNegotiable', true)
+          && request.resource.data.get('pricingVersion', null)
+            == resource.data.get('pricingVersion', null)
+          && request.resource.data.get('partnerId', null)
+            == resource.data.get('partnerId', null)
+          && request.resource.data.get('partnerName', null)
+            == resource.data.get('partnerName', null)
+          && request.resource.data.get('items', [])
+            == resource.data.get('items', [])
+          && request.resource.data.get('subtotal', null)
+            == resource.data.get('subtotal', null)
+          && request.resource.data.get('deliveryFee', null)
+            == resource.data.get('deliveryFee', null)
+          && request.resource.data.get('total', null)
+            == resource.data.get('total', null)
           && request.resource.data.get('isTestOrder', false)
             == resource.data.get('isTestOrder', false)
           && request.resource.data.createdAt == resource.data.createdAt;
+      }
+
+      function orderTypeDataIsValid(data) {
+        let type = data.get('orderType', 'customDelivery');
+        return (type == 'customDelivery'
+            && data.get('priceNegotiable', true) == true)
+          || (type == 'catalogOrder'
+            && data.get('priceNegotiable', true) == false
+            && data.get('partnerId', null) is string
+            && data.get('partnerName', null) is string
+            && data.get('items', []) is list
+            && data.get('items', []).size() > 0
+            && data.get('subtotal', null) is number
+            && data.get('subtotal', 0) >= 0
+            && data.get('deliveryFee', null) is number
+            && data.get('deliveryFee', 0) >= 10
+            && data.get('total', null) is number
+            && data.total == data.subtotal + data.deliveryFee
+            && data.price == data.deliveryFee
+            && catalogPartnerDataMatches(data)
+            && exists(
+              /databases/$(database)/documents/partners/$(data.partnerId)
+            )
+            && get(
+              /databases/$(database)/documents/partners/$(data.partnerId)
+            ).data.get('isActive', false) == true
+            && get(
+              /databases/$(database)/documents/partners/$(data.partnerId)
+            ).data.get('isOpen', false) == true);
+      }
+
+      function catalogPartnerDataMatches(data) {
+        let partner = get(
+          /databases/$(database)/documents/partners/$(data.partnerId)
+        ).data;
+        let expectedDeliveryFee = partner.deliveryFee < 10
+          ? 10
+          : partner.deliveryFee;
+        return data.partnerName == partner.name
+          && data.type == partner.category
+          && data.fromText == partner.address
+          && data.fromLocation == partner.location
+          && data.subtotal >= partner.minimumOrder
+          && data.deliveryFee == expectedDeliveryFee
+          && data.items.size() <= 50;
       }
 
       function customerCancels() {
@@ -513,7 +580,7 @@ service cloud.firestore {
           /databases/$(database)/documents/couriers/$(request.auth.uid)
         );
         return isCourier()
-          && resource.data.status in ['waiting', 'waitingOffers']
+          && resource.data.status == 'waiting'
           && request.resource.data.status == 'accepted'
           && request.resource.data.courierId == request.auth.uid
           && courierAfter.data.get('activeOrderId', null) == orderId
@@ -652,6 +719,7 @@ service cloud.firestore {
         && request.resource.data.price is number
         && request.resource.data.price >= 10
         && request.resource.data.currency == 'TJS'
+        && orderTypeDataIsValid(request.resource.data)
         && request.resource.data.get('courierId', null) == null
         && (authPhone() != null
           || request.resource.data.get('isTestOrder', false) == true)
@@ -682,6 +750,12 @@ service cloud.firestore {
           'toLocation',
           'distanceKm',
           'etaMinutes',
+          'partnerId',
+          'partnerName',
+          'items',
+          'subtotal',
+          'deliveryFee',
+          'total',
           'comment',
           'isTestOrder',
           'declinedBy',
@@ -719,29 +793,117 @@ service cloud.firestore {
           return signedIn() && parentOrder().data.customerId == request.auth.uid;
         }
 
+        function courierOfferDataIsValid() {
+          let clientPrice = parentOrder().data.get(
+            'clientPrice',
+            parentOrder().data.price
+          );
+          return isCourier()
+            && offerId == request.auth.uid
+            && request.resource.data.courierId == request.auth.uid
+            && request.resource.data.originalClientPrice == clientPrice
+            && request.resource.data.proposedPrice is number
+            && (parentOrder().data.get('priceNegotiable', true) == true
+              ? request.resource.data.proposedPrice >= clientPrice
+              : request.resource.data.proposedPrice == clientPrice)
+            && request.resource.data.status in ['pending', 'withdrawn']
+            && request.resource.data.updatedAt == request.time
+            && request.resource.data.keys().hasOnly([
+              'courierId',
+              'courierName',
+              'courierRating',
+              'courierTransport',
+              'courierDistanceMeters',
+              'proposedPrice',
+              'originalClientPrice',
+              'status',
+              'createdAt',
+              'updatedAt',
+              'expiresAt',
+              'isTest'
+            ]);
+        }
+
         allow get, list: if isAdmin()
           || customerOwnsParent()
           || (isCourier() && resource.data.courierId == request.auth.uid);
 
-        allow create: if isCourier()
-          && offerId == request.auth.uid
-          && request.resource.data.courierId == request.auth.uid
+        allow create: if isAdmin() || (courierOfferDataIsValid()
           && request.resource.data.status == 'pending'
-          && request.resource.data.proposedPrice >= request.resource.data.originalClientPrice
-          && parentOrder().data.status in ['waiting', 'waitingOffers'];
+          && request.resource.data.createdAt == request.time
+          && parentOrder().data.status in ['waiting', 'waitingOffers']);
 
         allow update: if isAdmin()
-          || (isCourier()
-            && offerId == request.auth.uid
-            && request.resource.data.courierId == resource.data.courierId
-            && request.resource.data.status in ['pending', 'withdrawn'])
+          || (courierOfferDataIsValid()
+            && request.resource.data.createdAt == resource.data.createdAt
+            && parentOrder().data.status in ['waiting', 'waitingOffers'])
           || (customerOwnsParent()
             && request.resource.data.courierId == resource.data.courierId
-            && request.resource.data.status in ['accepted', 'rejected', 'expired']);
+            && resource.data.status == 'pending'
+            && request.resource.data.status in ['accepted', 'rejected', 'expired']
+            && request.resource.data.updatedAt == request.time
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'status',
+              'updatedAt'
+            ]));
 
         allow delete: if false;
       }
 
+      allow delete: if false;
+    }
+
+    match /partners/{partnerId} {
+      function partnerDataIsValid(data) {
+        return data.get('name', null) is string
+          && data.get('category', null) in ['food', 'groceries', 'flowers']
+          && data.get('address', null) is string
+          && data.get('location', null) is latlng
+          && data.get('minimumOrder', null) is number
+          && data.get('minimumOrder', -1) >= 0
+          && data.get('deliveryFee', null) is number
+          && data.get('deliveryFee', -1) >= 0
+          && data.get('preparationMinutes', 20) is int
+          && data.get('preparationMinutes', 20) >= 0
+          && data.get('isOpen', null) is bool
+          && data.get('isActive', null) is bool;
+      }
+
+      allow get, list: if signedIn();
+      allow create: if isAdmin()
+        && partnerDataIsValid(request.resource.data)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+      allow update: if isAdmin()
+        && partnerDataIsValid(request.resource.data)
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if false;
+    }
+
+    match /products/{productId} {
+      function productDataIsValid(data) {
+        return data.get('partnerId', null) is string
+          && existsAfter(
+            /databases/$(database)/documents/partners/$(data.partnerId)
+          )
+          && data.get('name', null) is string
+          && data.get('price', null) is number
+          && data.get('price', -1) >= 0
+          && data.get('unit', null) in ['item', 'kg', 'portion', 'bouquet']
+          && data.get('isAvailable', null) is bool
+          && data.get('hidden', null) is bool;
+      }
+
+      allow get, list: if signedIn();
+      allow create: if isAdmin()
+        && productDataIsValid(request.resource.data)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+      allow update: if isAdmin()
+        && productDataIsValid(request.resource.data)
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedAt == request.time;
       allow delete: if false;
     }
 

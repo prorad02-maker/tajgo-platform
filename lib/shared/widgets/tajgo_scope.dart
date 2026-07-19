@@ -10,11 +10,13 @@ import '../../core/services/courier_repository.dart';
 import '../../core/services/courier_offer_repository.dart';
 import '../../core/services/courier_application_repository.dart';
 import '../../core/services/external_navigator_service.dart';
+import '../../core/services/marketplace_repository.dart';
 import '../../core/services/order_repository.dart';
 import '../../core/services/route_service.dart';
 import '../../core/services/user_repository.dart';
 import '../../core/services/role_preference_service.dart';
 import '../../features/map/services/tajgo_location_service.dart';
+import '../../core/models/marketplace_cart.dart';
 
 class TajGoScope extends InheritedWidget {
   factory TajGoScope({Key? key, required Widget child}) {
@@ -37,6 +39,8 @@ class TajGoScope extends InheritedWidget {
       routeService: RouteService(),
       locationService: TajGoLocationService(),
       externalNavigatorService: ExternalNavigatorService(),
+      marketplaceRepository: MarketplaceRepository(db),
+      marketplaceCart: MarketplaceCart(),
       child: child,
     );
   }
@@ -57,6 +61,8 @@ class TajGoScope extends InheritedWidget {
     required this.routeService,
     required this.locationService,
     required this.externalNavigatorService,
+    required this.marketplaceRepository,
+    required this.marketplaceCart,
   });
 
   final AuthService authService;
@@ -72,6 +78,8 @@ class TajGoScope extends InheritedWidget {
   final RouteService routeService;
   final TajGoLocationService locationService;
   final ExternalNavigatorService externalNavigatorService;
+  final MarketplaceRepository marketplaceRepository;
+  final MarketplaceCart marketplaceCart;
 
   static TajGoScope of(BuildContext context) {
     final scope = context.dependOnInheritedWidgetOfExactType<TajGoScope>();

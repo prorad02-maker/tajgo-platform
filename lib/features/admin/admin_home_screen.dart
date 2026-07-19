@@ -10,6 +10,7 @@ import '../../shared/widgets/tajgo_stat_card.dart';
 import 'admin_couriers_screen.dart';
 import 'admin_courier_applications_screen.dart';
 import 'admin_orders_screen.dart';
+import 'admin_marketplace_screen.dart';
 import 'dispatch_map_screen.dart';
 import 'widgets/admin_access_gate.dart';
 
@@ -164,6 +165,13 @@ class AdminHomeScreen extends StatelessWidget {
                           subtitle: 'Линия, статистика и активные заказы',
                           onTap: () =>
                               _open(context, const AdminCouriersScreen()),
+                        ),
+                        _NavCard(
+                          icon: Icons.storefront_rounded,
+                          title: 'Партнёры и товары',
+                          subtitle: 'Витрина, доступность, цены и ассортимент',
+                          onTap: () =>
+                              _open(context, const AdminMarketplaceScreen()),
                         ),
                         _NavCard(
                           icon: Icons.map_rounded,

@@ -621,6 +621,11 @@ class _StatusPanel extends StatelessWidget {
                 ].join(' · '),
                 style: const TextStyle(color: TajGoColors.muted, fontSize: 13),
               ),
+              if (order.orderType == 'catalogOrder' &&
+                  order.items.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                _CatalogOrderSummary(order: order),
+              ],
               if (order.fromLocation != null && order.toLocation != null) ...[
                 const SizedBox(height: 8),
                 TajGoRouteSummaryCard(
@@ -698,6 +703,55 @@ class _StatusPanel extends StatelessWidget {
     ),
   );
 }
+
+class _CatalogOrderSummary extends StatelessWidget {
+  const _CatalogOrderSummary({required this.order});
+
+  final TajGoOrder order;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      color: TajGoColors.mint,
+      borderRadius: BorderRadius.circular(14),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          order.partnerName ?? 'Заказ у партнёра',
+          style: const TextStyle(fontWeight: FontWeight.w900),
+        ),
+        const SizedBox(height: 4),
+        for (final item in order.items.take(3))
+          Text(
+            '${item.name} × ${_catalogQuantity(item.quantity)} · '
+            '${item.lineTotal} TJS',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 13),
+          ),
+        if (order.items.length > 3)
+          Text(
+            'Ещё позиций: ${order.items.length - 3}',
+            style: const TextStyle(fontSize: 13, color: TajGoColors.muted),
+          ),
+        const SizedBox(height: 5),
+        Text(
+          'Товары ${order.subtotal ?? 0} + доставка '
+          '${order.deliveryFee ?? order.price} = ${order.total ?? 0} TJS',
+          style: const TextStyle(fontWeight: FontWeight.w800),
+        ),
+      ],
+    ),
+  );
+}
+
+String _catalogQuantity(double value) => value == value.roundToDouble()
+    ? value.toInt().toString()
+    : value.toStringAsFixed(1);
 
 class _OffersSection extends StatelessWidget {
   const _OffersSection({required this.order, required this.onShowMap});

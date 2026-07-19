@@ -56,8 +56,13 @@ class CourierOfferRepository {
     if (!isCourierOfferPriceValid(
       proposedPrice: proposedPrice,
       clientPrice: clientPrice,
+      priceNegotiable: order['priceNegotiable'] as bool? ?? true,
     )) {
-      throw StateError('Предложение не может быть ниже цены клиента.');
+      throw StateError(
+        order['priceNegotiable'] == false
+            ? 'Для этого заказа действует фиксированная цена.'
+            : 'Предложение не может быть ниже цены клиента.',
+      );
     }
     final pickup = order['fromLocation'] as GeoPoint?;
     final location = courier['location'] as GeoPoint?;
@@ -240,7 +245,10 @@ bool isWaitingOrderStatus(String? status) =>
 bool isCourierOfferPriceValid({
   required num proposedPrice,
   required num clientPrice,
-}) => proposedPrice >= clientPrice;
+  bool priceNegotiable = true,
+}) => priceNegotiable
+    ? proposedPrice >= clientPrice
+    : proposedPrice == clientPrice;
 
 bool shouldIncrementOffersCount(String? previousStatus) =>
     previousStatus != 'pending';
