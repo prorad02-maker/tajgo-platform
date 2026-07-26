@@ -85,6 +85,37 @@ class MarketplaceProduct {
     'isPublished': !hidden,
   };
 
+  Map<String, dynamic> toCacheMap() => {
+    'id': id,
+    'partnerId': partnerId,
+    'name': name,
+    'description': description,
+    'imageUrl': imageUrl,
+    'price': price,
+    if (oldPrice != null) 'oldPrice': oldPrice,
+    'unit': unit,
+    'isAvailable': isAvailable,
+    'hidden': hidden,
+    'popularity': popularity,
+    'sortOrder': sortOrder,
+  };
+
+  factory MarketplaceProduct.fromCacheMap(Map<String, dynamic> data) =>
+      MarketplaceProduct(
+        id: data['id'] as String? ?? '',
+        partnerId: data['partnerId'] as String? ?? '',
+        name: data['name'] as String? ?? 'Товар',
+        description: data['description'] as String? ?? '',
+        imageUrl: data['imageUrl'] as String? ?? '',
+        price: data['price'] as num? ?? 0,
+        oldPrice: data['oldPrice'] as num?,
+        unit: data['unit'] as String? ?? 'item',
+        isAvailable: data['isAvailable'] as bool? ?? true,
+        hidden: data['hidden'] as bool? ?? false,
+        popularity: (data['popularity'] as num? ?? 0).toInt(),
+        sortOrder: (data['sortOrder'] as num? ?? 0).toInt(),
+      );
+
   MarketplaceProduct copyWith({
     num? price,
     num? oldPrice,

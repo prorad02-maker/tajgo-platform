@@ -87,6 +87,12 @@ service cloud.firestore {
         || (owner(uid) && safeOwnUserUpdate())
         || safeCourierApplicationUserSync(uid);
       allow delete: if false;
+
+      // Saved addresses are personal, non-critical data owned by the user.
+      // Order creation still validates the actual coordinates server-side.
+      match /addresses/{addressId} {
+        allow read, write: if owner(uid);
+      }
     }
 
     function safeOwnerApplicationCreate(uid) {

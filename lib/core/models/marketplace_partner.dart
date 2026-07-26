@@ -100,6 +100,51 @@ class MarketplacePartner {
     'isPublished': !isPreview,
   };
 
+  Map<String, dynamic> toCacheMap() => {
+    'id': id,
+    'name': name,
+    'category': category,
+    'description': description,
+    'imageUrl': imageUrl,
+    'address': address,
+    'lat': location.latitude,
+    'lng': location.longitude,
+    'minimumOrder': minimumOrder,
+    'deliveryFee': deliveryFee,
+    'rating': rating,
+    'preparationMinutes': preparationMinutes,
+    'sortOrder': sortOrder,
+    'workingHours': workingHours,
+    'isOpen': isOpen,
+    'isActive': isActive,
+    'isTest': isTest,
+    'isPreview': isPreview,
+  };
+
+  factory MarketplacePartner.fromCacheMap(Map<String, dynamic> data) =>
+      MarketplacePartner(
+        id: data['id'] as String? ?? '',
+        name: data['name'] as String? ?? 'Партнёр TajGo',
+        category: data['category'] as String? ?? 'food',
+        description: data['description'] as String? ?? '',
+        imageUrl: data['imageUrl'] as String? ?? '',
+        address: data['address'] as String? ?? 'Худжанд',
+        location: GeoPoint(
+          (data['lat'] as num? ?? 40.2833).toDouble(),
+          (data['lng'] as num? ?? 69.6222).toDouble(),
+        ),
+        minimumOrder: data['minimumOrder'] as num? ?? 0,
+        deliveryFee: data['deliveryFee'] as num? ?? 10,
+        rating: (data['rating'] as num? ?? 5).toDouble(),
+        preparationMinutes: (data['preparationMinutes'] as num? ?? 20).toInt(),
+        sortOrder: (data['sortOrder'] as num? ?? 0).toInt(),
+        workingHours: data['workingHours'] as String? ?? '',
+        isOpen: data['isOpen'] as bool? ?? true,
+        isActive: data['isActive'] as bool? ?? true,
+        isTest: data['isTest'] as bool? ?? false,
+        isPreview: data['isPreview'] as bool? ?? false,
+      );
+
   MarketplacePartner copyWith({
     String? id,
     String? name,

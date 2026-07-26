@@ -2306,18 +2306,21 @@ export class TajGoAuthoritativeCore {
           .collection("account_deletion_requests")
           .doc(principal.uid);
 
-        // Reads first (transaction contract): profile, courier, active orders.
-        const [userDoc, courierDoc, activeOrders] = await Promise.all([
-          transaction.get(userRef),
-          transaction.get(courierRef),
-          transaction.get(
-            this.db
-              .collection("orders")
-              .where("customerId", "==", principal.uid)
-              .where("status", "in", activeStatuses)
-              .limit(1),
-          ),
-        ]);
+        // Reads first (transaction contract): profile, courier, active orders,
+        // saved addresses (PII to remove).
+        const [userDoc, courierDoc, activeOrders, addresses] =
+          await Promise.all([
+            transaction.get(userRef),
+            transaction.get(courierRef),
+            transaction.get(
+              this.db
+                .collection("orders")
+                .where("customerId", "==", principal.uid)
+                .where("status", "in", activeStatuses)
+                .limit(1),
+            ),
+            transaction.get(userRef.collection("addresses")),
+          ]);
 
         const user = userDoc.data();
         if (user == null || user.deleted === true) {
@@ -2345,7 +2348,14 @@ export class TajGoAuthoritativeCore {
           );
         }
 
-        const anonymizedCategories = ["profile", "courier-presence"];
+        const anonymizedCategories = [
+          "profile",
+          "courier-presence",
+          ...(addresses.empty ? [] : ["saved-addresses"]),
+        ];
+        for (const address of addresses.docs) {
+          transaction.delete(address.ref);
+        }
         transaction.set(
           userRef,
           {

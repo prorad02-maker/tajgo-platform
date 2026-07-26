@@ -205,6 +205,10 @@ async function seed(): Promise<void> {
         storeName: "Гулхона",
         createdAt: Timestamp.now(),
       }),
+      setDoc(doc(db, "users", customerId, "addresses", "addr-1"), {
+        label: "home",
+        shortAddress: "ул. Ленина 1",
+      }),
       setDoc(doc(db, "unknown_private", "secret"), {value: true}),
     ]);
   });
@@ -441,6 +445,30 @@ test("account deletion request is owner/admin read-only, never client-writable",
     setDoc(doc(ownerDb, "account_deletion_requests", customerId), {
       uid: customerId,
       status: "completed",
+    }),
+  );
+});
+
+test("saved addresses are owner read/write only", async () => {
+  const ownerDb = environment.authenticatedContext(customerId).firestore();
+  const otherDb = environment
+    .authenticatedContext(otherCustomerId)
+    .firestore();
+  await assertSucceeds(
+    getDoc(doc(ownerDb, "users", customerId, "addresses", "addr-1")),
+  );
+  await assertSucceeds(
+    setDoc(doc(ownerDb, "users", customerId, "addresses", "addr-2"), {
+      label: "work",
+      shortAddress: "офис",
+    }),
+  );
+  await assertFails(
+    getDoc(doc(otherDb, "users", customerId, "addresses", "addr-1")),
+  );
+  await assertFails(
+    setDoc(doc(otherDb, "users", customerId, "addresses", "addr-3"), {
+      label: "home",
     }),
   );
 });

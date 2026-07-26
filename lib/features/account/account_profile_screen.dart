@@ -13,6 +13,7 @@ import '../legal/legal_document_screen.dart';
 import '../legal/support_screen.dart';
 import '../merchant/merchant_application_screen.dart';
 import '../startup/intent_selection_screen.dart';
+import 'addresses/saved_addresses_screen.dart';
 import 'security_data_screen.dart';
 import 'settings_screen.dart';
 
@@ -98,7 +99,12 @@ class AccountProfileScreen extends StatelessWidget {
               _Tile(
                 icon: Icons.favorite_rounded,
                 title: 'Избранные адреса',
-                onTap: () => _soon(context),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => const SavedAddressesScreen(),
+                  ),
+                ),
               ),
               if (currentMode == AppUserRole.customer &&
                   TajGoScope.of(context).featureFlags.merchantApplications)

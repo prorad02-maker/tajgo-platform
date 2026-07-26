@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -17,6 +19,7 @@ import '../../core/services/marketplace_repository.dart';
 import '../../core/services/merchant_application_repository.dart';
 import '../../core/services/order_repository.dart';
 import '../../core/services/route_service.dart';
+import '../../core/services/saved_address_repository.dart';
 import '../../core/services/user_repository.dart';
 import '../../core/services/role_preference_service.dart';
 import '../../features/map/services/tajgo_location_service.dart';
@@ -38,6 +41,8 @@ class TajGoScope extends InheritedWidget {
     );
     final users = UserRepository(db, commands);
     final rolePreferences = RolePreferenceService();
+    final cart = MarketplaceCart();
+    unawaited(cart.hydrate());
     return TajGoScope._(
       key: key,
       authService: auth,
@@ -56,7 +61,8 @@ class TajGoScope extends InheritedWidget {
       marketplaceRepository: MarketplaceRepository(db, commands),
       merchantApplicationRepository:
           MerchantApplicationRepository(db, commands),
-      marketplaceCart: MarketplaceCart(),
+      savedAddressRepository: SavedAddressRepository(db),
+      marketplaceCart: cart,
       featureFlags: flags,
       child: child,
     );
@@ -80,6 +86,7 @@ class TajGoScope extends InheritedWidget {
     required this.externalNavigatorService,
     required this.marketplaceRepository,
     required this.merchantApplicationRepository,
+    required this.savedAddressRepository,
     required this.marketplaceCart,
     required this.featureFlags,
   });
@@ -99,6 +106,7 @@ class TajGoScope extends InheritedWidget {
   final ExternalNavigatorService externalNavigatorService;
   final MarketplaceRepository marketplaceRepository;
   final MerchantApplicationRepository merchantApplicationRepository;
+  final SavedAddressRepository savedAddressRepository;
   final MarketplaceCart marketplaceCart;
   final FeatureFlags featureFlags;
 

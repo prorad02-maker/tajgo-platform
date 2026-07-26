@@ -338,6 +338,30 @@ test("deleteAccountRequest removes courier presence and public doc", async () =>
   assert.equal(publicDoc.exists, false);
 });
 
+test("deleteAccountRequest removes saved addresses", async () => {
+  await seedUser(customer, "customer");
+  await db
+    .collection("users")
+    .doc(customer.uid)
+    .collection("addresses")
+    .doc("addr-1")
+    .set({label: "home", shortAddress: "ул. Ленина 1"});
+  const deleted: string[] = [];
+  const result = await deletionCore(deleted).deleteAccountRequest({
+    principal: customer,
+    data: {idempotencyKey: "delete-addr-0001"},
+  });
+  assert.ok(
+    (result.anonymizedCategories as string[]).includes("saved-addresses"),
+  );
+  const remaining = await db
+    .collection("users")
+    .doc(customer.uid)
+    .collection("addresses")
+    .get();
+  assert.equal(remaining.size, 0);
+});
+
 test("deleteAccountRequest is idempotent for the same key", async () => {
   await seedUser(customer, "customer");
   const deleted: string[] = [];
