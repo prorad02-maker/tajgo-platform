@@ -97,6 +97,26 @@ class MarketplaceRepository {
               ..sort((a, b) => a.name.compareTo(b.name)),
       );
 
+  /// Опубликованные, доступные и не скрытые товары всех партнёров — для поиска.
+  ///
+  /// Запрос по одному индексируемому полю `isPublished`; остальные условия
+  /// (не test, доступен, не скрыт) фильтруются на клиенте, чтобы не требовать
+  /// составного индекса. При ошибке возвращается пустой список.
+  Stream<List<MarketplaceProduct>> publishedProductsStream() => _db
+      .collection('products')
+      .where('isPublished', isEqualTo: true)
+      .snapshots()
+      .map(
+        (snapshot) => snapshot.docs
+            .map(MarketplaceProduct.fromDoc)
+            .where(
+              (product) =>
+                  !product.isTest && product.isAvailable && !product.hidden,
+            )
+            .toList(growable: false),
+      )
+      .handleError((_) {});
+
   String newPartnerId() => _db.collection('partners').doc().id;
   String newProductId() => _db.collection('products').doc().id;
 
