@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../../core/config/feature_flags.dart';
 import '../../core/services/auth_service.dart';
 import '../../core/services/authoritative_command_service.dart';
 import '../../core/services/account_migration_service.dart';
@@ -21,8 +22,13 @@ import '../../features/map/services/tajgo_location_service.dart';
 import '../../core/models/marketplace_cart.dart';
 
 class TajGoScope extends InheritedWidget {
-  factory TajGoScope({Key? key, required Widget child}) {
+  factory TajGoScope({
+    Key? key,
+    required Widget child,
+    FeatureFlags? featureFlags,
+  }) {
     final db = FirebaseFirestore.instance;
+    final flags = featureFlags ?? FeatureFlags.resolve();
     final auth = AuthService(FirebaseAuth.instance);
     final commands = AuthoritativeCommandService(
       FirebaseAuthoritativeCommandGateway(
@@ -48,6 +54,7 @@ class TajGoScope extends InheritedWidget {
       externalNavigatorService: ExternalNavigatorService(),
       marketplaceRepository: MarketplaceRepository(db, commands),
       marketplaceCart: MarketplaceCart(),
+      featureFlags: flags,
       child: child,
     );
   }
@@ -70,6 +77,7 @@ class TajGoScope extends InheritedWidget {
     required this.externalNavigatorService,
     required this.marketplaceRepository,
     required this.marketplaceCart,
+    required this.featureFlags,
   });
 
   final AuthService authService;
@@ -87,6 +95,7 @@ class TajGoScope extends InheritedWidget {
   final ExternalNavigatorService externalNavigatorService;
   final MarketplaceRepository marketplaceRepository;
   final MarketplaceCart marketplaceCart;
+  final FeatureFlags featureFlags;
 
   static TajGoScope of(BuildContext context) {
     final scope = context.dependOnInheritedWidgetOfExactType<TajGoScope>();

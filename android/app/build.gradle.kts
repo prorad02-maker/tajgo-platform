@@ -32,7 +32,9 @@ android {
         applicationId = "tj.tajgo.app"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        // Firebase (App Check / Messaging / Crashlytics) requires Android 6 (API 23)
+        // as a minimum; respect a higher Flutter default if one is provided.
+        minSdk = maxOf(flutter.minSdkVersion, 23)
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName

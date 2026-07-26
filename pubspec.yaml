@@ -46,6 +46,21 @@ dependencies:
   http: ^1.2.2
   shared_preferences: ^2.5.3
   url_launcher: ^6.3.2
+  firebase_messaging: ^16.4.3
+  firebase_crashlytics: ^5.2.6
+  firebase_app_check: ^0.4.5+2
+  # file_selector (flutter.dev, federated) for price import / attachments.
+  # Chosen over file_picker: its Windows impl is a separate federated package
+  # that is NOT compiled into Android/iOS kernels, so the win32 desktop-only
+  # version conflict cannot break mobile builds.
+  file_selector: ^1.0.0
+
+# TajGo targets Android/iOS only. package_info_plus (pulled transitively via
+# geolocator's Linux impl) requires win32 ^6, while some desktop federated
+# plugins still pin win32 ^5.9. Force win32 ^6 to unblock version solving;
+# no Windows/Linux desktop implementation is compiled for mobile artifacts.
+dependency_overrides:
+  win32: ^6.0.0
 
 dev_dependencies:
   flutter_test:
