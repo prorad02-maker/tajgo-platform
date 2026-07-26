@@ -6,6 +6,7 @@ import {
   Timestamp,
   Transaction,
 } from "firebase-admin/firestore";
+import {getAuth} from "firebase-admin/auth";
 import {
   ACTION_RADIUS_METERS,
   CoreError,
@@ -51,6 +52,11 @@ export class TajGoAuthoritativeCore {
     private readonly db: Firestore,
     private readonly now: () => Date = () => new Date(),
     private readonly codeGenerator: () => string = generateDeliveryCode,
+    private readonly authDeleter: (uid: string) => Promise<void> = async (
+      uid,
+    ) => {
+      await getAuth().deleteUser(uid);
+    },
   ) {}
 
   async ensureUserProfile(context: CommandContext): Promise<Result> {
@@ -1900,6 +1906,152 @@ export class TajGoAuthoritativeCore {
         return {orderId, migrated: true};
       },
     );
+  }
+
+  /**
+   * Self-service account deletion. Anonymizes the user's identity and courier
+   * presence, records an audit-ready deletion request, and best-effort deletes
+   * the Firebase Auth user. Blocked while any order is still active. Mandatory
+   * operational history (orders, disputes) is retained but detached from PII.
+   */
+  async deleteAccountRequest(context: CommandContext): Promise<Result> {
+    const {principal, data} = context;
+    const key = requiredIdempotencyKey(data);
+    const reason = optionalString(data, "reason", 300);
+    const activeStatuses = [
+      ...waitingOrderStatuses,
+      ...activeDeliveryStatuses,
+    ];
+    const result = await this.runIdempotent(
+      "deleteAccountRequest",
+      principal,
+      key,
+      async (transaction) => {
+        const userRef = this.db.collection("users").doc(principal.uid);
+        const courierRef = this.db.collection("couriers").doc(principal.uid);
+        const courierPublicRef = this.db
+          .collection("courier_public")
+          .doc(principal.uid);
+        const deletionRef = this.db
+          .collection("account_deletion_requests")
+          .doc(principal.uid);
+
+        // Reads first (transaction contract): profile, courier, active orders.
+        const [userDoc, courierDoc, activeOrders] = await Promise.all([
+          transaction.get(userRef),
+          transaction.get(courierRef),
+          transaction.get(
+            this.db
+              .collection("orders")
+              .where("customerId", "==", principal.uid)
+              .where("status", "in", activeStatuses)
+              .limit(1),
+          ),
+        ]);
+
+        const user = userDoc.data();
+        if (user == null || user.deleted === true) {
+          throw new CoreError(
+            "failed-precondition",
+            "Аккаунт уже удалён или не найден.",
+          );
+        }
+        if (!activeOrders.empty) {
+          throw new CoreError(
+            "failed-precondition",
+            "Сначала завершите активный заказ.",
+            {reason: "active-order"},
+          );
+        }
+        const courier = courierDoc.data();
+        if (
+          courier != null &&
+          (courier.activeOrderId != null || courier.isBusy === true)
+        ) {
+          throw new CoreError(
+            "failed-precondition",
+            "Сначала завершите активную доставку.",
+            {reason: "active-order"},
+          );
+        }
+
+        const anonymizedCategories = ["profile", "courier-presence"];
+        transaction.set(
+          userRef,
+          {
+            displayName: "Удалённый пользователь",
+            name: "Удалённый пользователь",
+            phoneNumber: null,
+            phoneVerified: false,
+            role: "deleted",
+            roles: [],
+            lastMode: "customer",
+            selectedRole: "customer",
+            targetRole: "customer",
+            courierStatus: "none",
+            deleted: true,
+            deletedAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
+          },
+          {merge: true},
+        );
+        if (courierDoc.exists) {
+          transaction.set(
+            courierRef,
+            {
+              displayName: "Удалённый курьер",
+              name: "Удалённый курьер",
+              phoneNumber: null,
+              isOnline: false,
+              online: false,
+              deleted: true,
+              deletedAt: FieldValue.serverTimestamp(),
+              updatedAt: FieldValue.serverTimestamp(),
+            },
+            {merge: true},
+          );
+          transaction.delete(courierPublicRef);
+        }
+
+        transaction.set(deletionRef, {
+          uid: principal.uid,
+          status: "completed",
+          method: "in-app",
+          ...(reason != null ? {reason} : {}),
+          anonymizedCategories,
+          retainedCategories: [
+            "order-history-anonymized",
+            "disputes",
+            "operational-records",
+          ],
+          requestedAt: FieldValue.serverTimestamp(),
+          completedAt: FieldValue.serverTimestamp(),
+        });
+
+        this.writeAdminLog(transaction, principal.uid, {
+          action: "account.delete.self",
+          entityType: "user",
+          entityId: principal.uid,
+          anonymizedCategories,
+        });
+
+        return {status: "deleted", anonymizedCategories};
+      },
+    );
+
+    // Best-effort: remove the Firebase Auth identity so sign-in is no longer
+    // possible. Failure here does not undo the committed anonymization.
+    await this.deleteAuthUser(principal.uid);
+    return result;
+  }
+
+  private async deleteAuthUser(uid: string): Promise<void> {
+    try {
+      await this.authDeleter(uid);
+    } catch (_) {
+      // Auth identity may already be gone, or Auth is unavailable in this
+      // environment; anonymized Firestore state is the authoritative outcome.
+    }
   }
 
   private async runIdempotent(

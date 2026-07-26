@@ -147,6 +147,11 @@ export const resetTestOrderForCourier = command(
   (context) => core.resetTestOrderForCourier(context),
 );
 
+export const deleteAccountRequest = command(
+  "deleteAccountRequest",
+  (context) => core.deleteAccountRequest(context),
+);
+
 export const adminCancelOrder = command(
   "adminCancelOrder",
   (context) => core.adminCancelOrder(context),

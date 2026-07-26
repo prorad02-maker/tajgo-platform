@@ -351,6 +351,14 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Account deletion requests are written only by the deleteAccountRequest
+    // Function. The owner may read their own request status; admins may review.
+    match /account_deletion_requests/{uid} {
+      allow get: if owner(uid) || isAdmin();
+      allow list: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
     function publishedPartner() {
       return resource.data.isActive == true
         && resource.data.get('isPublished', true) == true

@@ -9,6 +9,7 @@ import '../courier/courier_home_screen.dart';
 import '../courier/courier_onboarding_screen.dart';
 import '../customer/customer_home_screen.dart';
 import '../startup/intent_selection_screen.dart';
+import 'security_data_screen.dart';
 import 'settings_screen.dart';
 
 class CustomerProfileScreen extends StatelessWidget {
@@ -125,6 +126,16 @@ class AccountProfileScreen extends StatelessWidget {
                 icon: Icons.privacy_tip_outlined,
                 title: 'Политика конфиденциальности',
                 onTap: () => _soon(context),
+              ),
+              _Tile(
+                icon: Icons.shield_outlined,
+                title: 'Безопасность и данные',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => const SecurityDataScreen(),
+                  ),
+                ),
               ),
               _Tile(
                 icon: Icons.logout_rounded,

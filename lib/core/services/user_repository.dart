@@ -75,6 +75,20 @@ class UserRepository {
       .snapshots()
       .map((doc) => doc.exists ? AppUser.fromDoc(doc) : null);
 
+  /// Запрос на удаление аккаунта через authoritative Function.
+  ///
+  /// Backend анонимизирует профиль и presence, запрещает удаление при активном
+  /// заказе и best-effort удаляет Firebase Auth-пользователя. Возвращает статус.
+  Future<Map<String, dynamic>> deleteAccountRequest({
+    required String uid,
+    String? reason,
+  }) {
+    return _commands.call('deleteAccountRequest', {
+      'idempotencyKey': TajGoIdempotencyKey.create('delete-account-$uid'),
+      if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
+    });
+  }
+
   Future<void> setAdminRoleForTesting(String uid) async {
     throw StateError(
       'Роль admin назначается владельцем через Firebase по документированной процедуре.',

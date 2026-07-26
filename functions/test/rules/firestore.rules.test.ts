@@ -194,6 +194,11 @@ async function seed(): Promise<void> {
         adminId,
         createdAt: Timestamp.now(),
       }),
+      setDoc(doc(db, "account_deletion_requests", customerId), {
+        uid: customerId,
+        status: "completed",
+        createdAt: Timestamp.now(),
+      }),
       setDoc(doc(db, "unknown_private", "secret"), {value: true}),
     ]);
   });
@@ -405,6 +410,31 @@ test("admin has guarded reads and logs; non-admin cannot access them", async () 
       action: "forged",
       adminId: customerId,
       createdAt: serverTimestamp(),
+    }),
+  );
+});
+
+test("account deletion request is owner/admin read-only, never client-writable", async () => {
+  const ownerDb = environment.authenticatedContext(customerId).firestore();
+  const otherDb = environment
+    .authenticatedContext(otherCustomerId)
+    .firestore();
+  const adminDb = environment
+    .authenticatedContext(adminId, {admin: true})
+    .firestore();
+  await assertSucceeds(
+    getDoc(doc(ownerDb, "account_deletion_requests", customerId)),
+  );
+  await assertSucceeds(
+    getDoc(doc(adminDb, "account_deletion_requests", customerId)),
+  );
+  await assertFails(
+    getDoc(doc(otherDb, "account_deletion_requests", customerId)),
+  );
+  await assertFails(
+    setDoc(doc(ownerDb, "account_deletion_requests", customerId), {
+      uid: customerId,
+      status: "completed",
     }),
   );
 });

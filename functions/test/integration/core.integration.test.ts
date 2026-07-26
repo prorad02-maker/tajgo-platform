@@ -237,6 +237,102 @@ test("offer submission rejects an order in an invalid status", async () => {
   );
 });
 
+function deletionCore(sink: string[]): TajGoAuthoritativeCore {
+  return new TajGoAuthoritativeCore(
+    db,
+    () => now,
+    () => "4321",
+    async (uid) => {
+      sink.push(uid);
+    },
+  );
+}
+
+test("deleteAccountRequest anonymizes profile and records request", async () => {
+  await seedUser(customer, "customer");
+  const deleted: string[] = [];
+  const result = await deletionCore(deleted).deleteAccountRequest({
+    principal: customer,
+    data: {idempotencyKey: "delete-account-0001", reason: "не нужно"},
+  });
+  assert.equal(result.status, "deleted");
+  assert.deepEqual(deleted, [customer.uid]);
+
+  const user = (await db.collection("users").doc(customer.uid).get()).data();
+  assert.equal(user?.deleted, true);
+  assert.equal(user?.displayName, "Удалённый пользователь");
+  assert.equal(user?.phoneNumber, null);
+  assert.equal(user?.phoneVerified, false);
+  assert.equal(user?.role, "deleted");
+
+  const request = (
+    await db.collection("account_deletion_requests").doc(customer.uid).get()
+  ).data();
+  assert.equal(request?.status, "completed");
+  assert.equal(request?.uid, customer.uid);
+
+  const logs = await db
+    .collection("admin_logs")
+    .where("action", "==", "account.delete.self")
+    .get();
+  assert.equal(logs.size, 1);
+});
+
+test("deleteAccountRequest is blocked while an order is active", async () => {
+  await seedUser(customer, "customer");
+  await seedWaitingOrder("blocking-order", customer);
+  const deleted: string[] = [];
+  await assert.rejects(
+    deletionCore(deleted).deleteAccountRequest({
+      principal: customer,
+      data: {idempotencyKey: "delete-blocked-0001"},
+    }),
+    (error: unknown) =>
+      error instanceof CoreError && error.code === "failed-precondition",
+  );
+  const user = (await db.collection("users").doc(customer.uid).get()).data();
+  assert.notEqual(user?.deleted, true);
+  assert.equal(deleted.length, 0);
+});
+
+test("deleteAccountRequest removes courier presence and public doc", async () => {
+  await seedCourier(courier);
+  await db.collection("courier_public").doc(courier.uid).set({
+    uid: courier.uid,
+    isOnline: true,
+    displayName: courier.uid,
+  });
+  const deleted: string[] = [];
+  await deletionCore(deleted).deleteAccountRequest({
+    principal: courier,
+    data: {idempotencyKey: "delete-courier-0001"},
+  });
+  const courierDoc = (
+    await db.collection("couriers").doc(courier.uid).get()
+  ).data();
+  assert.equal(courierDoc?.deleted, true);
+  assert.equal(courierDoc?.isOnline, false);
+  const publicDoc = await db
+    .collection("courier_public")
+    .doc(courier.uid)
+    .get();
+  assert.equal(publicDoc.exists, false);
+});
+
+test("deleteAccountRequest is idempotent for the same key", async () => {
+  await seedUser(customer, "customer");
+  const deleted: string[] = [];
+  const core2 = deletionCore(deleted);
+  const data = {idempotencyKey: "delete-idem-0001"};
+  await core2.deleteAccountRequest({principal: customer, data});
+  await core2.deleteAccountRequest({principal: customer, data});
+  const commands = await db
+    .collection("command_results")
+    .where("command", "==", "deleteAccountRequest")
+    .get();
+  assert.equal(commands.size, 1);
+});
+
 test("busy courier cannot submit an offer", async () => {
   await seedCourier(courier, {
     activeOrderId: "existing-order",
