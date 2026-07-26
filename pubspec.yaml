@@ -54,6 +54,8 @@ dependencies:
   # that is NOT compiled into Android/iOS kernels, so the win32 desktop-only
   # version conflict cannot break mobile builds.
   file_selector: ^1.0.0
+  csv: ^8.0.0
+  excel: ^4.0.6
 
 # TajGo targets Android/iOS only. package_info_plus (pulled transitively via
 # geolocator's Linux impl) requires win32 ^6, while some desktop federated

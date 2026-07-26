@@ -120,6 +120,15 @@ class MarketplaceRepository {
   String newPartnerId() => _db.collection('partners').doc().id;
   String newProductId() => _db.collection('products').doc().id;
 
+  /// Разовый список товаров партнёра (для сопоставления по SKU при импорте).
+  Future<List<MarketplaceProduct>> partnerProductsOnce(String partnerId) async {
+    final snapshot = await _db
+        .collection('products')
+        .where('partnerId', isEqualTo: partnerId)
+        .get();
+    return snapshot.docs.map(MarketplaceProduct.fromDoc).toList(growable: false);
+  }
+
   static Map<String, dynamic> _partnerFields(MarketplacePartner p) => {
     'name': p.name,
     'category': p.category,

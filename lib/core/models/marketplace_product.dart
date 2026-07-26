@@ -123,12 +123,13 @@ class MarketplaceProduct {
       );
 
   MarketplaceProduct copyWith({
+    String? id,
     num? price,
     num? oldPrice,
     bool? isAvailable,
     bool? hidden,
   }) => MarketplaceProduct(
-    id: id,
+    id: id ?? this.id,
     partnerId: partnerId,
     name: name,
     description: description,
