@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/constants/tajgo_colors.dart';
 import '../../../core/models/tajgo_courier.dart';
+import '../../../core/services/authoritative_command_service.dart';
 import '../../../core/services/pricing.dart' as pricing;
 import '../../../shared/widgets/tajgo_scope.dart';
 import '../../customer/order_tracking_screen.dart';
@@ -59,6 +60,7 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
   bool _showLocateHint = false;
   bool _showYouAreHere = false;
   bool _gpsWeak = false;
+  String? _createOrderKey;
   Timer? _youAreHereTimer;
 
   bool get _selectionMoving => _cameraMoving || _gestureMoving;
@@ -429,6 +431,7 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
   }
 
   Future<void> _createOrder() async {
+    if (_busy) return;
     final km =
         _route?.distanceKm ??
         pricing.distanceKm(_from!.toLatLng(), _to!.toLatLng());
@@ -470,6 +473,7 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
     setState(() => _busy = true);
     try {
       final scope = TajGoScope.of(context);
+      _createOrderKey ??= TajGoIdempotencyKey.create('create-custom-order');
       final user = scope.authService.currentUser!;
       final profile = await scope.userRepository.getUser(user.uid);
       if (!kDebugMode && profile?.phoneVerified != true) {
@@ -500,8 +504,9 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
         distanceKm: km,
         etaMinutes: pricing.etaMinutes(km),
         comment: _comment.text.trim().isEmpty ? null : _comment.text.trim(),
-        isTestOrder: kDebugMode && user.isAnonymous,
+        idempotencyKey: _createOrderKey,
       );
+      _createOrderKey = null;
       if (mounted) {
         Navigator.pushReplacement(
           context,
@@ -510,11 +515,23 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
           ),
         );
       }
-    } catch (error) {
+    } on TajGoCommandException catch (error) {
+      if (!error.retryable) _createOrderKey = null;
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('$error')));
+        ).showSnackBar(SnackBar(content: Text(error.message)));
+      }
+    } catch (_) {
+      _createOrderKey = null;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Не удалось создать заказ. Проверьте связь и повторите.',
+            ),
+          ),
+        );
       }
     } finally {
       if (mounted) {

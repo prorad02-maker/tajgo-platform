@@ -8,6 +8,7 @@ import 'package:latlong2/latlong.dart';
 import '../../core/constants/tajgo_colors.dart';
 import '../../core/models/tajgo_order.dart';
 import '../../core/services/external_navigator_service.dart';
+import '../../core/services/delivery_code_input.dart';
 import '../../core/services/pricing.dart' as pricing;
 import '../../shared/widgets/tajgo_action_button.dart';
 import '../../shared/widgets/tajgo_order_progress.dart';
@@ -448,7 +449,7 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
           FilledButton(
             onPressed: () {
               final code = controller.text.trim();
-              if (!RegExp(r'^\d{4}$').hasMatch(code)) {
+              if (!isValidDeliveryCodeInput(code)) {
                 ScaffoldMessenger.of(dialogContext).showSnackBar(
                   const SnackBar(content: Text('Введите четыре цифры.')),
                 );

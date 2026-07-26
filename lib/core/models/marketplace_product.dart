@@ -82,7 +82,31 @@ class MarketplaceProduct {
     'popularity': popularity,
     'sortOrder': sortOrder,
     'isTest': isTest,
+    'isPublished': !hidden,
   };
+
+  MarketplaceProduct copyWith({
+    num? price,
+    num? oldPrice,
+    bool? isAvailable,
+    bool? hidden,
+  }) => MarketplaceProduct(
+    id: id,
+    partnerId: partnerId,
+    name: name,
+    description: description,
+    imageUrl: imageUrl,
+    price: price ?? this.price,
+    oldPrice: oldPrice ?? this.oldPrice,
+    unit: unit,
+    isAvailable: isAvailable ?? this.isAvailable,
+    hidden: hidden ?? this.hidden,
+    popularity: popularity,
+    sortOrder: sortOrder,
+    isTest: isTest,
+    createdAt: createdAt,
+    updatedAt: updatedAt,
+  );
 }
 
 DateTime? _date(Object? value) => switch (value) {

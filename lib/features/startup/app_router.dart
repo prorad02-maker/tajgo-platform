@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/models/app_user.dart';
 import '../../shared/widgets/tajgo_scope.dart';
 import '../auth/profile_completion_screen.dart';
+import '../admin/admin_home_screen.dart';
 import '../courier/courier_home_screen.dart';
 import '../courier/courier_onboarding_screen.dart';
 import '../courier/courier_application_status_screen.dart';
@@ -33,12 +34,13 @@ class _AppStartupRouterState extends State<AppStartupRouter> {
     if (firebaseUser == null) {
       return const _StartupState(StartupDestination.intent, null);
     }
-    try {
-      await scope.accountMigrationService.migrate(firebaseUser.uid);
-    } catch (_) {
-      // Migration is additive. A temporary rules/network failure must never
-      // destroy or hide the existing account.
-    }
+    await scope.userRepository.ensureUser(
+      uid: firebaseUser.uid,
+      phoneNumber: firebaseUser.phoneNumber,
+      displayName: firebaseUser.displayName,
+      phoneVerified:
+          !firebaseUser.isAnonymous && firebaseUser.phoneNumber != null,
+    );
     var profile = await scope.userRepository.getUser(firebaseUser.uid);
     if (profile == null) {
       await scope.userRepository.ensureUser(
@@ -49,6 +51,9 @@ class _AppStartupRouterState extends State<AppStartupRouter> {
             !firebaseUser.isAnonymous && firebaseUser.phoneNumber != null,
       );
       profile = await scope.userRepository.getUser(firebaseUser.uid);
+    }
+    if (profile != null) {
+      await scope.rolePreferenceService.save(profile.lastMode);
     }
     return _StartupState(
       resolveStartupDestination(authenticated: true, profile: profile),
@@ -114,6 +119,7 @@ class _AppStartupRouterState extends State<AppStartupRouter> {
             status: state.profile?.courierStatus ?? CourierStatus.draft,
           ),
         StartupDestination.courierHome => const CourierHomeScreen(),
+        StartupDestination.adminHome => const AdminHomeScreen(),
       };
     },
   );

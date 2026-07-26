@@ -9,6 +9,7 @@ import '../../core/constants/tajgo_colors.dart';
 import '../../core/models/marketplace_cart.dart';
 import '../../core/models/marketplace_partner.dart';
 import '../../core/models/marketplace_product.dart';
+import '../../core/services/authoritative_command_service.dart';
 import '../../shared/widgets/tajgo_scope.dart';
 import '../customer/order_tracking_screen.dart';
 import '../map/models/place_suggestion.dart';
@@ -44,6 +45,7 @@ class _MarketplaceCheckoutScreenState extends State<MarketplaceCheckoutScreen> {
   final _comment = TextEditingController();
   MarketplaceDeliverySelection? _delivery;
   bool _busy = false;
+  String? _idempotencyKey;
 
   @override
   void dispose() {
@@ -62,6 +64,7 @@ class _MarketplaceCheckoutScreenState extends State<MarketplaceCheckoutScreen> {
   }
 
   Future<void> _submit(MarketplaceCart cart) async {
+    if (_busy) return;
     final partner = cart.partner;
     final delivery = _delivery;
     if (partner == null || cart.isEmpty) return;
@@ -89,6 +92,7 @@ class _MarketplaceCheckoutScreenState extends State<MarketplaceCheckoutScreen> {
     setState(() => _busy = true);
     try {
       final scope = TajGoScope.of(context);
+      _idempotencyKey ??= TajGoIdempotencyKey.create('catalog-checkout');
       final uid = scope.authService.currentUser!.uid;
       final user = await scope.userRepository.getUser(uid);
       if (!mounted) return;
@@ -102,7 +106,9 @@ class _MarketplaceCheckoutScreenState extends State<MarketplaceCheckoutScreen> {
         distanceKm: delivery.distanceKm,
         etaMinutes: delivery.etaMinutes,
         comment: _comment.text,
+        idempotencyKey: _idempotencyKey,
       );
+      _idempotencyKey = null;
       cart.clear();
       if (!mounted) return;
       Navigator.pushAndRemoveUntil(
@@ -112,11 +118,27 @@ class _MarketplaceCheckoutScreenState extends State<MarketplaceCheckoutScreen> {
         ),
         (route) => route.isFirst,
       );
-    } catch (error) {
+    } on TajGoCommandException catch (error) {
+      if (error.isPriceChanged) {
+        cart.applyServerPrices(error.currentPrices);
+      } else if (!error.retryable) {
+        _idempotencyKey = null;
+      }
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('$error')));
+        ).showSnackBar(SnackBar(content: Text(error.message)));
+      }
+    } catch (_) {
+      _idempotencyKey = null;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Не удалось оформить заказ. Проверьте связь и повторите.',
+            ),
+          ),
+        );
       }
     } finally {
       if (mounted) setState(() => _busy = false);

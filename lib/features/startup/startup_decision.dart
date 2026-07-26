@@ -8,6 +8,7 @@ enum StartupDestination {
   customerHome,
   courierOnboarding,
   courierHome,
+  adminHome,
 }
 
 StartupDestination resolveStartupDestination({
@@ -18,6 +19,7 @@ StartupDestination resolveStartupDestination({
   if (profile == null || !profile.profileComplete) {
     return StartupDestination.profileCompletion;
   }
+  if (profile.isAdmin) return StartupDestination.adminHome;
   if (!profile.onboardingCompleted) {
     return StartupDestination.roleOnboarding;
   }

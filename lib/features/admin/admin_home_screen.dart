@@ -9,8 +9,11 @@ import '../../shared/widgets/tajgo_scope.dart';
 import '../../shared/widgets/tajgo_stat_card.dart';
 import 'admin_couriers_screen.dart';
 import 'admin_courier_applications_screen.dart';
+import 'admin_audit_logs_screen.dart';
+import 'admin_offers_screen.dart';
 import 'admin_orders_screen.dart';
 import 'admin_marketplace_screen.dart';
+import 'admin_settings_screen.dart';
 import 'dispatch_map_screen.dart';
 import 'widgets/admin_access_gate.dart';
 
@@ -179,6 +182,39 @@ class AdminHomeScreen extends StatelessWidget {
                           subtitle: 'Курьеры и заказы Худжанда',
                           onTap: () =>
                               _open(context, const DispatchMapScreen()),
+                        ),
+                        _NavCard(
+                          icon: Icons.local_offer_rounded,
+                          title: 'Предложения',
+                          subtitle: 'Цены и состояния предложений курьеров',
+                          onTap: () =>
+                              _open(context, const AdminOffersScreen()),
+                        ),
+                        _NavCard(
+                          icon: Icons.report_problem_rounded,
+                          title: 'Споры',
+                          subtitle: 'Заказы, требующие решения администратора',
+                          onTap: () => _open(
+                            context,
+                            const AdminOrdersScreen(
+                              initialFilter: AdminOrderFilter.disputed,
+                            ),
+                          ),
+                        ),
+                        _NavCard(
+                          icon: Icons.history_rounded,
+                          title: 'Журнал действий',
+                          subtitle:
+                              'Аудит критических административных операций',
+                          onTap: () =>
+                              _open(context, const AdminAuditLogsScreen()),
+                        ),
+                        _NavCard(
+                          icon: Icons.settings_rounded,
+                          title: 'Настройки',
+                          subtitle: 'Безопасность и состояние backend',
+                          onTap: () =>
+                              _open(context, const AdminSettingsScreen()),
                         ),
                       ],
                     ),

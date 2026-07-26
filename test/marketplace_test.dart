@@ -218,7 +218,8 @@ void main() {
       for (final partner in marketplaceSamplePartners) {
         expect(partner.isPreview, isTrue);
         expect(sampleProductsForPartner(partner.id), hasLength(3));
-        expect(partner.toWriteMap(), isNot(contains('isPreview')));
+        expect(partner.toWriteMap()['isPreview'], isTrue);
+        expect(partner.toWriteMap()['isPublished'], isFalse);
       }
     });
   });

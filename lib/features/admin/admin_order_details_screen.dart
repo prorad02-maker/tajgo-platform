@@ -297,6 +297,21 @@ class _AdminOrderDetailsBodyState extends State<_AdminOrderDetailsBody> {
 
   List<Widget> _actions(TajGoOrder order, TajGoScope scope) {
     final result = <Widget>[];
+    if (order.confirmationCode != null) {
+      result.add(
+        TajGoAdminActionButton(
+          label: 'Защитить legacy-код',
+          title: 'Перенести код в защищённое хранилище?',
+          message:
+              'Открытый код будет удалён из заказа. Клиент продолжит видеть '
+              'его через защищённый документ, а курьер — только вводить.',
+          onConfirm: () => scope.adminRepository.migrateLegacyDeliveryCode(
+            orderId: order.id,
+            adminId: _adminId,
+          ),
+        ),
+      );
+    }
     if (!const {
       OrderStatus.completed,
       OrderStatus.cancelled,
@@ -358,7 +373,6 @@ class _AdminOrderDetailsBodyState extends State<_AdminOrderDetailsBody> {
       OrderStatus.accepted,
       OrderStatus.pickedUp,
       OrderStatus.delivered,
-      OrderStatus.completed,
     }.contains(order.status)) {
       result.add(
         OutlinedButton(

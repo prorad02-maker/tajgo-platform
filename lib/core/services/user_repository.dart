@@ -1,11 +1,12 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/foundation.dart';
 
 import '../models/app_user.dart';
+import 'authoritative_command_service.dart';
 
 class UserRepository {
-  UserRepository(this._db);
+  UserRepository(this._db, this._commands);
   final FirebaseFirestore _db;
+  final AuthoritativeCommandService _commands;
 
   Future<void> ensureUser({
     required String uid,
@@ -14,55 +15,10 @@ class UserRepository {
     bool phoneVerified = false,
     String initialMode = AppUserRole.customer,
   }) async {
-    final ref = _db.collection('users').doc(uid);
-    await _db.runTransaction((transaction) async {
-      final snapshot = await transaction.get(ref);
-      final existing = snapshot.data() ?? const <String, dynamic>{};
-      final resolvedName = displayName?.trim().isNotEmpty == true
-          ? displayName!.trim()
-          : existing['displayName'] as String? ??
-                existing['name'] as String? ??
-                'Пользователь';
-      final existingRoles = (existing['roles'] as List?)
-          ?.whereType<String>()
-          .toSet();
-      final roles = <String>{AppUserRole.customer, ...?existingRoles};
-      final mode = initialMode == AppUserRole.courier
-          ? AppUserRole.courier
-          : AppUserRole.customer;
-      final data = <String, dynamic>{
-        'uid': uid,
-        'phoneNumber': phoneNumber ?? existing['phoneNumber'],
-        'displayName': resolvedName,
-        'name': resolvedName,
-        'photoUrl': existing['photoUrl'],
-        'roles': roles.toList(),
-        // Courier intent starts an application; it never grants courier mode.
-        'lastMode': existing['lastMode'] ?? AppUserRole.customer,
-        'phoneVerified':
-            existing['phoneVerified'] == true ||
-            phoneVerified ||
-            phoneNumber?.isNotEmpty == true,
-        'profileComplete': existing['profileComplete'] ?? false,
-        'courierOnboardingCompleted':
-            existing['courierOnboardingCompleted'] ?? false,
-        'onboardingCompleted': existing['onboardingCompleted'] ?? false,
-        'courierStatus':
-            existing['courierStatus'] ??
-            (mode == AppUserRole.courier
-                ? CourierStatus.draft
-                : CourierStatus.none),
-        'targetRole': existing['targetRole'] ?? mode,
-        // Legacy mirror. Admin is never overwritten by a user mode.
-        'role': existing['role'] == AppUserRole.admin
-            ? AppUserRole.admin
-            : existing['role'] ?? AppUserRole.customer,
-        'city': existing['city'] ?? 'Худжанд',
-        'language': existing['language'] ?? 'ru',
-        'updatedAt': FieldValue.serverTimestamp(),
-      };
-      if (!snapshot.exists) data['createdAt'] = FieldValue.serverTimestamp();
-      transaction.set(ref, data, SetOptions(merge: true));
+    await _commands.call('ensureUserProfile', {
+      'initialIntent': initialMode,
+      if (displayName?.trim().isNotEmpty == true)
+        'displayName': displayName!.trim(),
     });
   }
 
@@ -74,47 +30,11 @@ class UserRepository {
   }) async {
     final name = displayName.trim();
     if (name.isEmpty) throw ArgumentError('Имя не может быть пустым.');
-    final courierIntent = initialIntent == AppUserRole.courier;
-    final ref = _db.collection('users').doc(uid);
-    await _db.runTransaction((transaction) async {
-      final snapshot = await transaction.get(ref);
-      final existing = snapshot.data() ?? const <String, dynamic>{};
-      final roles = <String>{
-        AppUserRole.customer,
-        ...?(existing['roles'] as List?)?.whereType<String>(),
-      };
-      final previousStatus =
-          existing['courierStatus'] as String? ?? CourierStatus.none;
-      final approved = previousStatus == CourierStatus.approved;
-      final status = approved
-          ? CourierStatus.approved
-          : courierIntent
-          ? CourierStatus.draft
-          : previousStatus;
-      final previousRole = existing['role'] as String?;
-      transaction.set(ref, {
-        'displayName': name,
-        'name': name,
-        if (photoUrl?.trim().isNotEmpty == true) 'photoUrl': photoUrl!.trim(),
-        'roles': roles.toList(growable: false),
-        'lastMode': approved
-            ? existing['lastMode'] ?? AppUserRole.courier
-            : AppUserRole.customer,
-        'profileComplete': true,
-        'onboardingCompleted': true,
-        'roleSelectedAt':
-            existing['roleSelectedAt'] ?? FieldValue.serverTimestamp(),
-        'courierStatus': status,
-        'role': previousRole == AppUserRole.admin
-            ? AppUserRole.admin
-            : approved
-            ? previousRole ?? AppUserRole.courier
-            : AppUserRole.customer,
-        'targetRole': courierIntent
-            ? AppUserRole.courier
-            : existing['targetRole'] ?? AppUserRole.customer,
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+    await _commands.call('completeUserProfile', {
+      'displayName': name,
+      if (photoUrl?.trim().isNotEmpty == true) 'photoUrl': photoUrl!.trim(),
+      'initialIntent': initialIntent,
+      'idempotencyKey': TajGoIdempotencyKey.create('complete-profile-$uid'),
     });
   }
 
@@ -122,22 +42,9 @@ class UserRepository {
     if (!AppUserRole.userModes.contains(mode)) {
       throw ArgumentError.value(mode, 'mode');
     }
-    final user = await getUser(uid);
-    if (user == null) throw StateError('Профиль пользователя не найден.');
-    if (mode == AppUserRole.courier && !user.courierApproved) {
-      throw StateError('Режим курьера доступен после одобрения заявки.');
-    }
-    if (mode == AppUserRole.courier && !user.courierOnboardingCompleted) {
-      throw StateError(
-        'Сначала пройдите короткое знакомство с работой курьера.',
-      );
-    }
-    await _db.collection('users').doc(uid).update({
-      'lastMode': mode,
-      'selectedRole': mode,
-      'onboardingCompleted': true,
-      if (!user.isAdmin) 'role': mode,
-      'updatedAt': FieldValue.serverTimestamp(),
+    await _commands.call('switchAccountMode', {
+      'targetMode': mode,
+      'idempotencyKey': TajGoIdempotencyKey.create('switch-mode-$uid-$mode'),
     });
   }
 
@@ -146,24 +53,15 @@ class UserRepository {
       throw ArgumentError.value(role, 'role');
     }
     final user = await getUser(uid);
-    final courierAllowed = user?.courierApproved == true;
-    final courierStatus = user?.courierStatus ?? CourierStatus.none;
-    final effectiveMode = role == AppUserRole.courier && !courierAllowed
-        ? AppUserRole.customer
-        : role;
-    await _db.collection('users').doc(uid).set({
-      'selectedRole': role,
-      'onboardingCompleted': true,
-      'roleSelectedAt': FieldValue.serverTimestamp(),
-      'targetRole': role,
-      'lastMode': effectiveMode,
-      if (user?.isAdmin != true) 'role': effectiveMode,
-      if (role == AppUserRole.courier && !courierAllowed)
-        'courierStatus': courierStatus == CourierStatus.none
-            ? CourierStatus.draft
-            : courierStatus,
-      'updatedAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
+    if (user == null) throw StateError('Профиль пользователя не найден.');
+    await _commands.call('completeUserProfile', {
+      'displayName': user.displayName,
+      if (user.photoUrl?.isNotEmpty == true) 'photoUrl': user.photoUrl,
+      'initialIntent': role,
+      'idempotencyKey': TajGoIdempotencyKey.create(
+        'role-onboarding-$uid-$role',
+      ),
+    });
   }
 
   Future<AppUser?> getUser(String uid) async {
@@ -178,12 +76,8 @@ class UserRepository {
       .map((doc) => doc.exists ? AppUser.fromDoc(doc) : null);
 
   Future<void> setAdminRoleForTesting(String uid) async {
-    if (!kDebugMode) {
-      throw StateError('Тестовое изменение роли доступно только в debug.');
-    }
-    await _db.collection('users').doc(uid).update({
-      'role': AppUserRole.admin,
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
+    throw StateError(
+      'Роль admin назначается владельцем через Firebase по документированной процедуре.',
+    );
   }
 }

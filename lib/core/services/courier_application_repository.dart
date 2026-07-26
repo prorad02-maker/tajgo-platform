@@ -2,11 +2,13 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../models/app_user.dart';
 import '../models/courier_application.dart';
+import 'authoritative_command_service.dart';
 
 class CourierApplicationRepository {
-  CourierApplicationRepository(this._db);
+  CourierApplicationRepository(this._db, this._commands);
 
   final FirebaseFirestore _db;
+  final AuthoritativeCommandService _commands;
 
   DocumentReference<Map<String, dynamic>> _application(String uid) =>
       _db.collection('courier_applications').doc(uid);
@@ -121,26 +123,14 @@ class CourierApplicationRepository {
     }),
   );
 
-  Future<void> completeOnboarding(String uid) => _guard(
-    () => _db.runTransaction((transaction) async {
-      final userRef = _db.collection('users').doc(uid);
-      final userDoc = await transaction.get(userRef);
-      final user = userDoc.data();
-      final roles = (user?['roles'] as List? ?? const [])
-          .whereType<String>()
-          .toSet();
-      if (user?['courierStatus'] != CourierStatus.approved ||
-          !roles.contains(AppUserRole.courier)) {
-        throw StateError('Курьерский режим ещё не одобрен.');
-      }
-      transaction.update(userRef, {
-        'courierOnboardingCompleted': true,
-        'lastMode': AppUserRole.courier,
-        'role': AppUserRole.courier,
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-    }),
-  );
+  Future<void> completeOnboarding(String uid) async {
+    await _commands.call('completeCourierOnboarding', {
+      'idempotencyKey': TajGoIdempotencyKey.stable(
+        'complete-courier-onboarding',
+        [uid],
+      ),
+    });
+  }
 
   Future<void> approve({
     required String uid,

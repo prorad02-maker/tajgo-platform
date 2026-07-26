@@ -4,18 +4,25 @@ import '../models/marketplace_cart.dart';
 import '../models/marketplace_partner.dart';
 import '../models/marketplace_product.dart';
 import '../models/marketplace_sample_catalog.dart';
+import 'authoritative_command_service.dart';
 import 'marketplace_import_service.dart';
-import 'pricing.dart';
+
+bool isMarketplaceCheckoutBlocked(MarketplacePartner partner) =>
+    partner.isPreview || partner.isTest;
 
 class MarketplaceRepository {
-  MarketplaceRepository(this._db);
+  MarketplaceRepository(this._db, this._commands);
 
   final FirebaseFirestore _db;
+  final AuthoritativeCommandService _commands;
 
   Stream<List<MarketplacePartner>> partnersStream({String? category}) async* {
     Query<Map<String, dynamic>> query = _db
         .collection('partners')
-        .where('isActive', isEqualTo: true);
+        .where('isActive', isEqualTo: true)
+        .where('isTest', isEqualTo: false)
+        .where('isPreview', isEqualTo: false)
+        .where('isPublished', isEqualTo: true);
     if (category != null) {
       query = query.where('category', isEqualTo: category);
     }
@@ -61,7 +68,10 @@ class MarketplaceRepository {
     }
     Query<Map<String, dynamic>> query = _db
         .collection('products')
-        .where('partnerId', isEqualTo: partnerId);
+        .where('partnerId', isEqualTo: partnerId)
+        .where('isTest', isEqualTo: false)
+        .where('isAvailable', isEqualTo: true)
+        .where('isPublished', isEqualTo: true);
     if (!includeHidden) {
       query = query.where('hidden', isEqualTo: false);
     }
@@ -273,96 +283,51 @@ class MarketplaceRepository {
     required num distanceKm,
     required int etaMinutes,
     String? comment,
-  }) => _db.runTransaction((transaction) async {
+    String? idempotencyKey,
+  }) async {
+    if (isMarketplaceCheckoutBlocked(partner)) {
+      throw const TajGoCommandException(
+        code: 'failed-precondition',
+        message: 'Тестовый каталог нельзя оформить.',
+        reason: 'preview-blocked',
+      );
+    }
     if (cartLines.isEmpty) throw StateError('Корзина пока пуста.');
-    final partnerRef = _db.collection('partners').doc(partner.id);
-    final partnerDoc = await transaction.get(partnerRef);
-    final freshPartner = partnerDoc.exists
-        ? MarketplacePartner.fromMap(partner.id, partnerDoc.data()!)
-        : null;
-    if (freshPartner == null || !freshPartner.isActive) {
-      throw StateError('Партнёр сейчас недоступен.');
-    }
-    if (!freshPartner.isOpen) {
-      throw StateError('Партнёр сейчас закрыт.');
-    }
-
-    final items = <Map<String, dynamic>>[];
-    num subtotal = 0;
-    for (final line in cartLines) {
-      final productDoc = await transaction.get(
-        _db.collection('products').doc(line.product.id),
-      );
-      if (!productDoc.exists) throw StateError('Один из товаров не найден.');
-      final product = MarketplaceProduct.fromMap(
-        productDoc.id,
-        productDoc.data()!,
-      );
-      if (product.partnerId != partner.id ||
-          product.hidden ||
-          !product.isAvailable) {
-        throw StateError('Некоторые товары закончились. Обновите корзину.');
-      }
-      if (product.price != line.product.price) {
-        throw StateError('Цена товара изменилась. Обновите корзину.');
-      }
-      if (line.quantity <= 0) throw StateError('Количество товара неверно.');
-      final lineTotal = product.price * line.quantity;
-      subtotal += lineTotal;
-      items.add({
-        'productId': product.id,
-        'name': product.name,
-        'unit': product.unit,
-        'unitPrice': product.price,
-        'quantity': line.quantity,
-        'lineTotal': lineTotal,
-      });
-    }
-    if (subtotal < freshPartner.minimumOrder) {
-      final missing = freshPartner.minimumOrder - subtotal;
-      throw StateError('Добавьте товаров ещё на $missing TJS.');
-    }
-
-    final deliveryFee = freshPartner.deliveryFee < minimumPrice
-        ? minimumPrice
-        : freshPartner.deliveryFee;
-    final ref = _db.collection('orders').doc();
-    transaction.set(ref, {
-      'customerId': customerId,
-      'customerName': customerName,
-      'status': 'waitingOffers',
-      'orderType': 'catalogOrder',
-      'type': freshPartner.category,
-      'city': 'Худжанд',
-      'fromText': freshPartner.address,
-      'toText': deliveryAddress.trim(),
-      'fromLocation': freshPartner.location,
-      'toLocation': deliveryLocation,
-      'partnerId': freshPartner.id,
-      'partnerName': freshPartner.name,
-      'items': items,
-      'subtotal': subtotal,
-      'deliveryFee': deliveryFee,
-      'total': subtotal + deliveryFee,
-      'price': deliveryFee,
-      'suggestedPrice': deliveryFee,
-      'clientPrice': deliveryFee,
-      'priceNegotiable': false,
-      'offersCount': 0,
-      'pricingVersion': 'marketplace-v1',
-      'currency': 'TJS',
-      'confirmationCode': generateConfirmationCode(),
-      'distanceKm': distanceKm,
-      'etaMinutes': etaMinutes,
+    final result = await _commands.call('createCatalogOrder', {
+      'idempotencyKey':
+          idempotencyKey ??
+          TajGoIdempotencyKey.create('catalog-order-$customerId'),
+      'partnerId': partner.id,
+      'items': cartLines
+          .map(
+            (line) => {
+              'productId': line.product.id,
+              'quantity': line.quantity,
+              'knownUnitPrice': line.product.price,
+            },
+          )
+          .toList(growable: false),
+      'deliveryLocation': {
+        'latitude': deliveryLocation.latitude,
+        'longitude': deliveryLocation.longitude,
+      },
+      'deliveryAddress': deliveryAddress.trim(),
       if (comment != null && comment.trim().isNotEmpty)
         'comment': comment.trim(),
-      if (freshPartner.isTest) 'isTestOrder': true,
-      'declinedBy': <String>[],
-      'createdAt': FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
+      // UI hints are deliberately non-authoritative. The backend recalculates.
+      'clientDistanceKm': distanceKm,
+      'clientEtaMinutes': etaMinutes,
     });
-    return ref.id;
-  });
+    final orderId = result['orderId'] as String?;
+    if (orderId == null || orderId.isEmpty) {
+      throw const TajGoCommandException(
+        code: 'aborted',
+        message: 'TajGo не вернул номер заказа. Повторите запрос.',
+        retryable: true,
+      );
+    }
+    return orderId;
+  }
 }
 
 class MarketplaceImportResult {

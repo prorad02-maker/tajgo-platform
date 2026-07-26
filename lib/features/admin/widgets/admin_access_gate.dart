@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/constants/tajgo_colors.dart';
@@ -22,7 +21,7 @@ class AdminAccessGate extends StatelessWidget {
             body: Center(child: CircularProgressIndicator()),
           );
         }
-        if (snapshot.data?.role == 'admin' || kDebugMode) return child;
+        if (snapshot.data?.role == 'admin') return child;
         return const _NoAccess();
       },
     );

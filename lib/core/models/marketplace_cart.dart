@@ -92,6 +92,20 @@ class MarketplaceCart extends ChangeNotifier {
     _partner = null;
     notifyListeners();
   }
+
+  void applyServerPrices(Map<String, num> prices) {
+    var changed = false;
+    for (final entry in prices.entries) {
+      final line = _lines[entry.key];
+      if (line == null || line.product.price == entry.value) continue;
+      _lines[entry.key] = MarketplaceCartLine(
+        product: line.product.copyWith(price: entry.value),
+        quantity: line.quantity,
+      );
+      changed = true;
+    }
+    if (changed) notifyListeners();
+  }
 }
 
 class MarketplaceCheckoutQuote {

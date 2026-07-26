@@ -157,6 +157,9 @@ class TajGoOrder {
       manuallyCompletedBy,
       adminNote;
 
+  num get effectivePrice => finalPrice ?? price;
+  bool get isFinalPriceLocked => finalPrice != null;
+
   factory TajGoOrder.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data() ?? const <String, dynamic>{};
     DateTime? date(String key) => (data[key] as Timestamp?)?.toDate();

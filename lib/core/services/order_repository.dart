@@ -1,11 +1,12 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../models/tajgo_order.dart';
-import 'pricing.dart';
+import 'authoritative_command_service.dart';
 
 class OrderRepository {
-  OrderRepository(this._db);
+  OrderRepository(this._db, this._commands);
   final FirebaseFirestore _db;
+  final AuthoritativeCommandService _commands;
 
   Future<String> createOrder({
     required String customerId,
@@ -24,34 +25,48 @@ class OrderRepository {
     int? etaMinutes,
     String? comment,
     bool isTestOrder = false,
+    String? idempotencyKey,
   }) async {
-    final ref = _db.collection('orders').doc();
-    final order = TajGoOrder(
-      id: ref.id,
-      customerId: customerId,
-      customerName: customerName,
-      status: OrderStatus.waiting,
-      type: type,
-      city: 'Худжанд',
-      fromText: fromText,
-      toText: toText,
-      price: price,
-      currency: 'TJS',
-      fromLocation: fromLocation,
-      toLocation: toLocation,
-      distanceKm: distanceKm,
-      etaMinutes: etaMinutes,
-      confirmationCode: generateConfirmationCode(),
-      comment: comment,
-      isTestOrder: isTestOrder,
-      orderType: orderType,
-      suggestedPrice: suggestedPrice ?? price,
-      clientPrice: clientPrice ?? price,
-      priceNegotiable: priceNegotiable,
-      pricingVersion: 'v2',
-    );
-    await ref.set(order.toCreateMap());
-    return ref.id;
+    if (isTestOrder) {
+      throw StateError('Тестовые заказы создаются только в Firebase Emulator.');
+    }
+    if (orderType != 'customDelivery') {
+      throw ArgumentError.value(orderType, 'orderType');
+    }
+    if (fromLocation == null || toLocation == null) {
+      throw StateError('Укажите точки A и B на карте.');
+    }
+    final result = await _commands.call('createCustomDeliveryOrder', {
+      'idempotencyKey':
+          idempotencyKey ??
+          TajGoIdempotencyKey.create('create-custom-$customerId'),
+      'fromText': fromText,
+      'toText': toText,
+      'type': type,
+      'clientPrice': (clientPrice ?? price).toInt(),
+      'suggestedPrice': (suggestedPrice ?? price).toInt(),
+      'priceNegotiable': priceNegotiable,
+      'fromLocation': {
+        'latitude': fromLocation.latitude,
+        'longitude': fromLocation.longitude,
+      },
+      'toLocation': {
+        'latitude': toLocation.latitude,
+        'longitude': toLocation.longitude,
+      },
+      'clientDistanceKm': ?distanceKm,
+      'clientEtaMinutes': ?etaMinutes,
+      if (comment?.trim().isNotEmpty == true) 'comment': comment!.trim(),
+    });
+    final orderId = result['orderId'] as String?;
+    if (orderId == null || orderId.isEmpty) {
+      throw const TajGoCommandException(
+        code: 'aborted',
+        message: 'TajGo не вернул номер заказа. Повторите запрос.',
+        retryable: true,
+      );
+    }
+    return orderId;
   }
 
   Stream<TajGoOrder?> activeOrderStream(String customerId) => _db
@@ -103,6 +118,12 @@ class OrderRepository {
       .snapshots()
       .map((doc) => doc.exists ? TajGoOrder.fromDoc(doc) : null);
 
+  Stream<String?> customerDeliveryCodeStream(String orderId) => _db
+      .collection('order_customer_codes')
+      .doc(orderId)
+      .snapshots()
+      .map((doc) => doc.data()?['code'] as String?);
+
   /// Последние завершённые заказы клиента для секции «Мои заказы».
   /// Тот же запрос, что у activeOrderStream, — составной индекс не нужен.
   Stream<List<TajGoOrder>> recentOrdersStream(String customerId) => _db
@@ -125,56 +146,30 @@ class OrderRepository {
             .toList(),
       );
 
-  Future<void> cancelOrder(String orderId) =>
-      _db.runTransaction((transaction) async {
-        final ref = _db.collection('orders').doc(orderId);
-        final doc = await transaction.get(ref);
-        if (!{'waiting', 'waitingOffers'}.contains(doc.data()?['status'])) {
-          throw StateError('Отменить можно только ожидающий заказ.');
-        }
-        transaction.update(ref, {
-          'status': 'cancelled',
-          'updatedAt': FieldValue.serverTimestamp(),
-        });
-      });
+  Future<void> cancelOrder(String orderId) async {
+    await _commands.call('cancelWaitingOrder', {
+      'orderId': orderId,
+      'idempotencyKey': TajGoIdempotencyKey.stable('cancel-order', [orderId]),
+    });
+  }
 
-  Future<void> confirmReceived(String orderId) =>
-      _db.runTransaction((transaction) async {
-        final orderRef = _db.collection('orders').doc(orderId);
-        final orderDoc = await transaction.get(orderRef);
-        final data = orderDoc.data();
-        if (data?['status'] != 'delivered') {
-          throw StateError('Заказ ещё не ожидает подтверждения получения.');
-        }
-        final courierId = data?['courierId'] as String?;
-        if (courierId == null) {
-          throw StateError('У заказа не указан курьер.');
-        }
-        transaction.update(orderRef, {
-          'status': 'completed',
-          'completedAt': FieldValue.serverTimestamp(),
-          'updatedAt': FieldValue.serverTimestamp(),
-        });
-        transaction.update(_db.collection('couriers').doc(courierId), {
-          'activeOrderId': null,
-          'isBusy': false,
-          'earningsToday': FieldValue.increment((data?['price'] ?? 0) as num),
-          'ordersToday': FieldValue.increment(1),
-          'updatedAt': FieldValue.serverTimestamp(),
-        });
-      });
+  Future<void> confirmReceived(String orderId) async {
+    await _commands.call('updateDeliveryStatus', {
+      'orderId': orderId,
+      'action': 'customerConfirm',
+      'idempotencyKey': TajGoIdempotencyKey.stable('customer-confirm', [
+        orderId,
+      ]),
+    });
+  }
 
-  Future<void> reportNotReceived(String orderId) =>
-      _db.runTransaction((transaction) async {
-        final orderRef = _db.collection('orders').doc(orderId);
-        final orderDoc = await transaction.get(orderRef);
-        if (orderDoc.data()?['status'] != 'delivered') {
-          throw StateError('Заказ ещё не ожидает подтверждения получения.');
-        }
-        transaction.update(orderRef, {
-          'status': 'disputed',
-          'disputedAt': FieldValue.serverTimestamp(),
-          'updatedAt': FieldValue.serverTimestamp(),
-        });
-      });
+  Future<void> reportNotReceived(String orderId) async {
+    await _commands.call('updateDeliveryStatus', {
+      'orderId': orderId,
+      'action': 'customerDispute',
+      'idempotencyKey': TajGoIdempotencyKey.stable('customer-dispute', [
+        orderId,
+      ]),
+    });
+  }
 }

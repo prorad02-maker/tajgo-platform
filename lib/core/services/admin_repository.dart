@@ -3,11 +3,13 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/app_user.dart';
 import '../models/tajgo_courier.dart';
 import '../models/tajgo_order.dart';
+import 'authoritative_command_service.dart';
 
 class AdminRepository {
-  AdminRepository(this._db);
+  AdminRepository(this._db, this._commands);
 
   final FirebaseFirestore _db;
+  final AuthoritativeCommandService _commands;
 
   Stream<List<TajGoOrder>> ordersStream({int limit = 100}) => _db
       .collection('orders')
@@ -65,158 +67,58 @@ class AdminRepository {
     required String orderId,
     required String adminId,
     required String reason,
-  }) => _adminAction(
-    () => _db.runTransaction((transaction) async {
-      final orderRef = _db.collection('orders').doc(orderId);
-      final orderDoc = await transaction.get(orderRef);
-      final data = orderDoc.data();
-      const allowed = {
-        'waiting',
-        'accepted',
-        'pickedUp',
-        'delivered',
-        'disputed',
-      };
-      if (!orderDoc.exists || !allowed.contains(data?['status'])) {
-        throw StateError('Этот заказ уже нельзя отменить.');
-      }
-      transaction.update(orderRef, {
-        'status': 'cancelled',
-        'cancelledAt': FieldValue.serverTimestamp(),
-        'cancelledReason': reason.trim(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-      final courierId = data?['courierId'] as String?;
-      if (courierId != null) {
-        transaction.update(_db.collection('couriers').doc(courierId), {
-          'activeOrderId': null,
-          'isBusy': false,
-          'updatedAt': FieldValue.serverTimestamp(),
-        });
-      }
-      _writeLog(
-        transaction,
-        action: 'cancelOrder',
-        adminId: adminId,
-        orderId: orderId,
-        details: reason.trim(),
-      );
-    }),
-  );
+  }) async {
+    await _commands.call('adminCancelOrder', {
+      'orderId': orderId,
+      'reason': reason.trim(),
+      'idempotencyKey': TajGoIdempotencyKey.create(
+        'admin-cancel-$orderId-$adminId',
+      ),
+    });
+  }
 
   Future<void> returnToWaiting({
     required String orderId,
     required String adminId,
-  }) => _adminAction(
-    () => _db.runTransaction((transaction) async {
-      final orderRef = _db.collection('orders').doc(orderId);
-      final orderDoc = await transaction.get(orderRef);
-      final data = orderDoc.data();
-      const allowed = {'accepted', 'pickedUp', 'delivered', 'disputed'};
-      if (!orderDoc.exists || !allowed.contains(data?['status'])) {
-        throw StateError('Вернуть этот заказ в waiting нельзя.');
-      }
-      final courierId = data?['courierId'] as String?;
-      transaction.update(orderRef, {
-        'status': 'waitingOffers',
-        'courierId': FieldValue.delete(),
-        'selectedCourierId': FieldValue.delete(),
-        'selectedOfferId': FieldValue.delete(),
-        'finalPrice': FieldValue.delete(),
-        'acceptedAt': FieldValue.delete(),
-        'arrivedAtPickupAt': FieldValue.delete(),
-        'pickedUpAt': FieldValue.delete(),
-        'deliveredAt': FieldValue.delete(),
-        'disputedAt': FieldValue.delete(),
-        'declinedBy': <String>[],
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-      if (courierId != null) {
-        transaction.update(_db.collection('couriers').doc(courierId), {
-          'activeOrderId': null,
-          'isBusy': false,
-          'updatedAt': FieldValue.serverTimestamp(),
-        });
-      }
-      _writeLog(
-        transaction,
-        action: 'returnToWaiting',
-        adminId: adminId,
-        orderId: orderId,
-      );
-    }),
-  );
+  }) async {
+    await _commands.call('adminResolveDispute', {
+      'orderId': orderId,
+      'resolution': 'returnToWaiting',
+      'reason': 'Возвращено администратором в ленту',
+      'idempotencyKey': TajGoIdempotencyKey.create(
+        'admin-return-$orderId-$adminId',
+      ),
+    });
+  }
 
   Future<void> completeManually({
     required String orderId,
     required String adminId,
-  }) => _adminAction(
-    () => _db.runTransaction((transaction) async {
-      final orderRef = _db.collection('orders').doc(orderId);
-      final orderDoc = await transaction.get(orderRef);
-      final data = orderDoc.data();
-      const allowed = {'pickedUp', 'delivered', 'disputed'};
-      if (!orderDoc.exists || !allowed.contains(data?['status'])) {
-        throw StateError('Завершить этот заказ вручную нельзя.');
-      }
-      final courierId = data?['courierId'] as String?;
-      if (courierId == null) {
-        throw StateError('У заказа нет назначенного курьера.');
-      }
-      transaction.update(orderRef, {
-        'status': 'completed',
-        'completedAt': FieldValue.serverTimestamp(),
-        'manuallyCompletedBy': adminId,
-        if (data?['status'] == 'disputed') 'resolvedBy': adminId,
-        if (data?['status'] == 'disputed')
-          'resolvedAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-      transaction.update(_db.collection('couriers').doc(courierId), {
-        'activeOrderId': null,
-        'isBusy': false,
-        'earningsToday': FieldValue.increment((data?['price'] ?? 0) as num),
-        'ordersToday': FieldValue.increment(1),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-      _writeLog(
-        transaction,
-        action: 'completeManually',
-        adminId: adminId,
-        orderId: orderId,
-        courierId: courierId,
-      );
-    }),
-  );
+  }) async {
+    await _commands.call('adminResolveDispute', {
+      'orderId': orderId,
+      'resolution': 'complete',
+      'reason': 'Завершено администратором после проверки',
+      'idempotencyKey': TajGoIdempotencyKey.create(
+        'admin-complete-$orderId-$adminId',
+      ),
+    });
+  }
 
   Future<void> markDisputed({
     required String orderId,
     required String adminId,
     required String reason,
-  }) => _adminAction(
-    () => _db.runTransaction((transaction) async {
-      final orderRef = _db.collection('orders').doc(orderId);
-      final orderDoc = await transaction.get(orderRef);
-      final data = orderDoc.data();
-      const allowed = {'accepted', 'pickedUp', 'delivered', 'completed'};
-      if (!orderDoc.exists || !allowed.contains(data?['status'])) {
-        throw StateError('Пометить этот заказ спорным нельзя.');
-      }
-      transaction.update(orderRef, {
-        'status': 'disputed',
-        'disputedAt': FieldValue.serverTimestamp(),
-        'adminNote': reason.trim(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-      _writeLog(
-        transaction,
-        action: 'markDisputed',
-        adminId: adminId,
-        orderId: orderId,
-        details: reason.trim(),
-      );
-    }),
-  );
+  }) async {
+    await _commands.call('adminResolveDispute', {
+      'orderId': orderId,
+      'resolution': 'markDisputed',
+      'reason': reason.trim(),
+      'idempotencyKey': TajGoIdempotencyKey.create(
+        'admin-dispute-$orderId-$adminId',
+      ),
+    });
+  }
 
   Future<void> forceOffline({
     required String courierId,
@@ -248,50 +150,43 @@ class AdminRepository {
   Future<void> clearActiveOrder({
     required String courierId,
     required String adminId,
-  }) => _adminAction(
-    () => _db.runTransaction((transaction) async {
-      final courierRef = _db.collection('couriers').doc(courierId);
-      final courierDoc = await transaction.get(courierRef);
-      if (!courierDoc.exists ||
-          (courierDoc.data()?['activeOrderId'] as String?) == null) {
-        throw StateError('У курьера нет активного заказа.');
-      }
-      transaction.update(courierRef, {
-        'activeOrderId': null,
-        'isBusy': false,
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-      _writeLog(
-        transaction,
-        action: 'clearActiveOrder',
-        adminId: adminId,
-        courierId: courierId,
-      );
-    }),
-  );
+  }) async {
+    await _commands.call('adminReleaseCourier', {
+      'courierId': courierId,
+      'resolution': 'returnToWaiting',
+      'reason': 'Курьер освобождён администратором',
+      'idempotencyKey': TajGoIdempotencyKey.create(
+        'admin-release-$courierId-$adminId',
+      ),
+    });
+  }
 
   Future<void> setAdminNote({
     required String orderId,
     required String adminId,
     required String note,
-  }) => _adminAction(
-    () => _db.runTransaction((transaction) async {
-      final orderRef = _db.collection('orders').doc(orderId);
-      final orderDoc = await transaction.get(orderRef);
-      if (!orderDoc.exists) throw StateError('Заказ не найден.');
-      transaction.update(orderRef, {
-        'adminNote': note.trim(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-      _writeLog(
-        transaction,
-        action: 'setAdminNote',
-        adminId: adminId,
-        orderId: orderId,
-        details: note.trim(),
-      );
-    }),
-  );
+  }) async {
+    await _commands.call('adminSetOrderNote', {
+      'orderId': orderId,
+      'note': note.trim(),
+      'idempotencyKey': TajGoIdempotencyKey.create(
+        'admin-note-$orderId-$adminId',
+      ),
+    });
+  }
+
+  Future<void> migrateLegacyDeliveryCode({
+    required String orderId,
+    required String adminId,
+  }) async {
+    await _commands.call('adminMigrateLegacyDeliveryCode', {
+      'orderId': orderId,
+      'idempotencyKey': TajGoIdempotencyKey.stable(
+        'admin-migrate-code',
+        [orderId, adminId],
+      ),
+    });
+  }
 
   Future<int> cancelWaitingTestOrders({required String adminId}) async {
     final snapshot = await _db
@@ -307,31 +202,20 @@ class AdminRepository {
         .map((doc) => doc.reference)
         .toList();
     if (refs.isEmpty) return 0;
-    await _adminAction(
-      () => _db.runTransaction((transaction) async {
-        final documents = <DocumentSnapshot<Map<String, dynamic>>>[];
-        for (final ref in refs) {
-          documents.add(await transaction.get(ref));
-        }
-        for (final doc in documents) {
-          if ({'waiting', 'waitingOffers'}.contains(doc.data()?['status'])) {
-            transaction.update(doc.reference, {
-              'status': 'cancelled',
-              'cancelledAt': FieldValue.serverTimestamp(),
-              'cancelledReason': 'Debug cleanup',
-              'updatedAt': FieldValue.serverTimestamp(),
-            });
-          }
-        }
-        _writeLog(
-          transaction,
-          action: 'cancelOrder',
+    var cancelled = 0;
+    for (final ref in refs) {
+      try {
+        await cancelOrder(
+          orderId: ref.id,
           adminId: adminId,
-          details: 'Debug cleanup: ${refs.length} waiting test orders',
+          reason: 'Debug cleanup',
         );
-      }),
-    );
-    return refs.length;
+        cancelled += 1;
+      } on TajGoCommandException {
+        // A concurrent test cleanup may already have closed this order.
+      }
+    }
+    return cancelled;
   }
 
   void _writeLog(

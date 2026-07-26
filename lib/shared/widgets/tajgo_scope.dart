@@ -1,8 +1,10 @@
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/services/auth_service.dart';
+import '../../core/services/authoritative_command_service.dart';
 import '../../core/services/account_migration_service.dart';
 import '../../core/services/account_mode_service.dart';
 import '../../core/services/admin_repository.dart';
@@ -22,7 +24,12 @@ class TajGoScope extends InheritedWidget {
   factory TajGoScope({Key? key, required Widget child}) {
     final db = FirebaseFirestore.instance;
     final auth = AuthService(FirebaseAuth.instance);
-    final users = UserRepository(db);
+    final commands = AuthoritativeCommandService(
+      FirebaseAuthoritativeCommandGateway(
+        FirebaseFunctions.instanceFor(region: 'europe-west1'),
+      ),
+    );
+    final users = UserRepository(db, commands);
     final rolePreferences = RolePreferenceService();
     return TajGoScope._(
       key: key,
@@ -31,15 +38,15 @@ class TajGoScope extends InheritedWidget {
       accountModeService: AccountModeService(auth, users, rolePreferences),
       rolePreferenceService: rolePreferences,
       accountMigrationService: AccountMigrationService(db),
-      adminRepository: AdminRepository(db),
-      courierRepository: CourierRepository(db),
-      courierOfferRepository: CourierOfferRepository(db),
-      courierApplicationRepository: CourierApplicationRepository(db),
-      orderRepository: OrderRepository(db),
+      adminRepository: AdminRepository(db, commands),
+      courierRepository: CourierRepository(db, commands),
+      courierOfferRepository: CourierOfferRepository(db, commands),
+      courierApplicationRepository: CourierApplicationRepository(db, commands),
+      orderRepository: OrderRepository(db, commands),
       routeService: RouteService(),
       locationService: TajGoLocationService(),
       externalNavigatorService: ExternalNavigatorService(),
-      marketplaceRepository: MarketplaceRepository(db),
+      marketplaceRepository: MarketplaceRepository(db, commands),
       marketplaceCart: MarketplaceCart(),
       child: child,
     );

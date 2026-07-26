@@ -75,7 +75,7 @@ class MarketplacePartner {
         isOpen: data['isOpen'] as bool? ?? true,
         isActive: data['isActive'] as bool? ?? true,
         isTest: data['isTest'] as bool? ?? false,
-        isPreview: false,
+        isPreview: data['isPreview'] as bool? ?? false,
         createdAt: _date(data['createdAt']),
         updatedAt: _date(data['updatedAt']),
       );
@@ -96,6 +96,8 @@ class MarketplacePartner {
     'isOpen': isOpen,
     'isActive': isActive,
     'isTest': isTest,
+    'isPreview': isPreview,
+    'isPublished': !isPreview,
   };
 
   MarketplacePartner copyWith({

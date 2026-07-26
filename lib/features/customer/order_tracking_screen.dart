@@ -711,10 +711,23 @@ class _StatusPanel extends StatelessWidget {
                   ),
                 ),
               ],
-              if (order.status == OrderStatus.pickedUp &&
-                  order.confirmationCode != null) ...[
+              if (order.status == OrderStatus.pickedUp) ...[
                 const SizedBox(height: 14),
-                TajGoConfirmationCode(code: order.confirmationCode!),
+                StreamBuilder<String?>(
+                  stream: TajGoScope.of(
+                    context,
+                  ).orderRepository.customerDeliveryCodeStream(order.id),
+                  builder: (context, snapshot) {
+                    final code = snapshot.data;
+                    if (code == null) {
+                      return const Text(
+                        'Готовим защищённый код получения…',
+                        style: TextStyle(color: TajGoColors.muted),
+                      );
+                    }
+                    return TajGoConfirmationCode(code: code);
+                  },
+                ),
               ],
               if (order.status == OrderStatus.delivered) ...[
                 const SizedBox(height: 14),
