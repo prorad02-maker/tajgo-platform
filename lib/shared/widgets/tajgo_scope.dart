@@ -14,6 +14,7 @@ import '../../core/services/courier_offer_repository.dart';
 import '../../core/services/courier_application_repository.dart';
 import '../../core/services/external_navigator_service.dart';
 import '../../core/services/marketplace_repository.dart';
+import '../../core/services/merchant_application_repository.dart';
 import '../../core/services/order_repository.dart';
 import '../../core/services/route_service.dart';
 import '../../core/services/user_repository.dart';
@@ -53,6 +54,8 @@ class TajGoScope extends InheritedWidget {
       locationService: TajGoLocationService(),
       externalNavigatorService: ExternalNavigatorService(),
       marketplaceRepository: MarketplaceRepository(db, commands),
+      merchantApplicationRepository:
+          MerchantApplicationRepository(db, commands),
       marketplaceCart: MarketplaceCart(),
       featureFlags: flags,
       child: child,
@@ -76,6 +79,7 @@ class TajGoScope extends InheritedWidget {
     required this.locationService,
     required this.externalNavigatorService,
     required this.marketplaceRepository,
+    required this.merchantApplicationRepository,
     required this.marketplaceCart,
     required this.featureFlags,
   });
@@ -94,6 +98,7 @@ class TajGoScope extends InheritedWidget {
   final TajGoLocationService locationService;
   final ExternalNavigatorService externalNavigatorService;
   final MarketplaceRepository marketplaceRepository;
+  final MerchantApplicationRepository merchantApplicationRepository;
   final MarketplaceCart marketplaceCart;
   final FeatureFlags featureFlags;
 

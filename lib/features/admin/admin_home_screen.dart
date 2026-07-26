@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/constants/tajgo_colors.dart';
+import '../../core/models/merchant_application.dart';
 import '../../core/models/tajgo_courier.dart';
 import '../../core/models/tajgo_order.dart';
 import '../../shared/widgets/tajgo_badge.dart';
@@ -9,6 +10,7 @@ import '../../shared/widgets/tajgo_scope.dart';
 import '../../shared/widgets/tajgo_stat_card.dart';
 import 'admin_couriers_screen.dart';
 import 'admin_courier_applications_screen.dart';
+import 'admin_merchant_applications_screen.dart';
 import 'admin_audit_logs_screen.dart';
 import 'admin_offers_screen.dart';
 import 'admin_orders_screen.dart';
@@ -161,6 +163,33 @@ class AdminHomeScreen extends StatelessWidget {
                               const AdminCourierApplicationsScreen(),
                             ),
                           ),
+                        ),
+                        StreamBuilder<List<MerchantApplication>>(
+                          stream: TajGoScope.of(
+                            context,
+                          ).merchantApplicationRepository.allApplicationsStream(),
+                          builder: (context, snapshot) {
+                            final pending = (snapshot.data ?? const [])
+                                .where(
+                                  (a) => const {
+                                    MerchantStatus.submitted,
+                                    MerchantStatus.underReview,
+                                    MerchantStatus.needsInfo,
+                                  }.contains(a.status),
+                                )
+                                .length;
+                            return _NavCard(
+                              icon: Icons.add_business_rounded,
+                              title: 'Заявки магазинов',
+                              subtitle: snapshot.hasError
+                                  ? 'Нужны новые Firestore Rules'
+                                  : 'В работе: ${snapshot.hasData ? pending : '—'}',
+                              onTap: () => _open(
+                                context,
+                                const AdminMerchantApplicationsScreen(),
+                              ),
+                            );
+                          },
                         ),
                         _NavCard(
                           icon: Icons.delivery_dining_rounded,

@@ -11,6 +11,7 @@ import '../customer/customer_home_screen.dart';
 import '../../core/legal/legal_documents.dart';
 import '../legal/legal_document_screen.dart';
 import '../legal/support_screen.dart';
+import '../merchant/merchant_application_screen.dart';
 import '../startup/intent_selection_screen.dart';
 import 'security_data_screen.dart';
 import 'settings_screen.dart';
@@ -99,6 +100,18 @@ class AccountProfileScreen extends StatelessWidget {
                 title: 'Избранные адреса',
                 onTap: () => _soon(context),
               ),
+              if (currentMode == AppUserRole.customer &&
+                  TajGoScope.of(context).featureFlags.merchantApplications)
+                _Tile(
+                  icon: Icons.storefront_rounded,
+                  title: 'Подключить свой магазин',
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) => const MerchantApplicationScreen(),
+                    ),
+                  ),
+                ),
               if (currentMode == AppUserRole.courier)
                 _Tile(
                   icon: Icons.school_outlined,

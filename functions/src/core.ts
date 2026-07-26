@@ -1908,6 +1908,344 @@ export class TajGoAuthoritativeCore {
     );
   }
 
+  // --- Merchant applications ---
+
+  private parseMerchantFields(data: Data, full: boolean): Data {
+    const categories = new Set(["food", "groceries", "flowers"]);
+    const deliveryModes = new Set(["self", "tajgo"]);
+    const out: Data = {};
+    const pick = (key: string, value: unknown): void => {
+      if (value !== undefined && value !== null) out[key] = value;
+    };
+
+    const storeName = full
+      ? requiredString(data, "storeName", {min: 2, max: 120})
+      : optionalString(data, "storeName", 120);
+    const category = full
+      ? requiredString(data, "category", {max: 20})
+      : optionalString(data, "category", 20);
+    if (category != null && !categories.has(category)) {
+      throw new CoreError("invalid-argument", "Неизвестная категория.");
+    }
+    const ownerName = full
+      ? requiredString(data, "ownerName", {min: 2, max: 80})
+      : optionalString(data, "ownerName", 80);
+    const phone = full
+      ? requiredString(data, "phone", {min: 5, max: 20, pattern: /^[+0-9 ()-]+$/})
+      : optionalString(data, "phone", 20);
+    const address = full
+      ? requiredString(data, "address", {min: 2, max: 240})
+      : optionalString(data, "address", 240);
+    const deliveryMode = full
+      ? requiredString(data, "deliveryMode", {max: 10})
+      : optionalString(data, "deliveryMode", 10);
+    if (deliveryMode != null && !deliveryModes.has(deliveryMode)) {
+      throw new CoreError("invalid-argument", "Неизвестный способ доставки.");
+    }
+
+    pick("storeName", storeName);
+    pick("category", category);
+    pick("ownerName", ownerName);
+    pick("phone", phone);
+    pick("extraContact", optionalString(data, "extraContact", 120));
+    pick("address", address);
+    pick("workingHours", optionalString(data, "workingHours", 120));
+    pick("description", optionalString(data, "description", 1000));
+    pick("comment", optionalString(data, "comment", 500));
+    pick("deliveryMode", deliveryMode);
+    pick("priceFileUrl", optionalString(data, "priceFileUrl", 500));
+
+    if (data.location !== undefined && data.location !== null) {
+      pick("location", toGeoPoint(parseCoordinate(data.location, "магазина")));
+    } else if (full) {
+      throw new CoreError("invalid-argument", "Укажите точку на карте.");
+    }
+
+    if (data.minimumOrder !== undefined) {
+      pick(
+        "minimumOrder",
+        requiredNumber(data, "minimumOrder", {min: 0, max: 100_000}),
+      );
+    } else if (full) {
+      out.minimumOrder = 0;
+    }
+
+    if (full) {
+      if (data.consent !== true) {
+        throw new CoreError(
+          "failed-precondition",
+          "Требуется согласие на обработку данных.",
+        );
+      }
+      out.consent = true;
+    } else if (data.consent === true) {
+      out.consent = true;
+    }
+    return out;
+  }
+
+  async saveMerchantApplicationDraft(
+    context: CommandContext,
+  ): Promise<Result> {
+    const {principal, data} = context;
+    const fields = this.parseMerchantFields(data, false);
+    const ref = this.db.collection("merchant_applications").doc(principal.uid);
+    await this.db.runTransaction(async (transaction) => {
+      const doc = await transaction.get(ref);
+      const status =
+        typeof doc.data()?.status === "string" ? doc.data()!.status : "draft";
+      if (["submitted", "underReview", "approved"].includes(status)) {
+        throw new CoreError(
+          "failed-precondition",
+          "Заявка уже на рассмотрении.",
+        );
+      }
+      transaction.set(
+        ref,
+        {
+          ...fields,
+          ownerId: principal.uid,
+          status: "draft",
+          createdAt: doc.exists
+            ? doc.data()?.createdAt ?? FieldValue.serverTimestamp()
+            : FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        {merge: true},
+      );
+    });
+    return {status: "draft"};
+  }
+
+  async submitMerchantApplication(context: CommandContext): Promise<Result> {
+    const {principal, data} = context;
+    const key = requiredIdempotencyKey(data);
+    const fields = this.parseMerchantFields(data, true);
+    return this.runIdempotent(
+      "submitMerchantApplication",
+      principal,
+      key,
+      async (transaction) => {
+        const ref = this.db
+          .collection("merchant_applications")
+          .doc(principal.uid);
+        const doc = await transaction.get(ref);
+        const current =
+          typeof doc.data()?.status === "string" ? doc.data()!.status : null;
+        if (
+          current != null &&
+          ["submitted", "underReview", "approved", "convertedToPartner"]
+            .includes(current)
+        ) {
+          throw new CoreError(
+            "failed-precondition",
+            "Заявка уже отправлена.",
+          );
+        }
+        transaction.set(
+          ref,
+          {
+            ...fields,
+            ownerId: principal.uid,
+            status: "submitted",
+            adminNote: null,
+            createdAt: doc.exists
+              ? doc.data()?.createdAt ?? FieldValue.serverTimestamp()
+              : FieldValue.serverTimestamp(),
+            submittedAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
+          },
+          {merge: true},
+        );
+        return {status: "submitted"};
+      },
+    );
+  }
+
+  async updateMerchantApplication(context: CommandContext): Promise<Result> {
+    const {principal, data} = context;
+    const fields = this.parseMerchantFields(data, true);
+    const ref = this.db.collection("merchant_applications").doc(principal.uid);
+    await this.db.runTransaction(async (transaction) => {
+      const doc = await transaction.get(ref);
+      if (!doc.exists || doc.data()?.ownerId !== principal.uid) {
+        throw new CoreError("not-found", "Заявка не найдена.");
+      }
+      if (doc.data()?.status !== "needsInfo") {
+        throw new CoreError(
+          "failed-precondition",
+          "Обновление доступно только по запросу администратора.",
+        );
+      }
+      transaction.set(
+        ref,
+        {
+          ...fields,
+          status: "submitted",
+          adminNote: null,
+          submittedAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        {merge: true},
+      );
+    });
+    return {status: "submitted"};
+  }
+
+  async withdrawMerchantApplication(context: CommandContext): Promise<Result> {
+    const {principal} = context;
+    const ref = this.db.collection("merchant_applications").doc(principal.uid);
+    await this.db.runTransaction(async (transaction) => {
+      const doc = await transaction.get(ref);
+      if (!doc.exists || doc.data()?.ownerId !== principal.uid) {
+        throw new CoreError("not-found", "Заявка не найдена.");
+      }
+      const status = doc.data()?.status;
+      if (["approved", "convertedToPartner", "withdrawn"].includes(status)) {
+        throw new CoreError(
+          "failed-precondition",
+          "Заявку уже нельзя отозвать.",
+        );
+      }
+      transaction.update(ref, {
+        status: "withdrawn",
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    });
+    return {status: "withdrawn"};
+  }
+
+  async adminReviewMerchantApplication(
+    context: CommandContext,
+  ): Promise<Result> {
+    const {principal, data} = context;
+    const applicationId = requiredString(data, "applicationId", {max: 128});
+    const action = requiredString(data, "action", {max: 20});
+    const message = optionalString(data, "message", 500);
+    const transitions: Record<string, {from: string[]; to: string}> = {
+      take: {from: ["submitted"], to: "underReview"},
+      needsInfo: {from: ["submitted", "underReview"], to: "needsInfo"},
+      approve: {from: ["submitted", "underReview"], to: "approved"},
+      reject: {from: ["submitted", "underReview", "needsInfo"], to: "rejected"},
+    };
+    const rule = transitions[action];
+    if (rule == null) {
+      throw new CoreError("invalid-argument", "Неизвестное действие.");
+    }
+    await this.db.runTransaction(async (transaction) => {
+      await this.requireAdmin(transaction, principal);
+      const ref = this.db
+        .collection("merchant_applications")
+        .doc(applicationId);
+      const doc = await transaction.get(ref);
+      if (!doc.exists) {
+        throw new CoreError("not-found", "Заявка не найдена.");
+      }
+      const status = doc.data()?.status;
+      if (!rule.from.includes(status)) {
+        throw new CoreError(
+          "failed-precondition",
+          "Недопустимый переход статуса заявки.",
+        );
+      }
+      transaction.update(ref, {
+        status: rule.to,
+        adminNote: message ?? null,
+        reviewedBy: principal.uid,
+        reviewedAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      this.writeAdminLog(transaction, principal.uid, {
+        action: `merchant.${action}`,
+        entityType: "merchant_application",
+        entityId: applicationId,
+        ...(message != null ? {message} : {}),
+      });
+    });
+    return {status: rule.to};
+  }
+
+  async adminConvertMerchantApplication(
+    context: CommandContext,
+  ): Promise<Result> {
+    const {principal, data} = context;
+    const key = requiredIdempotencyKey(data);
+    const applicationId = requiredString(data, "applicationId", {max: 128});
+    return this.runIdempotent(
+      "adminConvertMerchantApplication",
+      principal,
+      key,
+      async (transaction) => {
+        await this.requireAdmin(transaction, principal);
+        const appRef = this.db
+          .collection("merchant_applications")
+          .doc(applicationId);
+        const appDoc = await transaction.get(appRef);
+        if (!appDoc.exists) {
+          throw new CoreError("not-found", "Заявка не найдена.");
+        }
+        const application = appDoc.data() ?? {};
+        if (application.status === "convertedToPartner") {
+          return {
+            partnerId: application.convertedPartnerId,
+            status: "convertedToPartner",
+          };
+        }
+        if (application.status !== "approved") {
+          throw new CoreError(
+            "failed-precondition",
+            "Конвертация доступна только для одобренной заявки.",
+          );
+        }
+        const partnerId = deterministicOrderId(
+          applicationId,
+          "merchant-partner",
+          key,
+        );
+        const partnerRef = this.db.collection("partners").doc(partnerId);
+        const existingPartner = await transaction.get(partnerRef);
+        if (!existingPartner.exists) {
+          transaction.create(partnerRef, {
+            name: application.storeName ?? "Магазин",
+            category: application.category ?? "food",
+            description: application.description ?? "",
+            imageUrl: "",
+            address: application.address ?? "Худжанд",
+            location: application.location ?? new GeoPoint(40.2833, 69.6222),
+            minimumOrder: application.minimumOrder ?? 0,
+            deliveryFee: 10,
+            rating: 5,
+            preparationMinutes: 20,
+            sortOrder: 0,
+            workingHours: application.workingHours ?? "",
+            isOpen: false,
+            isActive: false,
+            isPublished: false,
+            isTest: false,
+            isPreview: false,
+            sourceApplicationId: applicationId,
+            createdAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+        }
+        transaction.update(appRef, {
+          status: "convertedToPartner",
+          convertedPartnerId: partnerId,
+          convertedBy: principal.uid,
+          convertedAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+        this.writeAdminLog(transaction, principal.uid, {
+          action: "merchant.convert",
+          entityType: "merchant_application",
+          entityId: applicationId,
+          partnerId,
+        });
+        return {partnerId, status: "convertedToPartner"};
+      },
+    );
+  }
+
   /**
    * Records the user's acceptance of the current Privacy Policy and Terms of
    * Use with versions, locale and a server timestamp. Idempotent by nature.

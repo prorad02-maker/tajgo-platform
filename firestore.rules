@@ -359,6 +359,15 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
+    // Merchant applications are written only by the merchant-application
+    // Functions. Document id equals the applicant uid: the owner reads their own
+    // application; admins read and list all. No direct client writes.
+    match /merchant_applications/{uid} {
+      allow get: if owner(uid) || isAdmin();
+      allow list: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
     function publishedPartner() {
       return resource.data.isActive == true
         && resource.data.get('isPublished', true) == true

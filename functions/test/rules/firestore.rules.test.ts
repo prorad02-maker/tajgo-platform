@@ -199,6 +199,12 @@ async function seed(): Promise<void> {
         status: "completed",
         createdAt: Timestamp.now(),
       }),
+      setDoc(doc(db, "merchant_applications", customerId), {
+        ownerId: customerId,
+        status: "submitted",
+        storeName: "Гулхона",
+        createdAt: Timestamp.now(),
+      }),
       setDoc(doc(db, "unknown_private", "secret"), {value: true}),
     ]);
   });
@@ -435,6 +441,31 @@ test("account deletion request is owner/admin read-only, never client-writable",
     setDoc(doc(ownerDb, "account_deletion_requests", customerId), {
       uid: customerId,
       status: "completed",
+    }),
+  );
+});
+
+test("merchant application is owner/admin read-only, never client-writable", async () => {
+  const ownerDb = environment.authenticatedContext(customerId).firestore();
+  const otherDb = environment
+    .authenticatedContext(otherCustomerId)
+    .firestore();
+  const adminDb = environment
+    .authenticatedContext(adminId, {admin: true})
+    .firestore();
+  await assertSucceeds(
+    getDoc(doc(ownerDb, "merchant_applications", customerId)),
+  );
+  await assertSucceeds(
+    getDoc(doc(adminDb, "merchant_applications", customerId)),
+  );
+  await assertFails(
+    getDoc(doc(otherDb, "merchant_applications", customerId)),
+  );
+  await assertFails(
+    setDoc(doc(ownerDb, "merchant_applications", customerId), {
+      ownerId: customerId,
+      status: "approved",
     }),
   );
 });

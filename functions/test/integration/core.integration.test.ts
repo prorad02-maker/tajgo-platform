@@ -15,6 +15,25 @@ const customer = principal("customer-1", "customer");
 const customer2 = principal("customer-2", "customer");
 const courier = principal("courier-1", "courier");
 const courier2 = principal("courier-2", "courier");
+const merchant = principal("merchant-1", "customer");
+const adminActor = principal("admin-1", "admin");
+
+function merchantData(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    storeName: "Гулхона",
+    category: "flowers",
+    ownerName: "Иван",
+    phone: "+992900000000",
+    address: "ул. Ленина 1",
+    location: {latitude: 40.28, longitude: 69.62},
+    deliveryMode: "tajgo",
+    minimumOrder: 20,
+    consent: true,
+    ...overrides,
+  };
+}
 
 let db: Firestore;
 let app: ReturnType<typeof initializeApp>;
@@ -346,6 +365,153 @@ test("acceptLegalDocuments records versions, locale and timestamp", async () => 
   assert.equal(acceptance?.termsVersion, "1.0");
   assert.equal(acceptance?.locale, "ru");
   assert.ok(acceptance?.acceptedAt);
+});
+
+async function merchantDoc(): Promise<Record<string, unknown> | undefined> {
+  return (
+    await db.collection("merchant_applications").doc(merchant.uid).get()
+  ).data();
+}
+
+test("merchant application lifecycle: draft->submit->needsInfo->approve->convert", async () => {
+  await Promise.all([
+    seedUser(merchant, "customer"),
+    seedUser(adminActor, "admin"),
+  ]);
+  await core.saveMerchantApplicationDraft({
+    principal: merchant,
+    data: {storeName: "Гулхона"},
+  });
+  assert.equal((await merchantDoc())?.status, "draft");
+
+  await core.submitMerchantApplication({
+    principal: merchant,
+    data: merchantData({idempotencyKey: "merchant-submit-0001"}),
+  });
+  assert.equal((await merchantDoc())?.status, "submitted");
+
+  await core.adminReviewMerchantApplication({
+    principal: adminActor,
+    data: {applicationId: merchant.uid, action: "take"},
+  });
+  await core.adminReviewMerchantApplication({
+    principal: adminActor,
+    data: {
+      applicationId: merchant.uid,
+      action: "needsInfo",
+      message: "Уточните адрес",
+    },
+  });
+  const afterNeedsInfo = await merchantDoc();
+  assert.equal(afterNeedsInfo?.status, "needsInfo");
+  assert.equal(afterNeedsInfo?.adminNote, "Уточните адрес");
+
+  await core.updateMerchantApplication({
+    principal: merchant,
+    data: merchantData({address: "ул. Ленина 2"}),
+  });
+  assert.equal((await merchantDoc())?.status, "submitted");
+
+  await core.adminReviewMerchantApplication({
+    principal: adminActor,
+    data: {applicationId: merchant.uid, action: "approve"},
+  });
+  const convert = await core.adminConvertMerchantApplication({
+    principal: adminActor,
+    data: {applicationId: merchant.uid, idempotencyKey: "merchant-convert-0001"},
+  });
+  assert.equal((await merchantDoc())?.status, "convertedToPartner");
+  const partner = (
+    await db.collection("partners").doc(convert.partnerId as string).get()
+  ).data();
+  assert.equal(partner?.isPublished, false);
+  assert.equal(partner?.isActive, false);
+  assert.equal(partner?.sourceApplicationId, merchant.uid);
+});
+
+test("merchant conversion is idempotent and creates one partner", async () => {
+  await Promise.all([
+    seedUser(merchant, "customer"),
+    seedUser(adminActor, "admin"),
+  ]);
+  await core.submitMerchantApplication({
+    principal: merchant,
+    data: merchantData({idempotencyKey: "merchant-submit-0002"}),
+  });
+  await core.adminReviewMerchantApplication({
+    principal: adminActor,
+    data: {applicationId: merchant.uid, action: "approve"},
+  });
+  const key = "merchant-convert-idem-0002";
+  const first = await core.adminConvertMerchantApplication({
+    principal: adminActor,
+    data: {applicationId: merchant.uid, idempotencyKey: key},
+  });
+  const second = await core.adminConvertMerchantApplication({
+    principal: adminActor,
+    data: {applicationId: merchant.uid, idempotencyKey: key},
+  });
+  assert.equal(first.partnerId, second.partnerId);
+  const partners = await db
+    .collection("partners")
+    .where("sourceApplicationId", "==", merchant.uid)
+    .get();
+  assert.equal(partners.size, 1);
+});
+
+test("non-admin cannot review a merchant application", async () => {
+  await seedUser(merchant, "customer");
+  await core.submitMerchantApplication({
+    principal: merchant,
+    data: merchantData({idempotencyKey: "merchant-submit-0003"}),
+  });
+  await assert.rejects(
+    core.adminReviewMerchantApplication({
+      principal: merchant,
+      data: {applicationId: merchant.uid, action: "approve"},
+    }),
+    (error: unknown) =>
+      error instanceof CoreError && error.code === "permission-denied",
+  );
+});
+
+test("merchant submit requires consent", async () => {
+  await seedUser(merchant, "customer");
+  await assert.rejects(
+    core.submitMerchantApplication({
+      principal: merchant,
+      data: merchantData({
+        consent: false,
+        idempotencyKey: "merchant-submit-0004",
+      }),
+    }),
+    (error: unknown) =>
+      error instanceof CoreError && error.code === "failed-precondition",
+  );
+});
+
+test("withdraw is blocked after conversion", async () => {
+  await Promise.all([
+    seedUser(merchant, "customer"),
+    seedUser(adminActor, "admin"),
+  ]);
+  await core.submitMerchantApplication({
+    principal: merchant,
+    data: merchantData({idempotencyKey: "merchant-submit-0005"}),
+  });
+  await core.adminReviewMerchantApplication({
+    principal: adminActor,
+    data: {applicationId: merchant.uid, action: "approve"},
+  });
+  await core.adminConvertMerchantApplication({
+    principal: adminActor,
+    data: {applicationId: merchant.uid, idempotencyKey: "merchant-convert-0005"},
+  });
+  await assert.rejects(
+    core.withdrawMerchantApplication({principal: merchant, data: {}}),
+    (error: unknown) =>
+      error instanceof CoreError && error.code === "failed-precondition",
+  );
 });
 
 test("busy courier cannot submit an offer", async () => {

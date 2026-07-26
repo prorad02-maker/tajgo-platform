@@ -157,6 +157,36 @@ export const acceptLegalDocuments = command(
   (context) => core.acceptLegalDocuments(context),
 );
 
+export const saveMerchantApplicationDraft = command(
+  "saveMerchantApplicationDraft",
+  (context) => core.saveMerchantApplicationDraft(context),
+);
+
+export const submitMerchantApplication = command(
+  "submitMerchantApplication",
+  (context) => core.submitMerchantApplication(context),
+);
+
+export const updateMerchantApplication = command(
+  "updateMerchantApplication",
+  (context) => core.updateMerchantApplication(context),
+);
+
+export const withdrawMerchantApplication = command(
+  "withdrawMerchantApplication",
+  (context) => core.withdrawMerchantApplication(context),
+);
+
+export const adminReviewMerchantApplication = command(
+  "adminReviewMerchantApplication",
+  (context) => core.adminReviewMerchantApplication(context),
+);
+
+export const adminConvertMerchantApplication = command(
+  "adminConvertMerchantApplication",
+  (context) => core.adminConvertMerchantApplication(context),
+);
+
 export const adminCancelOrder = command(
   "adminCancelOrder",
   (context) => core.adminCancelOrder(context),
