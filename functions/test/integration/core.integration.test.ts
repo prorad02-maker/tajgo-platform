@@ -538,6 +538,112 @@ test("withdraw is blocked after conversion", async () => {
   );
 });
 
+const partnerData = {
+  name: "Тестовый магазин",
+  category: "food",
+  address: "ул. Ленина 1",
+  location: {latitude: 40.28, longitude: 69.62},
+  minimumOrder: 0,
+  deliveryFee: 12,
+  isOpen: true,
+  isActive: true,
+  isPublished: true,
+};
+
+test("adminSavePartner creates a real published partner", async () => {
+  await seedUser(adminActor, "admin");
+  const res = await core.adminSavePartner({
+    principal: adminActor,
+    data: {...partnerData},
+  });
+  const partner = (
+    await db.collection("partners").doc(res.partnerId as string).get()
+  ).data();
+  assert.equal(partner?.name, "Тестовый магазин");
+  assert.equal(partner?.isPublished, true);
+  assert.equal(partner?.isPreview, false);
+  assert.equal(partner?.isTest, false);
+});
+
+test("adminSaveProduct requires an existing partner and keeps SKU", async () => {
+  await seedUser(adminActor, "admin");
+  await assert.rejects(
+    core.adminSaveProduct({
+      principal: adminActor,
+      data: {partnerId: "missing", name: "P", price: 10},
+    }),
+    (error: unknown) =>
+      error instanceof CoreError && error.code === "failed-precondition",
+  );
+  const partner = await core.adminSavePartner({
+    principal: adminActor,
+    data: {...partnerData},
+  });
+  const product = await core.adminSaveProduct({
+    principal: adminActor,
+    data: {
+      partnerId: partner.partnerId,
+      name: "Плов",
+      price: 25,
+      unit: "portion",
+      sku: "PLV-1",
+    },
+  });
+  const doc = (
+    await db.collection("products").doc(product.productId as string).get()
+  ).data();
+  assert.equal(doc?.sku, "PLV-1");
+  assert.equal(doc?.isPublished, true);
+});
+
+test("adminImportCatalog writes partner and products idempotently", async () => {
+  await seedUser(adminActor, "admin");
+  const payload = {
+    idempotencyKey: "import-catalog-0001",
+    partner: {id: "imp-partner", ...partnerData, category: "groceries"},
+    products: [
+      {id: "imp-1", name: "Хлеб", price: 5, unit: "item", sku: "BR-1"},
+      {id: "imp-2", name: "Молоко", price: 8, unit: "item"},
+    ],
+  };
+  await core.adminImportCatalog({principal: adminActor, data: payload});
+  await core.adminImportCatalog({principal: adminActor, data: payload});
+  const products = await db
+    .collection("products")
+    .where("partnerId", "==", "imp-partner")
+    .get();
+  assert.equal(products.size, 2);
+  const partner = (
+    await db.collection("partners").doc("imp-partner").get()
+  ).data();
+  assert.equal(partner?.category, "groceries");
+});
+
+test("adminSetCourierOffline forces the courier offline", async () => {
+  await Promise.all([seedCourier(courier), seedUser(adminActor, "admin")]);
+  await db.collection("courier_public").doc(courier.uid).set({
+    uid: courier.uid,
+    isOnline: true,
+  });
+  await core.adminSetCourierOffline({
+    principal: adminActor,
+    data: {courierId: courier.uid},
+  });
+  const courierDoc = (
+    await db.collection("couriers").doc(courier.uid).get()
+  ).data();
+  assert.equal(courierDoc?.isOnline, false);
+});
+
+test("non-admin cannot save a partner", async () => {
+  await seedUser(customer, "customer");
+  await assert.rejects(
+    core.adminSavePartner({principal: customer, data: {...partnerData}}),
+    (error: unknown) =>
+      error instanceof CoreError && error.code === "permission-denied",
+  );
+});
+
 test("busy courier cannot submit an offer", async () => {
   await seedCourier(courier, {
     activeOrderId: "existing-order",

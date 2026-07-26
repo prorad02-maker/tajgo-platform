@@ -19,6 +19,7 @@ class MarketplaceProduct {
     this.imageUrl = '',
     this.oldPrice,
     this.unit = 'item',
+    this.sku = '',
     this.isAvailable = true,
     this.hidden = false,
     this.popularity = 0,
@@ -36,6 +37,7 @@ class MarketplaceProduct {
   final num price;
   final num? oldPrice;
   final String unit;
+  final String sku;
   final bool isAvailable;
   final bool hidden;
   final int popularity;
@@ -60,6 +62,7 @@ class MarketplaceProduct {
         price: data['price'] as num? ?? 0,
         oldPrice: data['oldPrice'] as num?,
         unit: data['unit'] as String? ?? 'item',
+        sku: data['sku'] as String? ?? '',
         isAvailable: data['isAvailable'] as bool? ?? true,
         hidden: data['hidden'] as bool? ?? false,
         popularity: (data['popularity'] as num? ?? 0).toInt(),
@@ -77,6 +80,7 @@ class MarketplaceProduct {
     'price': price,
     if (oldPrice != null) 'oldPrice': oldPrice,
     'unit': unit,
+    if (sku.isNotEmpty) 'sku': sku,
     'isAvailable': isAvailable,
     'hidden': hidden,
     'popularity': popularity,
@@ -94,6 +98,7 @@ class MarketplaceProduct {
     'price': price,
     if (oldPrice != null) 'oldPrice': oldPrice,
     'unit': unit,
+    'sku': sku,
     'isAvailable': isAvailable,
     'hidden': hidden,
     'popularity': popularity,
@@ -110,6 +115,7 @@ class MarketplaceProduct {
         price: data['price'] as num? ?? 0,
         oldPrice: data['oldPrice'] as num?,
         unit: data['unit'] as String? ?? 'item',
+        sku: data['sku'] as String? ?? '',
         isAvailable: data['isAvailable'] as bool? ?? true,
         hidden: data['hidden'] as bool? ?? false,
         popularity: (data['popularity'] as num? ?? 0).toInt(),
@@ -130,6 +136,7 @@ class MarketplaceProduct {
     price: price ?? this.price,
     oldPrice: oldPrice ?? this.oldPrice,
     unit: unit,
+    sku: sku,
     isAvailable: isAvailable ?? this.isAvailable,
     hidden: hidden ?? this.hidden,
     popularity: popularity,

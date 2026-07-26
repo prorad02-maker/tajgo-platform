@@ -2246,6 +2246,252 @@ export class TajGoAuthoritativeCore {
     );
   }
 
+  // --- Admin marketplace (authoritative catalog writes) ---
+
+  private parsePartnerInput(data: Data): Data {
+    const category = requiredString(data, "category", {max: 20});
+    if (!["food", "groceries", "flowers"].includes(category)) {
+      throw new CoreError("invalid-argument", "Неизвестная категория.");
+    }
+    return {
+      name: requiredString(data, "name", {min: 1, max: 120}),
+      category,
+      description: optionalString(data, "description", 1000) ?? "",
+      imageUrl: optionalString(data, "imageUrl", 500) ?? "",
+      address: requiredString(data, "address", {min: 1, max: 240}),
+      location: toGeoPoint(parseCoordinate(data.location, "партнёра")),
+      minimumOrder: requiredNumber(data, "minimumOrder", {min: 0, max: 100_000}),
+      deliveryFee: requiredNumber(data, "deliveryFee", {min: 0, max: 100_000}),
+      rating: data.rating == null
+        ? 5
+        : requiredNumber(data, "rating", {min: 0, max: 5}),
+      preparationMinutes: data.preparationMinutes == null
+        ? 20
+        : requiredNumber(data, "preparationMinutes", {
+            min: 0,
+            max: 600,
+            integer: true,
+          }),
+      sortOrder: data.sortOrder == null
+        ? 0
+        : requiredNumber(data, "sortOrder", {integer: true}),
+      workingHours: optionalString(data, "workingHours", 120) ?? "",
+      isOpen: data.isOpen === true,
+      isActive: data.isActive !== false,
+      isPublished: data.isPublished !== false,
+      isTest: false,
+      isPreview: false,
+    };
+  }
+
+  private parseProductInput(data: Data): Data {
+    const unit = optionalString(data, "unit", 20) ?? "item";
+    if (!["item", "kg", "portion", "bouquet"].includes(unit)) {
+      throw new CoreError("invalid-argument", "Неизвестная единица товара.");
+    }
+    const hidden = data.hidden === true;
+    const oldPrice = data.oldPrice == null
+      ? null
+      : requiredNumber(data, "oldPrice", {min: 0, max: 1_000_000});
+    return {
+      partnerId: requiredString(data, "partnerId", {max: 128}),
+      name: requiredString(data, "name", {min: 1, max: 120}),
+      description: optionalString(data, "description", 1000) ?? "",
+      imageUrl: optionalString(data, "imageUrl", 500) ?? "",
+      price: requiredNumber(data, "price", {min: 0, max: 1_000_000}),
+      ...(oldPrice != null ? {oldPrice} : {}),
+      unit,
+      sku: optionalString(data, "sku", 64) ?? "",
+      isAvailable: data.isAvailable !== false,
+      hidden,
+      popularity: data.popularity == null
+        ? 0
+        : requiredNumber(data, "popularity", {integer: true}),
+      sortOrder: data.sortOrder == null
+        ? 0
+        : requiredNumber(data, "sortOrder", {integer: true}),
+      isTest: false,
+      isPublished: !hidden,
+    };
+  }
+
+  async adminSavePartner(context: CommandContext): Promise<Result> {
+    const {principal, data} = context;
+    const fields = this.parsePartnerInput(data);
+    const partnerId = optionalString(data, "partnerId", 128);
+    return this.db.runTransaction(async (transaction) => {
+      await this.requireAdmin(transaction, principal);
+      const ref = partnerId != null && partnerId.length > 0
+        ? this.db.collection("partners").doc(partnerId)
+        : this.db.collection("partners").doc();
+      const existing = await transaction.get(ref);
+      transaction.set(ref, {
+        ...fields,
+        createdAt: existing.exists
+          ? existing.data()?.createdAt ?? FieldValue.serverTimestamp()
+          : FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      this.writeAdminLog(transaction, principal.uid, {
+        action: "marketplace.partner.save",
+        entityType: "partner",
+        entityId: ref.id,
+      });
+      return {partnerId: ref.id};
+    });
+  }
+
+  async adminSaveProduct(context: CommandContext): Promise<Result> {
+    const {principal, data} = context;
+    const fields = this.parseProductInput(data);
+    const productId = optionalString(data, "productId", 128);
+    return this.db.runTransaction(async (transaction) => {
+      await this.requireAdmin(transaction, principal);
+      const partnerRef = this.db
+        .collection("partners")
+        .doc(fields.partnerId as string);
+      const ref = productId != null && productId.length > 0
+        ? this.db.collection("products").doc(productId)
+        : this.db.collection("products").doc();
+      const [partnerDoc, existing] = await Promise.all([
+        transaction.get(partnerRef),
+        transaction.get(ref),
+      ]);
+      if (!partnerDoc.exists) {
+        throw new CoreError("failed-precondition", "Партнёр не найден.");
+      }
+      if (
+        existing.exists &&
+        existing.data()?.partnerId !== fields.partnerId
+      ) {
+        throw new CoreError(
+          "failed-precondition",
+          "Товар принадлежит другому партнёру.",
+        );
+      }
+      transaction.set(ref, {
+        ...fields,
+        createdAt: existing.exists
+          ? existing.data()?.createdAt ?? FieldValue.serverTimestamp()
+          : FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      this.writeAdminLog(transaction, principal.uid, {
+        action: "marketplace.product.save",
+        entityType: "product",
+        entityId: ref.id,
+      });
+      return {productId: ref.id};
+    });
+  }
+
+  async adminImportCatalog(context: CommandContext): Promise<Result> {
+    const {principal, data} = context;
+    const key = requiredIdempotencyKey(data);
+    const partnerInput = asRecord(data.partner);
+    const rawProducts = Array.isArray(data.products) ? data.products : [];
+    if (rawProducts.length > 200) {
+      throw new CoreError("invalid-argument", "Слишком много товаров (макс. 200).");
+    }
+    const partnerFields = this.parsePartnerInput(partnerInput);
+    const partnerId = requiredString(partnerInput, "id", {max: 128});
+    const products = rawProducts.map((item) => {
+      const record = asRecord(item);
+      const fields = this.parseProductInput({
+        ...record,
+        partnerId,
+      });
+      return {id: requiredString(record, "id", {max: 128}), fields};
+    });
+    return this.runIdempotent(
+      "adminImportCatalog",
+      principal,
+      key,
+      async (transaction) => {
+        await this.requireAdmin(transaction, principal);
+        const partnerRef = this.db.collection("partners").doc(partnerId);
+        const productRefs = products.map((p) => ({
+          ref: this.db.collection("products").doc(p.id),
+          fields: p.fields,
+        }));
+        const [partnerDoc, productDocs] = await Promise.all([
+          transaction.get(partnerRef),
+          Promise.all(productRefs.map((p) => transaction.get(p.ref))),
+        ]);
+        for (const doc of productDocs) {
+          if (doc.exists && doc.data()?.partnerId !== partnerId) {
+            throw new CoreError(
+              "failed-precondition",
+              `Товар ${doc.id} принадлежит другому партнёру.`,
+            );
+          }
+        }
+        transaction.set(partnerRef, {
+          ...partnerFields,
+          createdAt: partnerDoc.exists
+            ? partnerDoc.data()?.createdAt ?? FieldValue.serverTimestamp()
+            : FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+        productRefs.forEach((p, index) => {
+          const existing = productDocs[index];
+          transaction.set(p.ref, {
+            ...p.fields,
+            createdAt: existing?.exists
+              ? existing.data()?.createdAt ?? FieldValue.serverTimestamp()
+              : FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+        });
+        this.writeAdminLog(transaction, principal.uid, {
+          action: "marketplace.catalog.import",
+          entityType: "partner",
+          entityId: partnerId,
+          productCount: products.length,
+        });
+        return {partnerId, productCount: products.length};
+      },
+    );
+  }
+
+  async adminSetCourierOffline(context: CommandContext): Promise<Result> {
+    const {principal, data} = context;
+    const courierId = requiredString(data, "courierId", {max: 128});
+    return this.db.runTransaction(async (transaction) => {
+      await this.requireAdmin(transaction, principal);
+      const courierRef = this.db.collection("couriers").doc(courierId);
+      const publicRef = this.db.collection("courier_public").doc(courierId);
+      const courierDoc = await transaction.get(courierRef);
+      if (!courierDoc.exists) {
+        throw new CoreError("not-found", "Курьер не найден.");
+      }
+      transaction.set(
+        courierRef,
+        {
+          isOnline: false,
+          online: false,
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        {merge: true},
+      );
+      transaction.set(
+        publicRef,
+        {
+          isOnline: false,
+          online: false,
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        {merge: true},
+      );
+      this.writeAdminLog(transaction, principal.uid, {
+        action: "courier.forceOffline",
+        entityType: "courier",
+        entityId: courierId,
+      });
+      return {courierId, online: false};
+    });
+  }
+
   /**
    * Records the user's acceptance of the current Privacy Policy and Terms of
    * Use with versions, locale and a server timestamp. Idempotent by nature.

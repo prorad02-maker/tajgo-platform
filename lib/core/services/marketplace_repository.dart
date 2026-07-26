@@ -120,178 +120,93 @@ class MarketplaceRepository {
   String newPartnerId() => _db.collection('partners').doc().id;
   String newProductId() => _db.collection('products').doc().id;
 
+  static Map<String, dynamic> _partnerFields(MarketplacePartner p) => {
+    'name': p.name,
+    'category': p.category,
+    'description': p.description,
+    'imageUrl': p.imageUrl,
+    'address': p.address,
+    'location': {
+      'latitude': p.location.latitude,
+      'longitude': p.location.longitude,
+    },
+    'minimumOrder': p.minimumOrder,
+    'deliveryFee': p.deliveryFee,
+    'rating': p.rating,
+    'preparationMinutes': p.preparationMinutes,
+    'sortOrder': p.sortOrder,
+    'workingHours': p.workingHours,
+    'isOpen': p.isOpen,
+    'isActive': p.isActive,
+    'isPublished': !p.isPreview,
+  };
+
+  static Map<String, dynamic> _productFields(MarketplaceProduct p) => {
+    'partnerId': p.partnerId,
+    'name': p.name,
+    'description': p.description,
+    'imageUrl': p.imageUrl,
+    'price': p.price,
+    if (p.oldPrice != null) 'oldPrice': p.oldPrice,
+    'unit': p.unit,
+    if (p.sku.isNotEmpty) 'sku': p.sku,
+    'isAvailable': p.isAvailable,
+    'hidden': p.hidden,
+    'popularity': p.popularity,
+    'sortOrder': p.sortOrder,
+  };
+
   Future<void> savePartner({
     required MarketplacePartner partner,
     required String adminId,
-  }) => _saveAdminDocument(
-    collection: 'partners',
-    id: partner.id,
-    data: partner.toWriteMap(),
-    adminId: adminId,
-    action: 'marketplace.partner.save',
-  );
+  }) => _commands.call('adminSavePartner', {
+    if (partner.id.isNotEmpty) 'partnerId': partner.id,
+    ..._partnerFields(partner),
+  });
 
   Future<void> saveProduct({
     required MarketplaceProduct product,
     required String adminId,
-  }) => _saveAdminDocument(
-    collection: 'products',
-    id: product.id,
-    data: product.toWriteMap(),
-    adminId: adminId,
-    action: 'marketplace.product.save',
-  );
-
-  Future<void> publishSampleCatalog({
-    required String adminId,
-  }) => _db.runTransaction((transaction) async {
-    final partners = marketplaceSamplePartners
-        .map((partner) => partner.copyWith(isPreview: false))
-        .toList(growable: false);
-    final partnerRefs = {
-      for (final partner in partners)
-        partner.id: _db.collection('partners').doc(partner.id),
-    };
-    final productRefs = {
-      for (final product in marketplaceSampleProducts)
-        product.id: _db.collection('products').doc(product.id),
-    };
-    final existingPartners = <String, Map<String, dynamic>?>{};
-    final existingProducts = <String, Map<String, dynamic>?>{};
-    for (final entry in partnerRefs.entries) {
-      existingPartners[entry.key] = (await transaction.get(entry.value)).data();
-    }
-    for (final entry in productRefs.entries) {
-      existingProducts[entry.key] = (await transaction.get(entry.value)).data();
-    }
-    for (final partner in partners) {
-      transaction.set(partnerRefs[partner.id]!, {
-        ...partner.toWriteMap(),
-        'createdAt':
-            existingPartners[partner.id]?['createdAt'] ??
-            FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-    }
-    for (final product in marketplaceSampleProducts) {
-      transaction.set(productRefs[product.id]!, {
-        ...product.toWriteMap(),
-        'createdAt':
-            existingProducts[product.id]?['createdAt'] ??
-            FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-    }
-    transaction.set(_db.collection('admin_logs').doc(), {
-      'adminId': adminId,
-      'action': 'marketplace.samples.publish',
-      'entityType': 'marketplace',
-      'entityId': 'sample-catalog',
-      'before': {
-        'existingPartners': existingPartners.values
-            .whereType<Map<String, dynamic>>()
-            .length,
-        'existingProducts': existingProducts.values
-            .whereType<Map<String, dynamic>>()
-            .length,
-      },
-      'after': {
-        'partners': partners.length,
-        'products': marketplaceSampleProducts.length,
-      },
-      'createdAt': FieldValue.serverTimestamp(),
-    });
+  }) => _commands.call('adminSaveProduct', {
+    if (product.id.isNotEmpty) 'productId': product.id,
+    ..._productFields(product),
   });
+
+  Future<void> publishSampleCatalog({required String adminId}) async {
+    for (final partner in marketplaceSamplePartners) {
+      final published = partner.copyWith(isPreview: false);
+      final products = marketplaceSampleProducts
+          .where((product) => product.partnerId == partner.id)
+          .toList(growable: false);
+      await importCatalog(
+        catalog: MarketplaceCatalogImport(
+          partner: published,
+          products: products,
+          warnings: const [],
+        ),
+        adminId: adminId,
+      );
+    }
+  }
 
   Future<MarketplaceImportResult> importCatalog({
     required MarketplaceCatalogImport catalog,
     required String adminId,
-  }) => _db.runTransaction((transaction) async {
+  }) async {
     final partner = catalog.partner.copyWith(isPreview: false);
-    final partnerRef = _db.collection('partners').doc(partner.id);
-    final productRefs = {
-      for (final product in catalog.products)
-        product.id: _db.collection('products').doc(product.id),
-    };
-    final partnerBefore = (await transaction.get(partnerRef)).data();
-    final productsBefore = <String, Map<String, dynamic>?>{};
-    for (final entry in productRefs.entries) {
-      final data = (await transaction.get(entry.value)).data();
-      if (data != null && data['partnerId'] != partner.id) {
-        throw StateError(
-          'Товар ${entry.key} уже принадлежит другому партнёру.',
-        );
-      }
-      productsBefore[entry.key] = data;
-    }
-    transaction.set(partnerRef, {
-      ...partner.toWriteMap(),
-      'createdAt': partnerBefore?['createdAt'] ?? FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
-    for (final product in catalog.products) {
-      transaction.set(productRefs[product.id]!, {
-        ...product.toWriteMap(),
-        'createdAt':
-            productsBefore[product.id]?['createdAt'] ??
-            FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-    }
-    transaction.set(_db.collection('admin_logs').doc(), {
-      'adminId': adminId,
-      'action': 'marketplace.catalog.import',
-      'entityType': 'marketplace',
-      'entityId': partner.id,
-      'before': {
-        'partnerExists': partnerBefore != null,
-        'existingProducts': productsBefore.values
-            .whereType<Map<String, dynamic>>()
-            .length,
-      },
-      'after': {
-        'partnerId': partner.id,
-        'productIds': catalog.products.map((product) => product.id).toList(),
-        'warnings': catalog.warnings,
-      },
-      'createdAt': FieldValue.serverTimestamp(),
+    await _commands.call('adminImportCatalog', {
+      'idempotencyKey': TajGoIdempotencyKey.create('catalog-import-${partner.id}'),
+      'partner': {'id': partner.id, ..._partnerFields(partner)},
+      'products': catalog.products
+          .map((p) => {'id': p.id, ..._productFields(p)})
+          .toList(growable: false),
     });
     return MarketplaceImportResult(
-      partnerCreated: partnerBefore == null,
-      productsCreated: productsBefore.values
-          .where((data) => data == null)
-          .length,
-      productsUpdated: productsBefore.values
-          .whereType<Map<String, dynamic>>()
-          .length,
+      partnerCreated: true,
+      productsCreated: catalog.products.length,
+      productsUpdated: 0,
     );
-  });
-
-  Future<void> _saveAdminDocument({
-    required String collection,
-    required String id,
-    required Map<String, dynamic> data,
-    required String adminId,
-    required String action,
-  }) => _db.runTransaction((transaction) async {
-    final ref = _db.collection(collection).doc(id);
-    final existing = await transaction.get(ref);
-    transaction.set(ref, {
-      ...data,
-      'createdAt':
-          existing.data()?['createdAt'] ?? FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
-    transaction.set(_db.collection('admin_logs').doc(), {
-      'adminId': adminId,
-      'action': action,
-      'entityType': collection,
-      'entityId': id,
-      'before': existing.data(),
-      'after': data,
-      'createdAt': FieldValue.serverTimestamp(),
-    });
-  });
+  }
 
   Future<String> createCatalogOrder({
     required String customerId,

@@ -383,9 +383,8 @@ service cloud.firestore {
 
     match /partners/{partnerId} {
       allow get, list: if isAdmin() || (signedIn() && publishedPartner());
-      allow create, update: if isAdmin()
-        && request.resource.data.get('isPreview', false) != true;
-      allow delete: if isAdmin();
+      // Catalog writes go through authoritative admin Functions only.
+      allow create, update, delete: if false;
     }
 
     function publicProduct(partnerId) {
@@ -407,7 +406,8 @@ service cloud.firestore {
           signedIn()
           && publicProduct(resource.data.partnerId)
         );
-      allow create, update, delete: if isAdmin();
+      // Catalog writes go through authoritative admin Functions only.
+      allow create, update, delete: if false;
     }
 
     match /admin_logs/{logId} {

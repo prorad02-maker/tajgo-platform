@@ -187,6 +187,26 @@ export const adminConvertMerchantApplication = command(
   (context) => core.adminConvertMerchantApplication(context),
 );
 
+export const adminSavePartner = command(
+  "adminSavePartner",
+  (context) => core.adminSavePartner(context),
+);
+
+export const adminSaveProduct = command(
+  "adminSaveProduct",
+  (context) => core.adminSaveProduct(context),
+);
+
+export const adminImportCatalog = command(
+  "adminImportCatalog",
+  (context) => core.adminImportCatalog(context),
+);
+
+export const adminSetCourierOffline = command(
+  "adminSetCourierOffline",
+  (context) => core.adminSetCourierOffline(context),
+);
+
 export const adminCancelOrder = command(
   "adminCancelOrder",
   (context) => core.adminCancelOrder(context),

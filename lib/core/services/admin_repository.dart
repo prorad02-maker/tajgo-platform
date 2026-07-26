@@ -123,29 +123,9 @@ class AdminRepository {
   Future<void> forceOffline({
     required String courierId,
     required String adminId,
-  }) => _adminAction(
-    () => _db.runTransaction((transaction) async {
-      final privateRef = _db.collection('couriers').doc(courierId);
-      final publicRef = _db.collection('courier_public').doc(courierId);
-      final courierDoc = await transaction.get(privateRef);
-      if (!courierDoc.exists) {
-        throw StateError('Курьер не найден.');
-      }
-      final update = {
-        'isOnline': false,
-        'online': false,
-        'updatedAt': FieldValue.serverTimestamp(),
-      };
-      transaction.update(privateRef, update);
-      transaction.set(publicRef, update, SetOptions(merge: true));
-      _writeLog(
-        transaction,
-        action: 'forceOffline',
-        adminId: adminId,
-        courierId: courierId,
-      );
-    }),
-  );
+  }) async {
+    await _commands.call('adminSetCourierOffline', {'courierId': courierId});
+  }
 
   Future<void> clearActiveOrder({
     required String courierId,
@@ -218,36 +198,4 @@ class AdminRepository {
     return cancelled;
   }
 
-  void _writeLog(
-    Transaction transaction, {
-    required String action,
-    required String adminId,
-    String? orderId,
-    String? courierId,
-    String? details,
-  }) {
-    final log = <String, dynamic>{
-      'action': action,
-      'adminId': adminId,
-      if (details != null && details.isNotEmpty) 'details': details,
-      'createdAt': FieldValue.serverTimestamp(),
-    };
-    if (orderId != null) log['orderId'] = orderId;
-    if (courierId != null) log['courierId'] = courierId;
-    transaction.set(_db.collection('admin_logs').doc(), log);
-  }
-
-  Future<void> _adminAction(Future<void> Function() action) async {
-    try {
-      await action();
-    } on FirebaseException catch (error) {
-      if (error.code == 'permission-denied') {
-        throw StateError(
-          'Действие не выполнено: не хватает прав. '
-          'Требуется обновление правил безопасности.',
-        );
-      }
-      rethrow;
-    }
-  }
 }

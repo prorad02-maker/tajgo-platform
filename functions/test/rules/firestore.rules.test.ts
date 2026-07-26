@@ -473,6 +473,30 @@ test("saved addresses are owner read/write only", async () => {
   );
 });
 
+test("catalog writes are denied even for admins (Functions only)", async () => {
+  const adminDb = environment
+    .authenticatedContext(adminId, {admin: true})
+    .firestore();
+  await assertFails(
+    setDoc(doc(adminDb, "partners", "new-partner"), {
+      name: "X",
+      isActive: true,
+      isPublished: true,
+      isTest: false,
+      isPreview: false,
+    }),
+  );
+  await assertFails(
+    updateDoc(doc(adminDb, "partners", "published"), {name: "Renamed"}),
+  );
+  await assertFails(
+    setDoc(doc(adminDb, "products", "new-product"), {
+      partnerId: "published",
+      name: "Y",
+    }),
+  );
+});
+
 test("merchant application is owner/admin read-only, never client-writable", async () => {
   const ownerDb = environment.authenticatedContext(customerId).firestore();
   const otherDb = environment
