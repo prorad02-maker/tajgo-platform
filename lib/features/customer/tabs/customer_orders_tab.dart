@@ -6,11 +6,36 @@ import '../../../shared/widgets/tajgo_order_history_tile.dart';
 import '../../../shared/widgets/tajgo_scope.dart';
 import '../widgets/active_order_card.dart';
 
-/// Вкладка «Заказы»: активный заказ и история (завершённые/отменённые).
-class CustomerOrdersTab extends StatelessWidget {
+enum _OrdersFilter { all, active, completed, cancelled }
+
+/// Вкладка «Заказы»: активные / завершённые / отменённые / спорные,
+/// custom и catalog, с фильтрами и человеческими статусами.
+class CustomerOrdersTab extends StatefulWidget {
   const CustomerOrdersTab({super.key, required this.scrollController});
 
   final ScrollController scrollController;
+
+  @override
+  State<CustomerOrdersTab> createState() => _CustomerOrdersTabState();
+}
+
+class _CustomerOrdersTabState extends State<CustomerOrdersTab> {
+  _OrdersFilter _filter = _OrdersFilter.all;
+
+  static const _active = {
+    OrderStatus.waiting,
+    OrderStatus.accepted,
+    OrderStatus.pickedUp,
+    OrderStatus.delivered,
+    OrderStatus.disputed,
+  };
+
+  bool _matches(TajGoOrder order) => switch (_filter) {
+    _OrdersFilter.all => true,
+    _OrdersFilter.active => _active.contains(order.status),
+    _OrdersFilter.completed => order.status == OrderStatus.completed,
+    _OrdersFilter.cancelled => order.status == OrderStatus.cancelled,
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -19,62 +44,98 @@ class CustomerOrdersTab extends StatelessWidget {
 
     return TajGoScaffold(
       appBar: const TajGoAppBar(title: 'Мои заказы'),
-      body: CustomScrollView(
-        controller: scrollController,
-        slivers: [
-          SliverToBoxAdapter(
-            child: StreamBuilder<TajGoOrder?>(
-              stream: scope.orderRepository.activeOrderStream(uid),
-              builder: (context, snapshot) {
-                if (snapshot.data == null) return const SizedBox.shrink();
-                return Padding(
-                  padding: const EdgeInsets.fromLTRB(
-                    TajGoSpacing.screenH,
-                    TajGoSpacing.md,
-                    TajGoSpacing.screenH,
-                    0,
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Активный заказ', style: TajGoTypography.title),
-                      const SizedBox(height: TajGoSpacing.sm),
-                      ActiveOrderCard(order: snapshot.data!),
-                    ],
-                  ),
-                );
-              },
-            ),
-          ),
-          SliverToBoxAdapter(
+      body: Column(
+        children: [
+          _filters(),
+          Expanded(
             child: StreamBuilder<List<TajGoOrder>>(
-              stream: scope.orderRepository.recentOrdersStream(uid),
+              stream: scope.orderRepository.customerOrdersStream(uid),
               builder: (context, snapshot) {
-                final orders = snapshot.data ?? const <TajGoOrder>[];
-                if (orders.isEmpty) {
-                  return const Padding(
-                    padding: EdgeInsets.only(top: TajGoSpacing.xxxl),
-                    child: TajGoEmptyState(
-                      icon: Icons.receipt_long_outlined,
-                      title: 'Заказов пока нет',
-                      message: 'Завершённые доставки появятся здесь.',
-                    ),
+                if (snapshot.hasError) {
+                  return const TajGoErrorState();
+                }
+                if (!snapshot.hasData) {
+                  return ListView(
+                    controller: widget.scrollController,
+                    children: const [
+                      TajGoCardSkeleton(),
+                      TajGoCardSkeleton(),
+                      TajGoCardSkeleton(),
+                    ],
                   );
                 }
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                final all = snapshot.data!;
+                final active = all
+                    .where((o) => _active.contains(o.status))
+                    .toList(growable: false);
+                final filtered = all
+                    .where(_matches)
+                    .toList(growable: false);
+                if (filtered.isEmpty) {
+                  return TajGoEmptyState(
+                    icon: Icons.receipt_long_outlined,
+                    title: _filter == _OrdersFilter.all
+                        ? 'Заказов пока нет'
+                        : 'Здесь пусто',
+                    message: 'Ваши заказы появятся здесь.',
+                  );
+                }
+                return ListView(
+                  controller: widget.scrollController,
+                  padding: const EdgeInsets.only(bottom: TajGoSpacing.xxl),
                   children: [
-                    const TajGoSectionHeader(title: 'История'),
-                    ...orders.map(
-                      (order) => TajGoOrderHistoryTile(order: order),
-                    ),
-                    const SizedBox(height: TajGoSpacing.xxl),
+                    if (_filter == _OrdersFilter.all && active.isNotEmpty) ...[
+                      const TajGoSectionHeader(title: 'Активные'),
+                      ...active.map(
+                        (o) => ActiveOrderCard(
+                          order: o,
+                          margin: const EdgeInsets.symmetric(
+                            horizontal: TajGoSpacing.screenH,
+                            vertical: TajGoSpacing.xs,
+                          ),
+                        ),
+                      ),
+                      const TajGoSectionHeader(title: 'История'),
+                      ...filtered
+                          .where((o) => !_active.contains(o.status))
+                          .map((o) => TajGoOrderHistoryTile(order: o)),
+                    ] else
+                      ...filtered.map((o) => TajGoOrderHistoryTile(order: o)),
                   ],
                 );
               },
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _filters() {
+    const labels = {
+      _OrdersFilter.all: 'Все',
+      _OrdersFilter.active: 'Активные',
+      _OrdersFilter.completed: 'Завершённые',
+      _OrdersFilter.cancelled: 'Отменённые',
+    };
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(
+        horizontal: TajGoSpacing.screenH,
+        vertical: TajGoSpacing.sm,
+      ),
+      child: Row(
+        children: _OrdersFilter.values.map((f) {
+          return Padding(
+            padding: const EdgeInsets.only(right: TajGoSpacing.sm),
+            child: ChoiceChip(
+              label: Text(labels[f]!),
+              selected: f == _filter,
+              onSelected: (_) => setState(() => _filter = f),
+              selectedColor: TajGoColors.mint,
+            ),
+          );
+        }).toList(growable: false),
       ),
     );
   }

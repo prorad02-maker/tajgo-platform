@@ -146,6 +146,22 @@ class OrderRepository {
             .toList(),
       );
 
+  /// Все заказы клиента (для полной вкладки «Заказы» с фильтрами).
+  /// Использует индекс orders(customerId ASC, createdAt DESC).
+  Stream<List<TajGoOrder>> customerOrdersStream(
+    String customerId, {
+    int limit = 50,
+  }) => _db
+      .collection('orders')
+      .where('customerId', isEqualTo: customerId)
+      .orderBy('createdAt', descending: true)
+      .limit(limit)
+      .snapshots()
+      .map(
+        (snapshot) =>
+            snapshot.docs.map(TajGoOrder.fromDoc).toList(growable: false),
+      );
+
   Future<void> cancelOrder(String orderId) async {
     await _commands.call('cancelWaitingOrder', {
       'orderId': orderId,

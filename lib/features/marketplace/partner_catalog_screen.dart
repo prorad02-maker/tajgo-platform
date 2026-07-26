@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 
-import '../../core/constants/tajgo_colors.dart';
 import '../../core/models/marketplace_cart.dart';
 import '../../core/models/marketplace_partner.dart';
 import '../../core/models/marketplace_product.dart';
+import '../../shared/design/tajgo_components.dart';
 import '../../shared/widgets/tajgo_scope.dart';
 import 'marketplace_checkout_screen.dart';
 import 'marketplace_partners_screen.dart';
+import 'widgets/product_details_sheet.dart';
 
 class PartnerCatalogScreen extends StatelessWidget {
   const PartnerCatalogScreen({super.key, required this.partner});
@@ -126,7 +127,7 @@ class PartnerCatalogScreen extends StatelessWidget {
               ),
               icon: const Icon(Icons.shopping_cart_rounded),
               label: Text(
-                'Корзина · ${cart.itemKinds} поз. · ${cart.total} TJS',
+                'Корзина · ${cart.itemKinds} поз. · ${TajGoMoney.format(cart.total)}',
               ),
             ),
           );
@@ -156,8 +157,8 @@ class _PartnerHeader extends StatelessWidget {
           const SizedBox(height: 6),
           Text(
             '${partner.address} · ~${partner.preparationMinutes} мин · '
-            'минимум ${partner.minimumOrder} TJS · '
-            'доставка ${partner.deliveryFee} TJS',
+            'минимум ${TajGoMoney.format(partner.minimumOrder)} · '
+            'доставка ${TajGoMoney.format(partner.deliveryFee)}',
             style: const TextStyle(color: TajGoColors.muted, fontSize: 12),
           ),
           if (!partner.isOpen) ...[
@@ -195,7 +196,15 @@ class _ProductCard extends StatelessWidget {
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
       clipBehavior: Clip.antiAlias,
-      child: Padding(
+      child: InkWell(
+        onTap: () => showProductDetailsSheet(
+          context: context,
+          product: product,
+          cart: cart,
+          enabled: enabled,
+          onAdd: onAdd,
+        ),
+        child: Padding(
         padding: const EdgeInsets.all(10),
         child: Row(
           children: [
@@ -226,20 +235,19 @@ class _ProductCard extends StatelessWidget {
                   const SizedBox(height: 5),
                   Row(
                     children: [
-                      Text(
-                        '${product.price} TJS / ${marketplaceUnitLabel(product.unit)}',
-                        style: const TextStyle(fontWeight: FontWeight.w900),
-                      ),
-                      if (product.oldPrice != null) ...[
-                        const SizedBox(width: 7),
-                        Text(
-                          '${product.oldPrice}',
-                          style: const TextStyle(
-                            color: TajGoColors.muted,
-                            decoration: TextDecoration.lineThrough,
-                          ),
+                      TajGoPrice(
+                        value: product.price,
+                        oldValue: product.oldPrice,
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w900,
+                          color: TajGoColors.ink,
                         ),
-                      ],
+                      ),
+                      Text(
+                        ' / ${marketplaceUnitLabel(product.unit)}',
+                        style: const TextStyle(color: TajGoColors.muted),
+                      ),
                     ],
                   ),
                   if (!product.isAvailable)
@@ -301,6 +309,7 @@ class _ProductCard extends StatelessWidget {
             ),
           ],
         ),
+      ),
       ),
     );
   }

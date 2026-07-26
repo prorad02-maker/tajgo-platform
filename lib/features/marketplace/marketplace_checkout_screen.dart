@@ -6,6 +6,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../core/constants/tajgo_colors.dart';
+import '../../core/design/tajgo_money.dart';
 import '../../core/models/marketplace_cart.dart';
 import '../../core/models/marketplace_partner.dart';
 import '../../core/models/marketplace_product.dart';
@@ -83,7 +84,7 @@ class _MarketplaceCheckoutScreenState extends State<MarketplaceCheckoutScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Добавьте товаров ещё на ${quote.missingForMinimum} TJS.',
+            'Добавьте товаров ещё на ${TajGoMoney.format(quote.missingForMinimum)}.',
           ),
         ),
       );
@@ -233,7 +234,7 @@ class _MarketplaceCheckoutScreenState extends State<MarketplaceCheckoutScreen> {
                           ? 'Пример · публикация через админку'
                           : _busy
                           ? 'Оформляем…'
-                          : 'Оформить · ${cart.total} TJS',
+                          : 'Оформить · ${TajGoMoney.format(cart.total)}',
                     ),
                   ),
                 ),
@@ -259,7 +260,7 @@ class _CartLineTile extends StatelessWidget {
       ),
       title: Text(line.product.name),
       subtitle: Text(
-        '${line.product.price} TJS × ${_quantity(line.quantity)} ${marketplaceUnitLabel(line.product.unit)}',
+        '${TajGoMoney.format(line.product.price)} × ${_quantity(line.quantity)} ${marketplaceUnitLabel(line.product.unit)}',
       ),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
@@ -308,7 +309,7 @@ class _TotalsCard extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.only(top: 8),
                 child: Text(
-                  'Добавьте товаров ещё на ${quote.missingForMinimum} TJS.',
+                  'Добавьте товаров ещё на ${TajGoMoney.format(quote.missingForMinimum)}.',
                   style: const TextStyle(
                     color: TajGoColors.warning,
                     fontWeight: FontWeight.w800,
@@ -325,7 +326,7 @@ class _TotalsCard extends StatelessWidget {
     children: [
       Expanded(child: Text(label)),
       Text(
-        '$value TJS',
+        TajGoMoney.format(value),
         style: TextStyle(
           fontWeight: strong ? FontWeight.w900 : FontWeight.w700,
         ),
