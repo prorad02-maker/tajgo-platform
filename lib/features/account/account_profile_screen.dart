@@ -8,6 +8,9 @@ import '../courier/courier_application_status_screen.dart';
 import '../courier/courier_home_screen.dart';
 import '../courier/courier_onboarding_screen.dart';
 import '../customer/customer_home_screen.dart';
+import '../../core/legal/legal_documents.dart';
+import '../legal/legal_document_screen.dart';
+import '../legal/support_screen.dart';
 import '../startup/intent_selection_screen.dart';
 import 'security_data_screen.dart';
 import 'settings_screen.dart';
@@ -119,13 +122,35 @@ class AccountProfileScreen extends StatelessWidget {
               ),
               _Tile(
                 icon: Icons.help_outline_rounded,
-                title: 'Помощь',
-                onTap: () => _soon(context),
+                title: 'Поддержка',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => const SupportScreen(),
+                  ),
+                ),
               ),
               _Tile(
                 icon: Icons.privacy_tip_outlined,
                 title: 'Политика конфиденциальности',
-                onTap: () => _soon(context),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) =>
+                        const LegalDocumentScreen(document: LegalDocuments.privacy),
+                  ),
+                ),
+              ),
+              _Tile(
+                icon: Icons.description_outlined,
+                title: 'Условия использования',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) =>
+                        const LegalDocumentScreen(document: LegalDocuments.terms),
+                  ),
+                ),
               ),
               _Tile(
                 icon: Icons.shield_outlined,

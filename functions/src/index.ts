@@ -152,6 +152,11 @@ export const deleteAccountRequest = command(
   (context) => core.deleteAccountRequest(context),
 );
 
+export const acceptLegalDocuments = command(
+  "acceptLegalDocuments",
+  (context) => core.acceptLegalDocuments(context),
+);
+
 export const adminCancelOrder = command(
   "adminCancelOrder",
   (context) => core.adminCancelOrder(context),

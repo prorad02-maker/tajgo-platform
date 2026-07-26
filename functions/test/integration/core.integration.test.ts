@@ -333,6 +333,21 @@ test("deleteAccountRequest is idempotent for the same key", async () => {
   assert.equal(commands.size, 1);
 });
 
+test("acceptLegalDocuments records versions, locale and timestamp", async () => {
+  await seedUser(customer, "customer");
+  const result = await core.acceptLegalDocuments({
+    principal: customer,
+    data: {privacyVersion: "1.0", termsVersion: "1.0", locale: "ru"},
+  });
+  assert.equal(result.accepted, true);
+  const user = (await db.collection("users").doc(customer.uid).get()).data();
+  const acceptance = user?.legalAcceptance as Record<string, unknown>;
+  assert.equal(acceptance?.privacyVersion, "1.0");
+  assert.equal(acceptance?.termsVersion, "1.0");
+  assert.equal(acceptance?.locale, "ru");
+  assert.ok(acceptance?.acceptedAt);
+});
+
 test("busy courier cannot submit an offer", async () => {
   await seedCourier(courier, {
     activeOrderId: "existing-order",

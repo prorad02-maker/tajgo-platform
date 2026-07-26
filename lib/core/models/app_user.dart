@@ -19,6 +19,9 @@ class AppUser {
     required this.updatedAt,
     this.phoneNumber,
     this.photoUrl,
+    this.acceptedPrivacyVersion,
+    this.acceptedTermsVersion,
+    this.legalAcceptedAt,
   });
 
   final String uid;
@@ -38,8 +41,14 @@ class AppUser {
   final String language;
   final DateTime? createdAt;
   final DateTime? updatedAt;
+  final String? acceptedPrivacyVersion;
+  final String? acceptedTermsVersion;
+  final DateTime? legalAcceptedAt;
 
   String get name => displayName;
+  bool hasAcceptedLegal(String privacyVersion, String termsVersion) =>
+      acceptedPrivacyVersion == privacyVersion &&
+      acceptedTermsVersion == termsVersion;
   bool get isAdmin => role == AppUserRole.admin;
   bool get courierApproved =>
       roles.contains(AppUserRole.courier) &&
@@ -99,7 +108,15 @@ class AppUser {
       language: data['language'] as String? ?? 'ru',
       createdAt: _date(data['createdAt']),
       updatedAt: _date(data['updatedAt']),
+      acceptedPrivacyVersion: _legal(data)?['privacyVersion'] as String?,
+      acceptedTermsVersion: _legal(data)?['termsVersion'] as String?,
+      legalAcceptedAt: _date(_legal(data)?['acceptedAt']),
     );
+  }
+
+  static Map<String, dynamic>? _legal(Map<String, dynamic> data) {
+    final value = data['legalAcceptance'];
+    return value is Map ? Map<String, dynamic>.from(value) : null;
   }
 
   static String _safeMode(String mode) =>

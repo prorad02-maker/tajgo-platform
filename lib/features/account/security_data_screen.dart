@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../core/legal/legal_documents.dart';
 import '../../shared/design/tajgo_components.dart';
+import '../legal/legal_document_screen.dart';
 import 'account_deletion_screen.dart';
 
 /// Раздел «Безопасность и данные»: точка входа к удалению аккаунта и краткая
@@ -36,6 +38,53 @@ class SecurityDataScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: TajGoSpacing.lg),
+          TajGoCard(
+            padding: EdgeInsets.zero,
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(
+                    Icons.privacy_tip_outlined,
+                    color: TajGoColors.darkGreen,
+                  ),
+                  title: Text(
+                    'Политика конфиденциальности',
+                    style: TajGoTypography.body,
+                  ),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) => const LegalDocumentScreen(
+                        document: LegalDocuments.privacy,
+                      ),
+                    ),
+                  ),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(
+                    Icons.description_outlined,
+                    color: TajGoColors.darkGreen,
+                  ),
+                  title: Text(
+                    'Условия использования',
+                    style: TajGoTypography.body,
+                  ),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) => const LegalDocumentScreen(
+                        document: LegalDocuments.terms,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: TajGoSpacing.md),
           TajGoCard(
             padding: EdgeInsets.zero,
             child: ListTile(

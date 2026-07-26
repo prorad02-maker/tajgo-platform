@@ -75,6 +75,19 @@ class UserRepository {
       .snapshots()
       .map((doc) => doc.exists ? AppUser.fromDoc(doc) : null);
 
+  /// Запись согласия с Политикой конфиденциальности и Условиями.
+  Future<void> acceptLegalDocuments({
+    required String privacyVersion,
+    required String termsVersion,
+    String locale = 'ru',
+  }) async {
+    await _commands.call('acceptLegalDocuments', {
+      'privacyVersion': privacyVersion,
+      'termsVersion': termsVersion,
+      'locale': locale,
+    });
+  }
+
   /// Запрос на удаление аккаунта через authoritative Function.
   ///
   /// Backend анонимизирует профиль и presence, запрещает удаление при активном

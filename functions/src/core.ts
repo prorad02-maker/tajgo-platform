@@ -1909,6 +1909,38 @@ export class TajGoAuthoritativeCore {
   }
 
   /**
+   * Records the user's acceptance of the current Privacy Policy and Terms of
+   * Use with versions, locale and a server timestamp. Idempotent by nature.
+   */
+  async acceptLegalDocuments(context: CommandContext): Promise<Result> {
+    const {principal, data} = context;
+    const privacyVersion = requiredString(data, "privacyVersion", {max: 20});
+    const termsVersion = requiredString(data, "termsVersion", {max: 20});
+    const locale = optionalString(data, "locale", 10) ?? "ru";
+    const userRef = this.db.collection("users").doc(principal.uid);
+    await this.db.runTransaction(async (transaction) => {
+      const userDoc = await transaction.get(userRef);
+      if (!userDoc.exists) {
+        throw new CoreError("failed-precondition", "Профиль не найден.");
+      }
+      transaction.set(
+        userRef,
+        {
+          legalAcceptance: {
+            privacyVersion,
+            termsVersion,
+            locale,
+            acceptedAt: FieldValue.serverTimestamp(),
+          },
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        {merge: true},
+      );
+    });
+    return {accepted: true, privacyVersion, termsVersion};
+  }
+
+  /**
    * Self-service account deletion. Anonymizes the user's identity and courier
    * presence, records an audit-ready deletion request, and best-effort deletes
    * the Firebase Auth user. Blocked while any order is still active. Mandatory
