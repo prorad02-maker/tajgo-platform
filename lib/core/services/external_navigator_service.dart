@@ -1,6 +1,9 @@
+import 'package:flutter/foundation.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+
+bool get _isIOS => defaultTargetPlatform == TargetPlatform.iOS;
 
 enum ExternalNavigator { tajgo, yandex, google, twoGis, system }
 
@@ -69,9 +72,13 @@ Uri navigatorUri(
   ExternalNavigator.yandex => Uri.parse(
     'yandexnavi://build_route_on_map?lat_to=${point.latitude}&lon_to=${point.longitude}',
   ),
-  ExternalNavigator.google => Uri.parse(
-    'google.navigation:q=${point.latitude},${point.longitude}&mode=b',
-  ),
+  ExternalNavigator.google => _isIOS
+      ? Uri.parse(
+          'comgooglemaps://?daddr=${point.latitude},${point.longitude}&directionsmode=bicycling',
+        )
+      : Uri.parse(
+          'google.navigation:q=${point.latitude},${point.longitude}&mode=b',
+        ),
   ExternalNavigator.twoGis => Uri.parse(
     'dgis://2gis.ru/routeSearch/rsType/bike/to/${point.longitude},${point.latitude}',
   ),
@@ -79,6 +86,11 @@ Uri navigatorUri(
   ExternalNavigator.tajgo => Uri(),
 };
 
-Uri navigatorFallbackUri(LatLng point) => Uri.parse(
-  'geo:${point.latitude},${point.longitude}?q=${point.latitude},${point.longitude}',
-);
+Uri navigatorFallbackUri(LatLng point) => _isIOS
+    // iOS не поддерживает geo:; используем Apple Maps.
+    ? Uri.parse(
+        'https://maps.apple.com/?daddr=${point.latitude},${point.longitude}',
+      )
+    : Uri.parse(
+        'geo:${point.latitude},${point.longitude}?q=${point.latitude},${point.longitude}',
+      );

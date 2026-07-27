@@ -1,6 +1,14 @@
-# Copy this file to android/key.properties and replace every placeholder.
-# Never commit android/key.properties or the keystore itself.
-storePassword=REPLACE_WITH_LOCAL_SECRET
-keyPassword=REPLACE_WITH_LOCAL_SECRET
-keyAlias=tajgo
-storeFile=C:\\Users\\YOUR_USER\\.android-keys\\tajgo-release-key.jks
+# TajGo Android release signing — EXAMPLE. Copy to android/key.properties and
+# fill in real values. NEVER commit the real key.properties or the keystore.
+#
+# Generate a keystore (owner, one-time):
+#   keytool -genkey -v -keystore tajgo-upload.jks -keyalg RSA -keysize 2048 \
+#           -validity 10000 -alias tajgo-upload
+#
+# Store the .jks OUTSIDE the repo and back it up securely. Losing it breaks
+# future Play updates.
+
+storeFile=C:/keys/tajgo-upload.jks
+storePassword=CHANGE_ME
+keyAlias=tajgo-upload
+keyPassword=CHANGE_ME

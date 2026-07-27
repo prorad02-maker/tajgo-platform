@@ -67,7 +67,7 @@ class DefaultFirebaseOptions {
     projectId: 'tajgo-4fcd0',
     databaseURL: 'https://tajgo-4fcd0-default-rtdb.firebaseio.com',
     storageBucket: 'tajgo-4fcd0.firebasestorage.app',
-    iosBundleId: 'com.example.tajgo',
+    iosBundleId: 'tj.tajgo.app',
   );
 
   static const FirebaseOptions macos = FirebaseOptions(
@@ -77,7 +77,7 @@ class DefaultFirebaseOptions {
     projectId: 'tajgo-4fcd0',
     databaseURL: 'https://tajgo-4fcd0-default-rtdb.firebaseio.com',
     storageBucket: 'tajgo-4fcd0.firebasestorage.app',
-    iosBundleId: 'com.example.tajgo',
+    iosBundleId: 'tj.tajgo.app',
   );
 
   static const FirebaseOptions windows = FirebaseOptions(

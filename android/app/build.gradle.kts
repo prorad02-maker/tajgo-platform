@@ -20,7 +20,8 @@ if (hasReleaseSigning) {
 
 android {
     namespace = "tj.tajgo.app"
-    compileSdk = flutter.compileSdkVersion
+    // Pinned for store readiness (Google Play requires targetSdk 35+; 36 = Android 16).
+    compileSdk = maxOf(flutter.compileSdkVersion, 36)
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -30,12 +31,10 @@ android {
 
     defaultConfig {
         applicationId = "tj.tajgo.app"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
         // Firebase (App Check / Messaging / Crashlytics) requires Android 6 (API 23)
         // as a minimum; respect a higher Flutter default if one is provided.
         minSdk = maxOf(flutter.minSdkVersion, 23)
-        targetSdk = flutter.targetSdkVersion
+        targetSdk = maxOf(flutter.targetSdkVersion, 36)
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
@@ -53,6 +52,13 @@ android {
 
     buildTypes {
         release {
+            // R8 code shrinking + resource shrinking for release artifacts.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
             // Keep local release builds available before the owner provides a
             // private key. A production artifact must use key.properties.
             signingConfig = if (hasReleaseSigning) {

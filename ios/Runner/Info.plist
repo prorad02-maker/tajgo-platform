@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Tajgo</string>
+	<string>TajGo</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -61,6 +61,16 @@
 	</array>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>TajGo показывает курьеров рядом и помогает выбрать адрес доставки.</string>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>yandexnavi</string>
+		<string>comgooglemaps</string>
+		<string>dgis</string>
+	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
 	<key>UISupportedInterfaceOrientations~ipad</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
