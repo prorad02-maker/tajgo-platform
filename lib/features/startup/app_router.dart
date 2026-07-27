@@ -1,3 +1,4 @@
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/models/app_user.dart';
@@ -12,28 +13,92 @@ import 'intent_selection_screen.dart';
 import 'role_onboarding_screen.dart';
 import 'startup_decision.dart';
 
+/// Результат стартовой маршрутизации: куда идти + загруженный профиль.
+class StartupState {
+  const StartupState(this.destination, this.profile);
+  final StartupDestination destination;
+  final AppUser? profile;
+}
+
 class AppStartupRouter extends StatefulWidget {
-  const AppStartupRouter({super.key});
+  const AppStartupRouter({super.key, this.resolver});
+
+  /// Инъекция резолвера для тестов. По умолчанию — реальные стадии startup.
+  final Future<StartupState> Function(BuildContext context)? resolver;
 
   @override
   State<AppStartupRouter> createState() => _AppStartupRouterState();
 }
 
 class _AppStartupRouterState extends State<AppStartupRouter> {
-  Future<_StartupState>? _future;
+  bool _loading = true;
+  bool _inFlight = false;
+  bool _started = false;
+  Object? _profileError;
+  StartupState? _state;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _future ??= _resolve();
+    if (!_started) {
+      _started = true;
+      // После первого кадра — чтобы setState не вызывался во время build.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _load();
+      });
+    }
   }
 
-  Future<_StartupState> _resolve() async {
-    final scope = TajGoScope.of(context);
-    final firebaseUser = scope.authService.currentUser;
-    if (firebaseUser == null) {
-      return const _StartupState(StartupDestination.intent, null);
+  /// Единая точка запуска/повтора startup. Никогда не передаёт async-колбэк в
+  /// setState; предотвращает параллельные запросы.
+  Future<void> _load() async {
+    if (_inFlight) return;
+    _inFlight = true;
+    if (mounted) {
+      setState(() {
+        _loading = true;
+        _profileError = null;
+      });
     }
+    try {
+      final resolver = widget.resolver ?? _resolve;
+      final result = await resolver(context);
+      if (!mounted) return;
+      setState(() {
+        _state = result;
+        _loading = false;
+      });
+    } catch (error, stackTrace) {
+      final code = error is FirebaseException
+          ? error.code
+          : error.runtimeType.toString();
+      debugPrint('[PROFILE_LOAD_ERROR] code=$code message=$error');
+      debugPrintStack(stackTrace: stackTrace);
+      if (!mounted) return;
+      setState(() {
+        _profileError = error;
+        _loading = false;
+      });
+    } finally {
+      _inFlight = false;
+    }
+  }
+
+  /// Стадии startup: (1) Firebase Auth, (2) загрузка users/{uid},
+  /// (3) определение роли, (4) переход в shell.
+  Future<StartupState> _resolve(BuildContext context) async {
+    final scope = TajGoScope.of(context);
+
+    // (1) Firebase Authentication.
+    final firebaseUser = scope.authService.currentUser;
+    debugPrint('[AUTH_STATE] uid=${firebaseUser?.uid ?? 'null'}');
+    if (firebaseUser == null) {
+      debugPrint('[STARTUP_ROUTE] role=intent');
+      return const StartupState(StartupDestination.intent, null);
+    }
+
+    // (2) Загрузка профиля users/{uid}.
+    debugPrint('[PROFILE_LOAD_START] uid=${firebaseUser.uid}');
     await scope.userRepository.ensureUser(
       uid: firebaseUser.uid,
       phoneNumber: firebaseUser.phoneNumber,
@@ -52,81 +117,89 @@ class _AppStartupRouterState extends State<AppStartupRouter> {
       );
       profile = await scope.userRepository.getUser(firebaseUser.uid);
     }
+    debugPrint('[PROFILE_LOAD_SUCCESS] uid=${firebaseUser.uid}');
     if (profile != null) {
       await scope.rolePreferenceService.save(profile.lastMode);
     }
-    return _StartupState(
-      resolveStartupDestination(authenticated: true, profile: profile),
-      profile,
+
+    // (3) Определение роли и (4) переход в shell.
+    final destination = resolveStartupDestination(
+      authenticated: true,
+      profile: profile,
     );
+    debugPrint('[STARTUP_ROUTE] role=${profile?.role ?? 'unknown'}');
+    return StartupState(destination, profile);
   }
 
   @override
-  Widget build(BuildContext context) => FutureBuilder<_StartupState>(
-    future: _future,
-    builder: (context, snapshot) {
-      if (snapshot.hasError) {
-        return Scaffold(
-          body: SafeArea(
-            child: Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.cloud_off_rounded, size: 56),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'Не удалось загрузить аккаунт',
-                      style: TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Проверьте интернет и попробуйте ещё раз.',
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 18),
-                    FilledButton(
-                      onPressed: () => setState(() => _future = _resolve()),
-                      child: const Text('Повторить'),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        );
-      }
-      if (!snapshot.hasData) {
-        return const Scaffold(body: Center(child: CircularProgressIndicator()));
-      }
-      final state = snapshot.data!;
-      return switch (state.destination) {
-        StartupDestination.intent => const IntentSelectionScreen(),
-        StartupDestination.roleOnboarding => const RoleOnboardingScreen(),
-        StartupDestination.profileCompletion => ProfileCompletionScreen(
-          initialIntent: state.profile?.courierStatus == CourierStatus.draft
-              ? AppUserRole.courier
-              : AppUserRole.customer,
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    if (_profileError != null) {
+      return _ProfileErrorScreen(
+        onRetry: _inFlight ? null : () => _load(),
+      );
+    }
+    final state = _state!;
+    return switch (state.destination) {
+      StartupDestination.intent => const IntentSelectionScreen(),
+      StartupDestination.roleOnboarding => const RoleOnboardingScreen(),
+      StartupDestination.profileCompletion => ProfileCompletionScreen(
+        initialIntent: state.profile?.courierStatus == CourierStatus.draft
+            ? AppUserRole.courier
+            : AppUserRole.customer,
+      ),
+      StartupDestination.customerHome => const CustomerHomeScreen(),
+      StartupDestination.courierOnboarding => const CourierOnboardingScreen(),
+      StartupDestination.courierApplicationStatus =>
+        CourierApplicationStatusScreen(
+          status: state.profile?.courierStatus ?? CourierStatus.draft,
         ),
-        StartupDestination.customerHome => const CustomerHomeScreen(),
-        StartupDestination.courierOnboarding => const CourierOnboardingScreen(),
-        StartupDestination.courierApplicationStatus =>
-          CourierApplicationStatusScreen(
-            status: state.profile?.courierStatus ?? CourierStatus.draft,
-          ),
-        StartupDestination.courierHome => const CourierHomeScreen(),
-        StartupDestination.adminHome => const AdminHomeScreen(),
-      };
-    },
-  );
+      StartupDestination.courierHome => const CourierHomeScreen(),
+      StartupDestination.adminHome => const AdminHomeScreen(),
+    };
+  }
 }
 
-class _StartupState {
-  const _StartupState(this.destination, this.profile);
-  final StartupDestination destination;
-  final AppUser? profile;
+/// Ошибка загрузки профиля (после успешного входа). Не «Не удалось войти».
+class _ProfileErrorScreen extends StatelessWidget {
+  const _ProfileErrorScreen({required this.onRetry});
+
+  final VoidCallback? onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.cloud_off_rounded, size: 56),
+                const SizedBox(height: 16),
+                const Text(
+                  'Вход выполнен, но не удалось загрузить профиль',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Проверьте интернет и попробуйте ещё раз.',
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 18),
+                FilledButton(
+                  onPressed: onRetry,
+                  child: const Text('Повторить'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

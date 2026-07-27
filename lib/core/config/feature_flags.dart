@@ -86,7 +86,10 @@ class FeatureFlags {
       diagnostics: _override('TAJGO_FF_DIAGNOSTICS', nonProd),
       adminImport: _override('TAJGO_FF_ADMIN_IMPORT', true),
       previewData: _override('TAJGO_FF_PREVIEW_DATA', nonProd),
-      appCheck: _override('TAJGO_FF_APP_CHECK', isDebug),
+      // App Check выключен по умолчанию во всех средах: включается через
+      // --dart-define=TAJGO_FF_APP_CHECK=true только после регистрации
+      // приложений и включения App Check API в Console (иначе SDK спамит 403).
+      appCheck: _override('TAJGO_FF_APP_CHECK', false),
       publicPilotRouting: _override('TAJGO_ROUTING_ENABLED', false),
       demoTools: isDebug && _override('TAJGO_FF_DEMO_TOOLS', true),
       anonymousDemoLogin: isDebug && _override('TAJGO_FF_ANON_LOGIN', true),

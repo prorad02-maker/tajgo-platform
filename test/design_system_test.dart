@@ -64,11 +64,14 @@ void main() {
       }
     });
 
-    test('App Check enforcement не форсируется вне debug (rollout owner-driven)', () {
-      expect(FeatureFlags.forEnvironment(AppEnvironment.production).appCheck,
-          isFalse);
-      expect(FeatureFlags.forEnvironment(AppEnvironment.pilot).appCheck,
-          isFalse);
+    test('App Check выключен по умолчанию во всех средах (owner-driven rollout)', () {
+      for (final env in AppEnvironment.values) {
+        expect(
+          FeatureFlags.forEnvironment(env).appCheck,
+          isFalse,
+          reason: env.label,
+        );
+      }
     });
   });
 }

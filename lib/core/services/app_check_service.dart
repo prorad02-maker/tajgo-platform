@@ -15,6 +15,9 @@ class AppCheckService {
   Future<void> activate({required bool enabled}) async {
     if (!enabled) return;
     try {
+      // Не держим цикл фонового обновления токена: при отключённом App Check API
+      // это приводит к повторяющимся 403 / "too many attempts".
+      await FirebaseAppCheck.instance.setTokenAutoRefreshEnabled(false);
       await FirebaseAppCheck.instance.activate(
         providerAndroid: kDebugMode
             ? const AndroidDebugProvider()
