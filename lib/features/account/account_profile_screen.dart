@@ -11,6 +11,7 @@ import '../customer/customer_home_screen.dart';
 import '../../core/legal/legal_documents.dart';
 import '../legal/legal_document_screen.dart';
 import '../legal/support_screen.dart';
+import '../diagnostics/diagnostics_screen.dart';
 import '../merchant/merchant_application_screen.dart';
 import '../startup/intent_selection_screen.dart';
 import 'addresses/saved_addresses_screen.dart';
@@ -181,6 +182,17 @@ class AccountProfileScreen extends StatelessWidget {
                   ),
                 ),
               ),
+              if (TajGoScope.of(context).featureFlags.diagnostics)
+                _Tile(
+                  icon: Icons.bug_report_outlined,
+                  title: 'Диагностика',
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) => const DiagnosticsScreen(),
+                    ),
+                  ),
+                ),
               _Tile(
                 icon: Icons.logout_rounded,
                 title: 'Выйти',
@@ -300,6 +312,11 @@ class AccountProfileScreen extends StatelessWidget {
     if (confirmed != true || !context.mounted) return;
     final scope = TajGoScope.of(context);
     final uid = scope.authService.currentUser?.uid;
+    if (uid != null) {
+      try {
+        await scope.pushNotificationService.disableForUser(uid);
+      } catch (_) {}
+    }
     if (currentMode == AppUserRole.courier && uid != null) {
       try {
         final profile = await scope.userRepository.getUser(uid);

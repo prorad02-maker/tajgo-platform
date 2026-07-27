@@ -430,6 +430,58 @@ export function deterministicOrderId(
     .slice(0, 32);
 }
 
+export interface SafeNotification {
+  title: string;
+  body: string;
+  data: Record<string, string>;
+}
+
+/**
+ * Privacy-safe order notification. Body never contains the delivery code, full
+ * phone number or full address — only order id/status/type travel in `data`.
+ */
+export function orderStatusNotification(
+  status: string,
+  orderId: string,
+): SafeNotification | null {
+  const map: Record<string, {title: string; body: string}> = {
+    accepted: {title: "Курьер найден", body: "Курьер едет за вашим заказом."},
+    pickedUp: {title: "Заказ у курьера", body: "Курьер везёт ваш заказ."},
+    delivered: {title: "Курьер на месте", body: "Курьер прибыл к вам."},
+    completed: {title: "Заказ доставлен", body: "Спасибо, что выбрали TajGo!"},
+    cancelled: {title: "Заказ отменён", body: "Ваш заказ был отменён."},
+    disputed: {title: "Требуется решение", body: "По заказу открыт спор."},
+  };
+  const entry = map[status];
+  if (entry == null) return null;
+  return {
+    title: entry.title,
+    body: entry.body,
+    data: {type: "order", orderId, status},
+  };
+}
+
+export function offerReceivedNotification(orderId: string): SafeNotification {
+  return {
+    title: "Есть предложения",
+    body: "Курьеры предложили цену за вашу доставку.",
+    data: {type: "order", orderId, status: "offers"},
+  };
+}
+
+/** True if the notification leaks a delivery code, phone or address hint. */
+export function notificationLeaksSensitiveData(
+  notification: SafeNotification,
+  probes: {code?: string; phone?: string; address?: string},
+): boolean {
+  const haystack =
+    `${notification.title} ${notification.body} ` +
+    Object.values(notification.data).join(" ");
+  return Object.values(probes).some(
+    (value) => value != null && value.length > 0 && haystack.includes(value),
+  );
+}
+
 export function suggestedDeliveryPrice(distanceKm: number): number {
   return Math.max(
     MINIMUM_DELIVERY_PRICE,

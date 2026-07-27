@@ -231,3 +231,6 @@ export const adminMigrateLegacyDeliveryCode = command(
   "adminMigrateLegacyDeliveryCode",
   (context) => core.adminMigrateLegacyDeliveryCode(context),
 );
+
+// FCM Firestore triggers (privacy-safe payloads). Inactive until owner deploy.
+export {onOrderStatusChanged, onOfferCreated} from "./notifications";

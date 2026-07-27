@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/config/feature_flags.dart';
@@ -18,6 +19,7 @@ import '../../core/services/external_navigator_service.dart';
 import '../../core/services/marketplace_repository.dart';
 import '../../core/services/merchant_application_repository.dart';
 import '../../core/services/order_repository.dart';
+import '../../core/services/push_notification_service.dart';
 import '../../core/services/route_service.dart';
 import '../../core/services/saved_address_repository.dart';
 import '../../core/services/user_repository.dart';
@@ -62,6 +64,10 @@ class TajGoScope extends InheritedWidget {
       merchantApplicationRepository:
           MerchantApplicationRepository(db, commands),
       savedAddressRepository: SavedAddressRepository(db),
+      pushNotificationService: PushNotificationService(
+        FirebaseMessaging.instance,
+        db,
+      ),
       marketplaceCart: cart,
       featureFlags: flags,
       child: child,
@@ -87,6 +93,7 @@ class TajGoScope extends InheritedWidget {
     required this.marketplaceRepository,
     required this.merchantApplicationRepository,
     required this.savedAddressRepository,
+    required this.pushNotificationService,
     required this.marketplaceCart,
     required this.featureFlags,
   });
@@ -107,6 +114,7 @@ class TajGoScope extends InheritedWidget {
   final MarketplaceRepository marketplaceRepository;
   final MerchantApplicationRepository merchantApplicationRepository;
   final SavedAddressRepository savedAddressRepository;
+  final PushNotificationService pushNotificationService;
   final MarketplaceCart marketplaceCart;
   final FeatureFlags featureFlags;
 

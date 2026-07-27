@@ -93,6 +93,11 @@ service cloud.firestore {
       match /addresses/{addressId} {
         allow read, write: if owner(uid);
       }
+
+      // FCM device tokens: owner writes their own; backend senders read them.
+      match /notification_tokens/{tokenId} {
+        allow read, write: if owner(uid);
+      }
     }
 
     function safeOwnerApplicationCreate(uid) {

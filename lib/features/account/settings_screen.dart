@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/services/external_navigator_service.dart';
+import '../../shared/design/tajgo_components.dart';
 import '../../shared/widgets/tajgo_scope.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -27,6 +28,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _save(NavigatorPreference value) async {
     await TajGoScope.of(context).externalNavigatorService.save(value);
     if (mounted) setState(() => _navigator = value);
+  }
+
+  Future<void> _enableNotifications() async {
+    final ok = await showTajGoConfirmation(
+      context: context,
+      title: 'Включить уведомления?',
+      message: 'TajGo будет присылать статус заказа и предложения курьеров. '
+          'Код получения, полный телефон и адрес в уведомления не попадают.',
+      confirmLabel: 'Включить',
+    );
+    if (!ok || !mounted) return;
+    final scope = TajGoScope.of(context);
+    final uid = scope.authService.currentUser?.uid;
+    if (uid == null) return;
+    final enabled = await scope.pushNotificationService.enableForUser(uid);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          enabled
+              ? 'Уведомления включены.'
+              : 'Разрешение не выдано. Включите в настройках телефона.',
+        ),
+      ),
+    );
   }
 
   String _label(ExternalNavigator value) => switch (value) {
@@ -95,6 +121,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onChanged: null,
               title: Text('Открывать автоматически после принятия'),
               subtitle: Text('Выключено для пилота'),
+            ),
+          ],
+          if (TajGoScope.of(context).featureFlags.notifications) ...[
+            const Divider(),
+            ListTile(
+              leading: const Icon(Icons.notifications_active_outlined),
+              title: const Text('Уведомления'),
+              subtitle: const Text('Статус заказа и предложения курьеров'),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: _enableNotifications,
             ),
           ],
           const Divider(),

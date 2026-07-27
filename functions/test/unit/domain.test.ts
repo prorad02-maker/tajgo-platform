@@ -7,6 +7,9 @@ import {
   evaluateCourierEligibility,
   hashDeliveryCode,
   haversineDistanceMeters,
+  notificationLeaksSensitiveData,
+  offerReceivedNotification,
+  orderStatusNotification,
   validateOfferPrice,
   verifyDeliveryCode,
 } from "../../src/domain";
@@ -175,4 +178,29 @@ test("idempotency document id is stable and scoped by actor/command", () => {
   assert.equal(first, commandDocumentId("u1", "create", "request-123456"));
   assert.notEqual(first, commandDocumentId("u2", "create", "request-123456"));
   assert.notEqual(first, commandDocumentId("u1", "select", "request-123456"));
+});
+
+test("order notification never leaks code, phone or address", () => {
+  const notification = orderStatusNotification("pickedUp", "order-1");
+  assert.ok(notification != null);
+  assert.equal(notification.data.type, "order");
+  assert.equal(notification.data.orderId, "order-1");
+  assert.equal(
+    notificationLeaksSensitiveData(notification, {
+      code: "4321",
+      phone: "+992900112233",
+      address: "ул. Ленина 1",
+    }),
+    false,
+  );
+});
+
+test("offer notification is privacy-safe and unknown status yields null", () => {
+  const offer = offerReceivedNotification("order-2");
+  assert.equal(offer.data.orderId, "order-2");
+  assert.equal(
+    notificationLeaksSensitiveData(offer, {code: "0000", phone: "+992"}),
+    false,
+  );
+  assert.equal(orderStatusNotification("waitingOffers", "x"), null);
 });
