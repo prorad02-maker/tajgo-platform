@@ -7,9 +7,7 @@ import '../../core/constants/tajgo_colors.dart';
 import '../../core/models/app_user.dart';
 import '../../core/services/auth_service.dart';
 import '../../shared/widgets/tajgo_scope.dart';
-import '../startup/app_router.dart';
 import 'account_conflict_screen.dart';
-import 'profile_completion_screen.dart';
 
 class PhoneAuthScreen extends StatefulWidget {
   const PhoneAuthScreen({
@@ -107,13 +105,17 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
   Future<void> _finishAuth() async {
     if (!mounted || _finishingAuth) return;
     _finishingAuth = true;
+    final scope = TajGoScope.of(context);
+    final user = scope.authService.currentUser;
+    if (user == null) {
+      _finishingAuth = false;
+      return;
+    }
+    // Успешный credential сразу ведёт к маршрутизации. Профиль записываем
+    // best-effort: ошибка (например, недоступные Functions) НЕ должна блокировать
+    // возврат к AppStartupRouter, который сам загрузит профиль и покажет нужный
+    // экран или «Вход выполнен, но не удалось загрузить профиль».
     try {
-      final scope = TajGoScope.of(context);
-      final user = scope.authService.currentUser;
-      if (user == null) {
-        _finishingAuth = false;
-        return;
-      }
       await scope.userRepository.ensureUser(
         uid: user.uid,
         phoneNumber: user.phoneNumber,
@@ -121,30 +123,21 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
         phoneVerified: !user.isAnonymous && user.phoneNumber != null,
         initialMode: widget.initialIntent,
       );
-      var profile = await scope.userRepository.getUser(user.uid);
-      if (profile?.onboardingCompleted != true) {
+      final profile = await scope.userRepository.getUser(user.uid);
+      if (profile != null && profile.onboardingCompleted != true) {
         await scope.userRepository.completeRoleOnboarding(
           user.uid,
           widget.initialIntent,
         );
-        profile = await scope.userRepository.getUser(user.uid);
       }
-      if (profile != null) {
-        await scope.rolePreferenceService.save(profile.lastMode);
-      }
-      if (!mounted) return;
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute<void>(
-          builder: (_) => profile?.profileComplete == true
-              ? const AppStartupRouter()
-              : ProfileCompletionScreen(initialIntent: widget.initialIntent),
-        ),
-        (_) => false,
-      );
-    } catch (_) {
-      _finishingAuth = false;
-      rethrow;
+    } catch (error, stackTrace) {
+      debugPrint('[AUTH_FINISH_PROFILE_ERROR] $error');
+      debugPrintStack(stackTrace: stackTrace);
     }
+    if (!mounted) return;
+    // Возврат к корневому AppStartupRouter (он слушает authStateChanges и
+    // пере-резолвит маршрут после входа). Не создаём второй роутер.
+    Navigator.of(context).popUntil((route) => route.isFirst);
   }
 
   Future<void> _demoLogin() async {

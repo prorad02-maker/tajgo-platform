@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 
@@ -21,10 +23,17 @@ class StartupState {
 }
 
 class AppStartupRouter extends StatefulWidget {
-  const AppStartupRouter({super.key, this.resolver});
+  const AppStartupRouter({
+    super.key,
+    this.resolver,
+    this.authUidStream,
+    this.initialUid,
+  });
 
-  /// Инъекция резолвера для тестов. По умолчанию — реальные стадии startup.
+  /// Инъекция резолвера/потока auth для тестов. По умолчанию — реальные стадии.
   final Future<StartupState> Function(BuildContext context)? resolver;
+  final Stream<String?>? authUidStream;
+  final String? initialUid;
 
   @override
   State<AppStartupRouter> createState() => _AppStartupRouterState();
@@ -33,24 +42,61 @@ class AppStartupRouter extends StatefulWidget {
 class _AppStartupRouterState extends State<AppStartupRouter> {
   bool _loading = true;
   bool _inFlight = false;
+  bool _pendingReload = false;
   bool _started = false;
+  String? _lastUid;
   Object? _profileError;
   StartupState? _state;
+  StreamSubscription<String?>? _authSub;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (!_started) {
-      _started = true;
-      // После первого кадра — чтобы setState не вызывался во время build.
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _load();
-      });
+    if (_started) return;
+    _started = true;
+
+    // Подписка на изменения авторизации: startup пере-резолвится при null->User
+    // (и любой смене uid), а не только при первом запуске.
+    if (widget.authUidStream != null) {
+      _lastUid = widget.initialUid;
+      _authSub = widget.authUidStream!.listen(_onAuthChanged);
+    } else {
+      final scope = TajGoScope.of(context);
+      _lastUid = scope.authService.currentUser?.uid;
+      _authSub = scope.authService.authStateChanges
+          .map((user) => user?.uid)
+          .listen(_onAuthChanged);
+    }
+
+    // Первичный резолв — после кадра, чтобы setState не вызывался во время build.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _load();
+    });
+  }
+
+  @override
+  void dispose() {
+    _authSub?.cancel();
+    super.dispose();
+  }
+
+  void _onAuthChanged(String? uid) {
+    debugPrint('[AUTH_STATE_CHANGE] uid=$uid');
+    if (uid == _lastUid) return; // без изменений — не перезапускаем
+    _lastUid = uid;
+    // Смена авторизации во время активного resolve откладывается (коалесцируется),
+    // чтобы после текущего resolve перечитать актуальное состояние. Ручной retry
+    // (кнопка) при активном resolve, наоборот, просто дропается.
+    if (_inFlight) {
+      _pendingReload = true;
+    } else {
+      _load();
     }
   }
 
   /// Единая точка запуска/повтора startup. Никогда не передаёт async-колбэк в
-  /// setState; предотвращает параллельные запросы.
+  /// setState; параллельные запросы исключены (ручной повтор при активном
+  /// resolve дропается; отложенный auth-повтор запускается в finally).
   Future<void> _load() async {
     if (_inFlight) return;
     _inFlight = true;
@@ -81,6 +127,10 @@ class _AppStartupRouterState extends State<AppStartupRouter> {
       });
     } finally {
       _inFlight = false;
+      if (_pendingReload && mounted) {
+        _pendingReload = false;
+        _load();
+      }
     }
   }
 
