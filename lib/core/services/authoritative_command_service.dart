@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:flutter/foundation.dart';
 
 class AuthoritativeCommandService {
   AuthoritativeCommandService(this._gateway);
@@ -16,8 +17,18 @@ class AuthoritativeCommandService {
     } on TajGoCommandException {
       rethrow;
     } on FirebaseFunctionsException catch (error) {
+      // Диагностика ДО преобразования в дружелюбное сообщение: сохраняем сырой
+      // код/сообщение/детали и точную функцию/регион, чтобы отличать
+      // not-found (функция не развёрнута / другой регион / другое имя) от
+      // unavailable / unauthenticated / permission-denied / internal.
+      debugPrint(
+        '[COMMAND_FUNCTION_ERROR] function=$command '
+        'region=${_gateway.region} code=${error.code} '
+        'message=${error.message} details=${error.details}',
+      );
       throw TajGoCommandException.fromFirebase(error);
-    } catch (_) {
+    } catch (error) {
+      debugPrint('[COMMAND_TRANSPORT_ERROR] function=$command error=$error');
       throw const TajGoCommandException(
         code: 'unavailable',
         message: 'Нет связи с TajGo. Проверьте интернет и повторите.',
@@ -29,13 +40,22 @@ class AuthoritativeCommandService {
 
 abstract interface class AuthoritativeCommandGateway {
   Future<Map<String, dynamic>> call(String command, Map<String, dynamic> data);
+
+  /// Регион callable-функций (для диагностики несоответствия region).
+  String get region;
 }
 
 class FirebaseAuthoritativeCommandGateway
     implements AuthoritativeCommandGateway {
-  FirebaseAuthoritativeCommandGateway(this._functions);
+  FirebaseAuthoritativeCommandGateway(
+    this._functions, {
+    this.region = 'europe-west1',
+  });
 
   final FirebaseFunctions _functions;
+
+  @override
+  final String region;
 
   @override
   Future<Map<String, dynamic>> call(
