@@ -200,6 +200,27 @@ test("callable wrapper rejects an unauthenticated request", async () => {
   assert.ok(payload.error?.message);
 });
 
+test("custom order ignores manipulated client preview price", async () => {
+  await seedUser(customer, "customer");
+  const result = await core.createCustomDeliveryOrder({
+    principal: customer,
+    data: {
+      idempotencyKey: "manipulated-price",
+      fromText: "Pickup",
+      toText: "Dropoff",
+      type: "parcel",
+      clientPrice: 9999,
+      fromLocation: {latitude: 40.2800, longitude: 69.6200},
+      toLocation: {latitude: 40.2900, longitude: 69.6300},
+    },
+  });
+  const order = (await db.collection("orders").doc(String(result.orderId)).get()).data();
+  assert.ok(order != null);
+  assert.notEqual(order.clientPrice, 9999);
+  assert.equal(order.clientPrice, order.suggestedPrice);
+  assert.equal(order.pricingVersion, "server-v2-authoritative");
+});
+
 test("courier admin callable rejects an unauthenticated request", async () => {
   const response = await fetch(
     "http://127.0.0.1:5001/demo-tajgo/europe-west1/adminApproveCourier",

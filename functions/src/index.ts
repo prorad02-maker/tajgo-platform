@@ -147,6 +147,11 @@ export const resetTestOrderForCourier = command(
   (context) => core.resetTestOrderForCourier(context),
 );
 
+export const getDeliveryQuote = command(
+  "getDeliveryQuote",
+  (context) => core.getDeliveryQuote(context),
+);
+
 export const adminApproveCourier = command(
   "adminApproveCourier",
   (context) => core.adminApproveCourier(context),

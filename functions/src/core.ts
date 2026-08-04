@@ -32,13 +32,19 @@ import {
   requiredIdempotencyKey,
   requiredNumber,
   requiredString,
-  suggestedDeliveryPrice,
   terminalOrderStatuses,
   toGeoPoint,
   validateOfferPrice,
   verifyDeliveryCode,
   waitingOrderStatuses,
 } from "./domain";
+import {
+  TaxiObservation,
+  calculateDeliveryQuote,
+  detectServiceCity,
+  pricingProfile,
+  selectTaxiReference,
+} from "./pricing";
 
 type Data = Record<string, unknown>;
 type Result = Record<string, unknown>;
@@ -59,6 +65,73 @@ export class TajGoAuthoritativeCore {
       await getAuth().deleteUser(uid);
     },
   ) {}
+
+  async getDeliveryQuote(context: CommandContext): Promise<Result> {
+    const {data} = context;
+    assertOnlyKeys(data, new Set([
+      "pickup",
+      "dropoff",
+      "cityId",
+      "routeHint",
+      "finalPrice",
+      "clientPrice",
+    ]));
+    const pickup = parseCoordinate(data.pickup, "pickup");
+    const dropoff = parseCoordinate(data.dropoff, "dropoff");
+    const cityId = requiredString(data, "cityId", {min: 3, max: 40});
+    const profile = pricingProfile(cityId);
+    // Client route/price fields are deliberately ignored. Until an authorized
+    // road provider is selected server-side, distance uses a conservative
+    // trusted geometric estimate and is explicitly low-confidence.
+    const directMeters = haversineDistanceMeters(pickup, dropoff);
+    const trustedDistanceMeters = Math.ceil(directMeters * 1.25);
+    const trustedDurationSeconds = Math.ceil(trustedDistanceMeters / 5);
+    const snapshot = await this.db
+      .collection("taxi_price_observations")
+      .where("cityId", "==", cityId)
+      .limit(100)
+      .get();
+    const observations = snapshot.docs.flatMap((doc): TaxiObservation[] => {
+      const value = doc.data();
+      const observedAt = dateFromStored(value.observedAt);
+      if (observedAt == null) return [];
+      return [{
+        cityId: String(value.cityId ?? ""),
+        provider: String(value.provider ?? "unknown"),
+        pickupBucket: String(value.pickupBucket ?? ""),
+        dropoffBucket: String(value.dropoffBucket ?? ""),
+        distanceMeters: Number(value.distanceMeters ?? 0),
+        durationSeconds: Number(value.durationSeconds ?? 0),
+        quotedPrice: Number(value.quotedPrice ?? 0),
+        currency: "TJS",
+        observedAt,
+        dayOfWeek: Number(value.dayOfWeek ?? 0),
+        localHour: Number(value.localHour ?? 0),
+        sourceType: String(value.sourceType ?? "observation"),
+        quality: Number(value.quality ?? 1),
+      }];
+    });
+    const reference = selectTaxiReference({
+      observations,
+      cityId,
+      distanceMeters: trustedDistanceMeters,
+      durationSeconds: trustedDurationSeconds,
+      at: this.now(),
+    });
+    return {
+      ...calculateDeliveryQuote({
+        profile,
+        distanceMeters: trustedDistanceMeters,
+        durationSeconds: trustedDurationSeconds,
+        taxiReference: reference,
+      }),
+      distanceMeters: trustedDistanceMeters,
+      durationSeconds: trustedDurationSeconds,
+      pricingProfileId: profile.id,
+      authoritative: true,
+      routeSource: "server_geometric_fallback_pending_authorized_provider",
+    };
+  }
 
   async ensureUserProfile(context: CommandContext): Promise<Result> {
     const {principal, data} = context;
@@ -442,16 +515,36 @@ export class TajGoAuthoritativeCore {
     const toText = requiredString(data, "toText", {min: 2, max: 240});
     const type = requiredString(data, "type", {max: 40});
     const comment = optionalString(data, "comment", 500);
-    const clientPrice = requiredNumber(data, "clientPrice", {
+    // Kept for backward-compatible request validation only. A manipulated
+    // client preview never becomes the authoritative stored order price.
+    requiredNumber(data, "clientPrice", {
       min: 10,
       max: 10_000,
       integer: true,
     });
     const from = parseCoordinate(data.fromLocation, "точки A");
     const to = parseCoordinate(data.toLocation, "точки B");
-    const distanceKm = haversineDistanceMeters(from, to) / 1000;
-    const suggestedPrice = suggestedDeliveryPrice(distanceKm);
-    const etaMinutes = deliveryEtaMinutes(distanceKm);
+    const fromCityId = detectServiceCity(from);
+    const toCityId = detectServiceCity(to);
+    if (fromCityId == null || fromCityId !== toCityId) {
+      throw new CoreError(
+        "failed-precondition",
+        "Точки должны находиться в одной доступной зоне доставки.",
+      );
+    }
+    const trustedDistanceMeters = Math.ceil(
+      haversineDistanceMeters(from, to) * 1.25,
+    );
+    const trustedDurationSeconds = Math.ceil(trustedDistanceMeters / 5);
+    const serverQuote = calculateDeliveryQuote({
+      profile: pricingProfile(fromCityId),
+      distanceMeters: trustedDistanceMeters,
+      durationSeconds: trustedDurationSeconds,
+    });
+    const distanceKm = trustedDistanceMeters / 1000;
+    const suggestedPrice = serverQuote.priceTjs;
+    const clientPrice = suggestedPrice;
+    const etaMinutes = Math.ceil(trustedDurationSeconds / 60);
     const code = this.codeGenerator();
     const secret = hashDeliveryCode(code);
     return this.runIdempotent(
@@ -481,7 +574,8 @@ export class TajGoAuthoritativeCore {
           status: "waitingOffers",
           orderType: "customDelivery",
           type,
-          city: user.city ?? "Худжанд",
+          city: fromCityId,
+          cityId: fromCityId,
           fromText,
           toText,
           fromLocation: toGeoPoint(from),
@@ -493,7 +587,7 @@ export class TajGoAuthoritativeCore {
           clientPrice,
           priceNegotiable: true,
           offersCount: 0,
-          pricingVersion: "server-v1.8",
+          pricingVersion: "server-v2-authoritative",
           currency: "TJS",
           codeAvailable: true,
           ...(comment != null && comment.length > 0 ? {comment} : {}),
