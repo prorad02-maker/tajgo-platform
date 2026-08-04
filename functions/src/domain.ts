@@ -81,6 +81,20 @@ export function asRecord(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+export function assertOnlyKeys(
+  data: Record<string, unknown>,
+  allowed: ReadonlySet<string>,
+): void {
+  const forbidden = Object.keys(data).filter((key) => !allowed.has(key));
+  if (forbidden.length > 0) {
+    throw new CoreError(
+      "invalid-argument",
+      "Запрос содержит запрещённые поля.",
+      {reason: "forbidden-fields"},
+    );
+  }
+}
+
 export function requiredString(
   data: Record<string, unknown>,
   key: string,

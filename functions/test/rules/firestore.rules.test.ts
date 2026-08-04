@@ -497,6 +497,31 @@ test("catalog writes are denied even for admins (Functions only)", async () => {
   );
 });
 
+test("courier authority writes are denied even for admins (Functions only)", async () => {
+  const adminDb = environment
+    .authenticatedContext(adminId, {admin: true})
+    .firestore();
+  await assertFails(
+    updateDoc(doc(adminDb, "users", courierId), {
+      role: "admin",
+      roles: ["customer", "courier", "admin"],
+      courierStatus: "approved",
+    }),
+  );
+  await assertFails(
+    updateDoc(doc(adminDb, "courier_applications", courierId), {
+      status: "approved",
+      reviewedBy: adminId,
+    }),
+  );
+  await assertFails(
+    updateDoc(doc(adminDb, "couriers", courierId), {isOnline: false}),
+  );
+  await assertFails(
+    updateDoc(doc(adminDb, "courier_public", courierId), {isOnline: false}),
+  );
+});
+
 test("merchant application is owner/admin read-only, never client-writable", async () => {
   const ownerDb = environment.authenticatedContext(customerId).firestore();
   const otherDb = environment

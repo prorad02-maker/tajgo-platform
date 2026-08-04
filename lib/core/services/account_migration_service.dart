@@ -1,28 +1,16 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-
 import '../models/app_user.dart';
+import 'authoritative_command_service.dart';
 
 class AccountMigrationService {
-  AccountMigrationService(this._db);
+  AccountMigrationService(this._commands);
 
-  final FirebaseFirestore _db;
+  final AuthoritativeCommandService _commands;
 
-  Future<void> migrate(String uid) async {
-    final userRef = _db.collection('users').doc(uid);
-    final courierRef = _db.collection('couriers').doc(uid);
-    final snapshots = await Future.wait([userRef.get(), courierRef.get()]);
-    final user = snapshots[0];
-    if (!user.exists) return;
-    final patch = buildLegacyAccountPatch(
-      user.data() ?? const {},
-      courierExists: snapshots[1].exists,
-    );
-    if (patch.isEmpty) return;
-    await userRef.set({
-      ...patch,
-      'updatedAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
-  }
+  Future<void> migrate(String uid) => _commands.call('ensureUserProfile', {
+    'idempotencyKey': TajGoIdempotencyKey.stable('legacy-account-migrate', [
+      uid,
+    ]),
+  });
 }
 
 Map<String, dynamic> buildLegacyAccountPatch(

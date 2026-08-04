@@ -1,11 +1,11 @@
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 
 import '../models/tajgo_navigation_step.dart';
 import '../models/tajgo_route.dart';
+import '../../../core/services/safe_diagnostics.dart';
 import 'navigation_instruction_formatter.dart';
 import 'route_provider.dart';
 import 'routing_config.dart';
@@ -59,7 +59,9 @@ class RoadRouteProvider implements RouteProvider {
     _lastHttpStatus = null;
     _lastParseSuccess = null;
     _lastFailure = null;
-    if (config.debugLogging) debugPrint('TajGo routing request: $name');
+    if (config.debugLogging) {
+      SafeDiagnostics.log('ROUTING_REQUEST', fields: {'provider': name});
+    }
     try {
       final response = await _client
           .get(

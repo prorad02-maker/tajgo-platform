@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/legal/legal_documents.dart';
 import '../../core/models/app_user.dart';
 import '../../core/services/auth_service.dart';
 import '../../core/services/authoritative_command_service.dart';
@@ -23,6 +25,11 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
 
   _DeletionPhase _phase = _DeletionPhase.checking;
   AppUser? _user;
+
+  Future<void> _openPublicDeletionPage() => launchUrl(
+    Uri.parse(LegalDocuments.accountDeletionUrl),
+    mode: LaunchMode.externalApplication,
+  );
   bool _busy = false;
   bool _acknowledged = false;
   String? _verificationId;
@@ -133,9 +140,10 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
       _error = null;
     });
     try {
-      await TajGoScope.of(
-        context,
-      ).authService.reauthenticateWithSmsCode(verificationId: id, smsCode: code);
+      await TajGoScope.of(context).authService.reauthenticateWithSmsCode(
+        verificationId: id,
+        smsCode: code,
+      );
       if (mounted) setState(() => _phase = _DeletionPhase.confirm);
     } on PhoneAuthFailure catch (error) {
       if (mounted) setState(() => _error = error.message);
@@ -157,6 +165,7 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
       _error = null;
     });
     try {
+      await scope.pushNotificationService.disableForUser(uid);
       await scope.userRepository.deleteAccountRequest(uid: uid);
       await scope.authService.signOut();
       if (!mounted) return;
@@ -240,11 +249,18 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
         ),
         if (_error != null) ...[
           const SizedBox(height: TajGoSpacing.md),
-          Text(_error!, style: TajGoTypography.caption.copyWith(
-            color: TajGoColors.error,
-          )),
+          Text(
+            _error!,
+            style: TajGoTypography.caption.copyWith(color: TajGoColors.error),
+          ),
         ],
         const SizedBox(height: TajGoSpacing.xl),
+        TextButton.icon(
+          onPressed: _openPublicDeletionPage,
+          icon: const Icon(Icons.open_in_new_rounded),
+          label: const Text('Публичная страница удаления'),
+        ),
+        const SizedBox(height: TajGoSpacing.sm),
         TajGoPrimaryButton(
           label: 'Продолжить',
           loading: _busy,
@@ -281,9 +297,10 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
         ),
         if (_error != null) ...[
           const SizedBox(height: TajGoSpacing.sm),
-          Text(_error!, style: TajGoTypography.caption.copyWith(
-            color: TajGoColors.error,
-          )),
+          Text(
+            _error!,
+            style: TajGoTypography.caption.copyWith(color: TajGoColors.error),
+          ),
         ],
         const SizedBox(height: TajGoSpacing.xl),
         TajGoPrimaryButton(
@@ -322,9 +339,10 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
         ),
         if (_error != null) ...[
           const SizedBox(height: TajGoSpacing.sm),
-          Text(_error!, style: TajGoTypography.caption.copyWith(
-            color: TajGoColors.error,
-          )),
+          Text(
+            _error!,
+            style: TajGoTypography.caption.copyWith(color: TajGoColors.error),
+          ),
         ],
         const SizedBox(height: TajGoSpacing.xl),
         TajGoPrimaryButton(

@@ -200,6 +200,123 @@ test("callable wrapper rejects an unauthenticated request", async () => {
   assert.ok(payload.error?.message);
 });
 
+test("courier admin callable rejects an unauthenticated request", async () => {
+  const response = await fetch(
+    "http://127.0.0.1:5001/demo-tajgo/europe-west1/adminApproveCourier",
+    {
+      method: "POST",
+      headers: {"content-type": "application/json"},
+      body: JSON.stringify({
+        data: {courierId: "courier-1", idempotencyKey: "unauth-approve-0001"},
+      }),
+    },
+  );
+  const payload = (await response.json()) as {error?: {status?: string}};
+  assert.equal(payload.error?.status, "UNAUTHENTICATED");
+});
+
+test("courier admin decisions are backend-authorized and transition safely", async () => {
+  await seedUser(adminActor, "admin");
+  await seedUser(customer, "customer");
+  await seedUser(customer2, "customer");
+  await db.collection("courier_applications").doc(customer.uid).set({
+    uid: customer.uid,
+    displayName: "Pending courier",
+    phoneNumber: customer.token.phone_number,
+    city: "Худжанд",
+    transport: "bike",
+    status: "pending",
+  });
+  await db.collection("courier_applications").doc(customer2.uid).set({
+    uid: customer2.uid,
+    displayName: "Rejected courier",
+    status: "pending",
+  });
+
+  await assert.rejects(
+    core.adminApproveCourier({
+      principal: customer,
+      data: {
+        courierId: customer.uid,
+        idempotencyKey: "non-admin-approve-0001",
+      },
+    }),
+    (error: unknown) =>
+      error instanceof CoreError && error.code === "permission-denied",
+  );
+  await assert.rejects(
+    core.adminApproveCourier({
+      principal: adminActor,
+      data: {
+        courierId: customer.uid,
+        idempotencyKey: "forbidden-approve-0001",
+        role: "admin",
+        status: "approved",
+      },
+    }),
+    (error: unknown) =>
+      error instanceof CoreError &&
+      error.code === "invalid-argument" &&
+      error.details?.reason === "forbidden-fields",
+  );
+
+  const approved = await core.adminApproveCourier({
+    principal: adminActor,
+    data: {
+      courierId: customer.uid,
+      idempotencyKey: "valid-approve-0001",
+    },
+  });
+  assert.equal(approved.status, "approved");
+  assert.equal(
+    (await db.collection("users").doc(customer.uid).get()).data()?.role,
+    "customer",
+  );
+  assert.deepEqual(
+    (await db.collection("users").doc(customer.uid).get()).data()?.roles,
+    ["customer", "courier"],
+  );
+
+  const rejected = await core.adminRejectCourier({
+    principal: adminActor,
+    data: {
+      courierId: customer2.uid,
+      reason: "Документ нечитаем",
+      idempotencyKey: "valid-reject-0001",
+    },
+  });
+  assert.equal(rejected.status, "rejected");
+
+  const suspended = await core.adminSuspendCourier({
+    principal: adminActor,
+    data: {
+      courierId: customer.uid,
+      reason: "Нарушение правил",
+      idempotencyKey: "valid-suspend-0001",
+    },
+  });
+  assert.equal(suspended.status, "suspended");
+  assert.equal(
+    (await db.collection("couriers").doc(customer.uid).get()).data()?.isOnline,
+    false,
+  );
+
+  const restored = await core.adminRestoreCourier({
+    principal: adminActor,
+    data: {
+      courierId: customer.uid,
+      idempotencyKey: "valid-restore-0001",
+    },
+  });
+  assert.equal(restored.status, "approved");
+  const logs = await db
+    .collection("admin_logs")
+    .where("courierId", "==", customer.uid)
+    .get();
+  assert.equal(logs.size, 3);
+  assert.ok(logs.docs.every((doc) => doc.data().adminId === adminActor.uid));
+});
+
 test("customer role cannot submit a courier offer", async () => {
   await seedUser(customer, "customer");
   await seedWaitingOrder("role-order", customer2);

@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:flutter/foundation.dart';
 
+import 'safe_diagnostics.dart';
+
 /// Тонкая обёртка над Crashlytics с безопасной инициализацией.
 ///
 /// Никогда не логируем чувствительные данные (код получения, полный телефон,
@@ -21,15 +23,26 @@ class CrashReportingService {
       final previousOnError = FlutterError.onError;
       FlutterError.onError = (details) {
         previousOnError?.call(details);
-        crashlytics.recordFlutterError(details);
+        crashlytics.recordError(
+          'flutter:${SafeDiagnostics.errorCode(details.exception)}',
+          details.stack,
+          fatal: false,
+        );
       };
 
       PlatformDispatcher.instance.onError = (error, stack) {
-        crashlytics.recordError(error, stack, fatal: true);
+        crashlytics.recordError(
+          'platform:${SafeDiagnostics.errorCode(error)}',
+          stack,
+          fatal: true,
+        );
         return true;
       };
     } catch (error) {
-      debugPrint('Crashlytics init skipped: $error');
+      SafeDiagnostics.log(
+        'CRASHLYTICS_INIT_SKIPPED',
+        fields: {'code': SafeDiagnostics.errorCode(error)},
+      );
     }
   }
 
@@ -43,7 +56,7 @@ class CrashReportingService {
     if (!enabled) return;
     try {
       await FirebaseCrashlytics.instance.recordError(
-        error,
+        'recorded:${SafeDiagnostics.errorCode(error)}',
         stack,
         reason: reason,
         fatal: false,

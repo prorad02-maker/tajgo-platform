@@ -51,7 +51,7 @@ class TajGoScope extends InheritedWidget {
       userRepository: users,
       accountModeService: AccountModeService(auth, users, rolePreferences),
       rolePreferenceService: rolePreferences,
-      accountMigrationService: AccountMigrationService(db),
+      accountMigrationService: AccountMigrationService(commands),
       adminRepository: AdminRepository(db, commands),
       courierRepository: CourierRepository(db, commands),
       courierOfferRepository: CourierOfferRepository(db, commands),

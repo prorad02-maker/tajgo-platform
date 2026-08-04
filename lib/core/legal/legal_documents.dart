@@ -15,12 +15,14 @@ class LegalDocument {
     required this.version,
     required this.updated,
     required this.sections,
+    required this.publicUrl,
   });
 
   final String title;
   final String version;
   final String updated;
   final List<LegalSection> sections;
+  final String publicUrl;
 }
 
 class LegalDocuments {
@@ -30,11 +32,16 @@ class LegalDocuments {
   static const String privacyVersion = '1.0';
   static const String termsVersion = '1.0';
   static const String supportEmail = 'support@tajgo.tj';
+  static const String privacyUrl = 'https://tajgo.ru/privacy';
+  static const String termsUrl = 'https://tajgo.ru/terms';
+  static const String supportUrl = 'https://tajgo.ru/support';
+  static const String accountDeletionUrl = 'https://tajgo.ru/account-deletion';
 
   static const LegalDocument privacy = LegalDocument(
     title: 'Политика конфиденциальности',
     version: privacyVersion,
     updated: 'июль 2026',
+    publicUrl: privacyUrl,
     sections: [
       LegalSection(
         'Что мы собираем',
@@ -79,6 +86,7 @@ class LegalDocuments {
     title: 'Условия использования',
     version: termsVersion,
     updated: 'июль 2026',
+    publicUrl: termsUrl,
     sections: [
       LegalSection(
         'О сервисе',

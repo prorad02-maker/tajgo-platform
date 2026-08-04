@@ -39,7 +39,9 @@ async function sendToUser(
       data: notification.data,
     });
   } catch (error) {
-    logger.error("FCM send failed", {uid, error: `${error}`});
+    logger.error("FCM send failed", {
+      errorType: error instanceof Error ? error.name : typeof error,
+    });
   }
 }
 

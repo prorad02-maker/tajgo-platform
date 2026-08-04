@@ -12,6 +12,7 @@ import '../../core/services/delivery_code_input.dart';
 import '../../core/services/pricing.dart' as pricing;
 import '../../shared/widgets/tajgo_action_button.dart';
 import '../../shared/widgets/tajgo_order_progress.dart';
+import '../../shared/widgets/order_details_load_state.dart';
 import '../../shared/widgets/tajgo_scope.dart';
 import '../map/services/tajgo_location_service.dart';
 import '../map/services/tajgo_map_camera.dart';
@@ -64,6 +65,7 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
   DateTime? _offRouteCandidateAt;
   TajGoRouteProgress? _routeProgress;
   Timer? _routeUpdatedTimer;
+  int _orderStreamAttempt = 0;
 
   String get _uid => TajGoScope.of(context).authService.currentUser!.uid;
 
@@ -504,12 +506,22 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
     final repository = TajGoScope.of(context).courierRepository;
     return Scaffold(
       body: StreamBuilder<TajGoOrder?>(
+        key: ValueKey('courier-order-${widget.orderId}-$_orderStreamAttempt'),
         stream: repository.orderStream(widget.orderId),
         builder: (context, snapshot) {
-          final order = snapshot.data;
-          if (order == null) {
+          final state = resolveOrderDetailsLoadState(snapshot);
+          if (state == OrderDetailsLoadState.loading) {
             return const Center(child: CircularProgressIndicator());
           }
+          if (state == OrderDetailsLoadState.error ||
+              state == OrderDetailsLoadState.notFound) {
+            return OrderDetailsTerminalView(
+              notFound: state == OrderDetailsLoadState.notFound,
+              onRetry: () => setState(() => _orderStreamAttempt++),
+              onBack: () => Navigator.of(context).maybePop(),
+            );
+          }
+          final order = snapshot.data!;
           final from = order.fromLocation == null
               ? null
               : LatLng(

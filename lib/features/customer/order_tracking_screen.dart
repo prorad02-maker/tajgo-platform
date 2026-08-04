@@ -13,6 +13,7 @@ import '../../shared/widgets/tajgo_action_button.dart';
 import '../../shared/widgets/tajgo_confirmation_code.dart';
 import '../../shared/widgets/tajgo_courier_banner.dart';
 import '../../shared/widgets/tajgo_order_progress.dart';
+import '../../shared/widgets/order_details_load_state.dart';
 import '../../shared/widgets/tajgo_scope.dart';
 import '../../shared/widgets/tajgo_status_header.dart';
 import '../map/services/tajgo_map_camera.dart';
@@ -50,6 +51,7 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
   bool _routeLoading = false;
   TajGoRoute? _liveRoute;
   String? _liveRouteKey;
+  int _orderStreamAttempt = 0;
 
   @override
   void initState() {
@@ -312,12 +314,22 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
     final scope = TajGoScope.of(context);
     return Scaffold(
       body: StreamBuilder<TajGoOrder?>(
+        key: ValueKey('customer-order-${widget.orderId}-$_orderStreamAttempt'),
         stream: scope.orderRepository.orderStream(widget.orderId),
         builder: (context, snapshot) {
-          final order = snapshot.data;
-          if (order == null) {
+          final state = resolveOrderDetailsLoadState(snapshot);
+          if (state == OrderDetailsLoadState.loading) {
             return const Center(child: CircularProgressIndicator());
           }
+          if (state == OrderDetailsLoadState.error ||
+              state == OrderDetailsLoadState.notFound) {
+            return OrderDetailsTerminalView(
+              notFound: state == OrderDetailsLoadState.notFound,
+              onRetry: () => setState(() => _orderStreamAttempt++),
+              onBack: () => Navigator.of(context).maybePop(),
+            );
+          }
+          final order = snapshot.data!;
           WidgetsBinding.instance.addPostFrameCallback(
             (_) => _onOrderUpdate(order),
           );

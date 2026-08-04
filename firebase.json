@@ -12,7 +12,7 @@
         "lib/firebase_options.dart": {
           "projectId": "tajgo-4fcd0",
           "configurations": {
-            "android": "1:784873463457:android:33da27eafa9432a4c91ae0",
+            "android": "1:784873463457:android:0ac2e36af2d8c1a0c91ae0",
             "ios": "1:784873463457:ios:42381eb986ce1b77c91ae0",
             "macos": "1:784873463457:ios:42381eb986ce1b77c91ae0",
             "web": "1:784873463457:web:ee2ac3d85f6fe22ac91ae0",
@@ -34,6 +34,12 @@
       "npm --prefix \"$RESOURCE_DIR\" run build",
       "npm --prefix \"$RESOURCE_DIR\" test"
     ]
+  },
+  "hosting": {
+    "public": "public",
+    "cleanUrls": true,
+    "trailingSlash": false,
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"]
   },
   "emulators": {
     "auth": {

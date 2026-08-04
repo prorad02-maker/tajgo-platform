@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/legal/legal_documents.dart';
 import '../../core/models/app_user.dart';
@@ -24,6 +25,11 @@ class _LegalDocumentScreenState extends State<LegalDocumentScreen> {
   AppUser? _user;
   bool _loading = true;
   bool _saving = false;
+
+  Future<void> _openPublicCopy() async {
+    final uri = Uri.parse(widget.document.publicUrl);
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
 
   @override
   void initState() {
@@ -58,9 +64,9 @@ class _LegalDocumentScreenState extends State<LegalDocumentScreen> {
       );
       await _load();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Согласие сохранено.')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Согласие сохранено.')));
       }
     } catch (_) {
       if (mounted) {
@@ -107,6 +113,12 @@ class _LegalDocumentScreenState extends State<LegalDocumentScreen> {
               ),
             ),
           ),
+          OutlinedButton.icon(
+            onPressed: _openPublicCopy,
+            icon: const Icon(Icons.open_in_new_rounded),
+            label: const Text('Открыть публичную версию'),
+          ),
+          const SizedBox(height: TajGoSpacing.lg),
           if (widget.showAcceptance && signedIn) ...[
             const Divider(),
             const SizedBox(height: TajGoSpacing.sm),

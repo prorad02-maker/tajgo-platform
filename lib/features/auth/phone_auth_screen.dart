@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../../core/constants/tajgo_colors.dart';
 import '../../core/models/app_user.dart';
 import '../../core/services/auth_service.dart';
+import '../../core/services/safe_diagnostics.dart';
 import '../../shared/widgets/tajgo_scope.dart';
 import 'account_conflict_screen.dart';
 
@@ -131,8 +132,11 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
         );
       }
     } catch (error, stackTrace) {
-      debugPrint('[AUTH_FINISH_PROFILE_ERROR] $error');
-      debugPrintStack(stackTrace: stackTrace);
+      SafeDiagnostics.log(
+        'AUTH_FINISH_PROFILE_ERROR',
+        fields: {'code': SafeDiagnostics.errorCode(error)},
+        stackTrace: stackTrace,
+      );
     }
     if (!mounted) return;
     // Возврат к корневому AppStartupRouter (он слушает authStateChanges и

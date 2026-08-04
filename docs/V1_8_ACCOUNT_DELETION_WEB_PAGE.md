@@ -60,8 +60,7 @@ Review notes.
   настройки владельцем — deploy в этой задаче не выполняется.
 - Любой статический хостинг (GitHub Pages, Netlify, собственный сервер).
 
-Итоговый URL, например: `https://tajgo.tj/account-deletion` или
-`https://<project>.web.app/account-deletion.html`.
+Итоговый production URL: `https://tajgo.ru/account-deletion`.
 
 ## Куда вписать URL
 

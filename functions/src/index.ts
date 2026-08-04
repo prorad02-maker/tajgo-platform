@@ -51,7 +51,7 @@ function command(name: string, handler: Handler) {
         }
         logger.error("Unexpected authoritative command failure", {
           command: name,
-          actorId: request.auth.uid,
+          errorType: error instanceof Error ? error.name : typeof error,
         });
         throw new HttpsError(
           "aborted",
@@ -145,6 +145,26 @@ export const cancelCatalogOrder = command(
 export const resetTestOrderForCourier = command(
   "resetTestOrderForCourier",
   (context) => core.resetTestOrderForCourier(context),
+);
+
+export const adminApproveCourier = command(
+  "adminApproveCourier",
+  (context) => core.adminApproveCourier(context),
+);
+
+export const adminRejectCourier = command(
+  "adminRejectCourier",
+  (context) => core.adminRejectCourier(context),
+);
+
+export const adminSuspendCourier = command(
+  "adminSuspendCourier",
+  (context) => core.adminSuspendCourier(context),
+);
+
+export const adminRestoreCourier = command(
+  "adminRestoreCourier",
+  (context) => core.adminRestoreCourier(context),
 );
 
 export const deleteAccountRequest = command(

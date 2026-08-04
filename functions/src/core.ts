@@ -15,6 +15,7 @@ import {
   Principal,
   activeDeliveryStatuses,
   asRecord,
+  assertOnlyKeys,
   assertCourierEligibility,
   canCourierTransition,
   commandDocumentId,
@@ -1508,6 +1509,213 @@ export class TajGoAuthoritativeCore {
           updatedAt: FieldValue.serverTimestamp(),
         });
         return {orderId, status: "waitingOffers"};
+      },
+    );
+  }
+
+  async adminApproveCourier(context: CommandContext): Promise<Result> {
+    return this.adminCourierDecision(context, "approve");
+  }
+
+  async adminRejectCourier(context: CommandContext): Promise<Result> {
+    return this.adminCourierDecision(context, "reject");
+  }
+
+  async adminSuspendCourier(context: CommandContext): Promise<Result> {
+    return this.adminCourierDecision(context, "suspend");
+  }
+
+  async adminRestoreCourier(context: CommandContext): Promise<Result> {
+    return this.adminCourierDecision(context, "restore");
+  }
+
+  private async adminCourierDecision(
+    context: CommandContext,
+    action: "approve" | "reject" | "suspend" | "restore",
+  ): Promise<Result> {
+    const {principal, data} = context;
+    assertOnlyKeys(
+      data,
+      new Set(["courierId", "idempotencyKey", "reason"]),
+    );
+    const courierId = requiredString(data, "courierId", {max: 128});
+    const key = requiredIdempotencyKey(data);
+    const reason =
+      action === "reject" || action === "suspend"
+        ? requiredString(data, "reason", {min: 3, max: 300})
+        : null;
+    const command = {
+      approve: "adminApproveCourier",
+      reject: "adminRejectCourier",
+      suspend: "adminSuspendCourier",
+      restore: "adminRestoreCourier",
+    }[action];
+    return this.runIdempotent(
+      command,
+      principal,
+      key,
+      async (transaction) => {
+        await this.requireAdmin(transaction, principal);
+        const applicationRef = this.db
+          .collection("courier_applications")
+          .doc(courierId);
+        const userRef = this.db.collection("users").doc(courierId);
+        const courierRef = this.db.collection("couriers").doc(courierId);
+        const publicRef = this.db.collection("courier_public").doc(courierId);
+        const [applicationDoc, userDoc, courierDoc] = await Promise.all([
+          transaction.get(applicationRef),
+          transaction.get(userRef),
+          transaction.get(courierRef),
+        ]);
+        const application = applicationDoc.data();
+        const user = userDoc.data();
+        const courier = courierDoc.data() ?? {};
+        if (user == null) {
+          throw new CoreError("not-found", "Профиль пользователя не найден.");
+        }
+        const expectedStatus =
+          action === "suspend"
+            ? "approved"
+            : action === "restore"
+              ? "suspended"
+              : "pending";
+        const currentStatus =
+          action === "suspend" ? user.courierStatus : application?.status;
+        if (currentStatus !== expectedStatus) {
+          throw new CoreError(
+            "failed-precondition",
+            "Статус курьера уже изменился. Обновите экран.",
+          );
+        }
+
+        const nextStatus =
+          action === "approve" || action === "restore"
+            ? "approved"
+            : action === "reject"
+              ? "rejected"
+              : "suspended";
+        const auditAction =
+          action === "restore" ? "reinstateCourier" : `${action}Courier`;
+        const history = {
+          action: auditAction,
+          adminUid: principal.uid,
+          ...(reason == null ? {} : {reason}),
+          at: Timestamp.fromDate(this.now()),
+        };
+        transaction.set(
+          applicationRef,
+          {
+            uid: courierId,
+            status: nextStatus,
+            reviewedBy: principal.uid,
+            reviewedAt: FieldValue.serverTimestamp(),
+            ...(action === "approve"
+              ? {
+                  resolvedBy: principal.uid,
+                  resolvedAt: FieldValue.serverTimestamp(),
+                  rejectionReason: FieldValue.delete(),
+                  suspensionReason: FieldValue.delete(),
+                }
+              : {}),
+            ...(action === "reject" ? {rejectionReason: reason} : {}),
+            ...(action === "suspend" ? {suspensionReason: reason} : {}),
+            ...(action === "restore"
+              ? {suspensionReason: FieldValue.delete()}
+              : {}),
+            ...(!applicationDoc.exists
+              ? {createdAt: FieldValue.serverTimestamp()}
+              : {}),
+            history: FieldValue.arrayUnion(history),
+            updatedAt: FieldValue.serverTimestamp(),
+          },
+          {merge: true},
+        );
+
+        const existingRoles = Array.isArray(user.roles)
+          ? user.roles.filter(
+              (value): value is string =>
+                value === "customer" || value === "courier",
+            )
+          : [];
+        transaction.update(userRef, {
+          courierStatus: nextStatus,
+          lastMode: "customer",
+          role: user.role === "admin" ? "admin" : "customer",
+          ...(action === "approve"
+            ? {
+                roles: [...new Set(["customer", ...existingRoles, "courier"])],
+                courierOnboardingCompleted:
+                  user.courierOnboardingCompleted === true || courierDoc.exists,
+              }
+            : {}),
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+
+        if (action === "approve") {
+          const displayName =
+            typeof application?.displayName === "string"
+              ? application.displayName
+              : typeof user.displayName === "string"
+                ? user.displayName
+                : "Курьер";
+          transaction.set(
+            courierRef,
+            {
+              uid: courierId,
+              phoneNumber: application?.phoneNumber ?? courier.phoneNumber ?? null,
+              displayName,
+              name: displayName,
+              city: application?.city ?? courier.city ?? "Худжанд",
+              isOnline: false,
+              online: false,
+              rating: courier.rating ?? 5.0,
+              score: courier.score ?? 100,
+              transport: application?.transport ?? courier.transport ?? "bike",
+              earningsToday: courier.earningsToday ?? 0,
+              ordersToday: courier.ordersToday ?? 0,
+              activeOrderId: courier.activeOrderId ?? null,
+              updatedAt: FieldValue.serverTimestamp(),
+            },
+            {merge: true},
+          );
+          transaction.set(
+            publicRef,
+            {
+              uid: courierId,
+              displayName,
+              name: displayName,
+              isOnline: false,
+              online: false,
+              rating: courier.rating ?? 5.0,
+              transport: application?.transport ?? courier.transport ?? "bike",
+              updatedAt: FieldValue.serverTimestamp(),
+            },
+            {merge: true},
+          );
+        } else if (action === "suspend") {
+          if (courierDoc.exists) {
+            transaction.update(courierRef, {
+              isOnline: false,
+              online: false,
+              updatedAt: FieldValue.serverTimestamp(),
+            });
+          }
+          transaction.set(
+            publicRef,
+            {
+              isOnline: false,
+              online: false,
+              updatedAt: FieldValue.serverTimestamp(),
+            },
+            {merge: true},
+          );
+        }
+        this.writeAdminLog(transaction, principal.uid, {
+          action: auditAction,
+          courierId,
+          ...(reason == null ? {} : {reason}),
+        });
+        return {courierId, status: nextStatus};
       },
     );
   }

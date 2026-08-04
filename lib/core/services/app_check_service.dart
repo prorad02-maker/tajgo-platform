@@ -1,6 +1,8 @@
 import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:flutter/foundation.dart';
 
+import 'safe_diagnostics.dart';
+
 /// Активация Firebase App Check.
 ///
 /// Enforcement НЕ включается здесь — это делается в Firebase Console после
@@ -27,8 +29,11 @@ class AppCheckService {
             : const AppleAppAttestProvider(),
       );
     } catch (error, stack) {
-      debugPrint('App Check activation skipped: $error');
-      debugPrintStack(stackTrace: stack);
+      SafeDiagnostics.log(
+        'APP_CHECK_ACTIVATION_SKIPPED',
+        fields: {'code': SafeDiagnostics.errorCode(error)},
+        stackTrace: stack,
+      );
     }
   }
 }

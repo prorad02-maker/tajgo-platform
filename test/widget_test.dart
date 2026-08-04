@@ -11,6 +11,7 @@ import 'package:tajgo/core/models/courier_application.dart';
 import 'package:tajgo/core/services/account_migration_service.dart';
 import 'package:tajgo/core/services/account_mode_service.dart';
 import 'package:tajgo/core/services/auth_service.dart';
+import 'package:tajgo/core/services/authoritative_command_service.dart';
 import 'package:tajgo/core/services/courier_application_repository.dart';
 import 'package:tajgo/core/services/courier_offer_repository.dart';
 import 'package:tajgo/core/services/courier_order_eligibility.dart';
@@ -402,48 +403,6 @@ void main() {
     expect(resolveAccountMode(afterOnboarding), ResolvedAccountMode.courier);
   });
 
-  test('approve keeps customer role and does not duplicate legacy courier', () {
-    expect(approvedCourierRoles(['customer']), ['customer', 'courier']);
-    expect(approvedCourierRoles(['customer', 'courier']), [
-      'customer',
-      'courier',
-    ]);
-    expect(
-      approvedCourierOnboardingCompleted(
-        existingValue: null,
-        courierProfileExists: false,
-      ),
-      isFalse,
-    );
-    expect(
-      approvedCourierOnboardingCompleted(
-        existingValue: null,
-        courierProfileExists: true,
-      ),
-      isTrue,
-    );
-
-    final application = CourierApplication.empty(
-      uid: 'courier-1',
-      displayName: 'Фаррух',
-      phoneNumber: '+992921234567',
-    );
-    final data = buildApprovedCourierData(
-      uid: 'courier-1',
-      application: application,
-      existing: const {
-        'activeOrderId': 'active-7',
-        'earningsToday': 55,
-        'ordersToday': 4,
-        'rating': 4.8,
-      },
-    );
-    expect(data['activeOrderId'], 'active-7');
-    expect(data['earningsToday'], 55);
-    expect(data['ordersToday'], 4);
-    expect(data['rating'], 4.8);
-  });
-
   test('reject and suspend keep customer access', () {
     AppUser account(String status) => AppUser.fromMap({
       'displayName': 'Фаррух',
@@ -463,26 +422,37 @@ void main() {
       ResolvedAccountMode.customer,
     );
     expect(account('suspended').roles, contains('customer'));
-
-    final suspension = buildSuspendedCourierPatch('server-time');
-    expect(suspension['isOnline'], isFalse);
-    expect(suspension['online'], isFalse);
-    expect(suspension.containsKey('activeOrderId'), isFalse);
   });
 
-  test('admin courier action contains immutable audit identities', () {
-    final log = buildCourierAdminLog(
-      action: 'rejectCourier',
-      targetUid: 'courier-1',
-      adminUid: 'admin-1',
-      reason: 'Нужно уточнить документ',
-      createdAt: 'server-time',
-    );
-    expect(log['targetUid'], 'courier-1');
-    expect(log['adminUid'], 'admin-1');
-    expect(log['reason'], 'Нужно уточнить документ');
-    expect(log['createdAt'], 'server-time');
-  });
+  test(
+    'courier admin client uses callable commands without authority fields',
+    () async {
+      final gateway = _RecordingCommandGateway();
+      final service = CourierAdminCommandService(
+        AuthoritativeCommandService(gateway),
+      );
+
+      await service.approve('courier-1');
+      await service.reject('courier-1', 'Нужно уточнить документ');
+      await service.suspend('courier-1', 'Нарушение правил');
+      await service.restore('courier-1');
+
+      expect(gateway.commands, [
+        'adminApproveCourier',
+        'adminRejectCourier',
+        'adminSuspendCourier',
+        'adminRestoreCourier',
+      ]);
+      for (final payload in gateway.payloads) {
+        expect(payload['courierId'], 'courier-1');
+        expect(payload['idempotencyKey'], isNotEmpty);
+        expect(payload, isNot(contains('adminUid')));
+        expect(payload, isNot(contains('role')));
+        expect(payload, isNot(contains('roles')));
+        expect(payload, isNot(contains('status')));
+      }
+    },
+  );
 
   testWidgets('intent screen has customer/courier intents but no admin', (
     tester,
@@ -1231,6 +1201,24 @@ void main() {
       expect(gpsRect.bottom, lessThan(panelRect.top));
     },
   );
+}
+
+class _RecordingCommandGateway implements AuthoritativeCommandGateway {
+  final List<String> commands = [];
+  final List<Map<String, dynamic>> payloads = [];
+
+  @override
+  String get region => 'test';
+
+  @override
+  Future<Map<String, dynamic>> call(
+    String command,
+    Map<String, dynamic> data,
+  ) async {
+    commands.add(command);
+    payloads.add(Map<String, dynamic>.from(data));
+    return const {};
+  }
 }
 
 class _TestRoleStore implements RolePreferenceStorage {

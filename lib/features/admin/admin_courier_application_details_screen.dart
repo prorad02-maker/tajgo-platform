@@ -54,7 +54,6 @@ class _AdminCourierApplicationDetailsScreenState
   @override
   Widget build(BuildContext context) {
     final scope = TajGoScope.of(context);
-    final adminUid = scope.authService.currentUser!.uid;
     return AdminAccessGate(
       child: Scaffold(
         appBar: AppBar(title: const Text('Заявка курьера')),
@@ -147,7 +146,6 @@ class _AdminCourierApplicationDetailsScreenState
                             'Одобрить курьера?',
                             (_) => scope.courierApplicationRepository.approve(
                               uid: app.uid,
-                              adminUid: adminUid,
                             ),
                           ),
                     icon: const Icon(Icons.check_circle_rounded),
@@ -158,12 +156,8 @@ class _AdminCourierApplicationDetailsScreenState
                         ? null
                         : () => _action(
                             'Отклонить заявку?',
-                            (reason) =>
-                                scope.courierApplicationRepository.reject(
-                                  uid: app.uid,
-                                  adminUid: adminUid,
-                                  reason: reason!,
-                                ),
+                            (reason) => scope.courierApplicationRepository
+                                .reject(uid: app.uid, reason: reason!),
                             reasonRequired: true,
                           ),
                     icon: const Icon(Icons.edit_note_rounded),
@@ -176,12 +170,8 @@ class _AdminCourierApplicationDetailsScreenState
                         ? null
                         : () => _action(
                             'Приостановить курьера?',
-                            (reason) =>
-                                scope.courierApplicationRepository.suspend(
-                                  uid: app.uid,
-                                  adminUid: adminUid,
-                                  reason: reason!,
-                                ),
+                            (reason) => scope.courierApplicationRepository
+                                .suspend(uid: app.uid, reason: reason!),
                             reasonRequired: true,
                           ),
                     icon: const Icon(Icons.pause_circle_rounded),
@@ -195,7 +185,6 @@ class _AdminCourierApplicationDetailsScreenState
                             'Вернуть курьерский доступ?',
                             (_) => scope.courierApplicationRepository.restore(
                               uid: app.uid,
-                              adminUid: adminUid,
                             ),
                           ),
                     icon: const Icon(Icons.restore_rounded),

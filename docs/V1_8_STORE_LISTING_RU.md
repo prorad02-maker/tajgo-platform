@@ -32,8 +32,8 @@ TajGo — сервис городской доставки в Худжанде.
 
 ## Контакты (заменить)
 - Email поддержки: support@tajgo.tj
-- Политика конфиденциальности: https://tajgo.tj/privacy
-- Удаление аккаунта: https://tajgo.tj/account-deletion
+- Политика конфиденциальности: https://tajgo.ru/privacy
+- Удаление аккаунта: https://tajgo.ru/account-deletion
 
 ## Возрастной рейтинг
 16+ (геолокация, пользовательский контент)

@@ -40,12 +40,15 @@ class SupportScreen extends StatelessWidget {
     final ok = await canLaunchUrl(uri) && await launchUrl(uri);
     if (!ok && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Напишите нам: ${LegalDocuments.supportEmail}'),
-        ),
+        SnackBar(content: Text('Напишите нам: ${LegalDocuments.supportEmail}')),
       );
     }
   }
+
+  Future<void> _openSupportPage() => launchUrl(
+    Uri.parse(LegalDocuments.supportUrl),
+    mode: LaunchMode.externalApplication,
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -72,6 +75,12 @@ class SupportScreen extends StatelessWidget {
                   icon: Icons.mail_outline_rounded,
                   expand: false,
                   onPressed: () => _email(context),
+                ),
+                const SizedBox(height: TajGoSpacing.sm),
+                TextButton.icon(
+                  onPressed: _openSupportPage,
+                  icon: const Icon(Icons.open_in_new_rounded),
+                  label: const Text('Открыть tajgo.ru/support'),
                 ),
               ],
             ),

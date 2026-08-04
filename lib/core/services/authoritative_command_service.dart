@@ -1,7 +1,8 @@
 import 'dart:math' as math;
 
 import 'package:cloud_functions/cloud_functions.dart';
-import 'package:flutter/foundation.dart';
+
+import 'safe_diagnostics.dart';
 
 class AuthoritativeCommandService {
   AuthoritativeCommandService(this._gateway);
@@ -17,18 +18,20 @@ class AuthoritativeCommandService {
     } on TajGoCommandException {
       rethrow;
     } on FirebaseFunctionsException catch (error) {
-      // Диагностика ДО преобразования в дружелюбное сообщение: сохраняем сырой
-      // код/сообщение/детали и точную функцию/регион, чтобы отличать
-      // not-found (функция не развёрнута / другой регион / другое имя) от
-      // unavailable / unauthenticated / permission-denied / internal.
-      debugPrint(
-        '[COMMAND_FUNCTION_ERROR] function=$command '
-        'region=${_gateway.region} code=${error.code} '
-        'message=${error.message} details=${error.details}',
+      SafeDiagnostics.log(
+        'COMMAND_FUNCTION_ERROR',
+        fields: {
+          'function': command,
+          'region': _gateway.region,
+          'code': error.code,
+        },
       );
       throw TajGoCommandException.fromFirebase(error);
     } catch (error) {
-      debugPrint('[COMMAND_TRANSPORT_ERROR] function=$command error=$error');
+      SafeDiagnostics.log(
+        'COMMAND_TRANSPORT_ERROR',
+        fields: {'function': command, 'code': SafeDiagnostics.errorCode(error)},
+      );
       throw const TajGoCommandException(
         code: 'unavailable',
         message: 'Нет связи с TajGo. Проверьте интернет и повторите.',

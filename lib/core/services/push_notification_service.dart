@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../features/customer/order_tracking_screen.dart';
+import 'safe_diagnostics.dart';
 
 /// Background-обработчик FCM. Отдельный isolate; никакой обработки чувствительных
 /// данных — систему уведомление рисует сама.
@@ -27,6 +30,9 @@ class PushNotificationService {
   final FirebaseFirestore _db;
 
   bool _initialized = false;
+  final TokenRefreshLifecycle _tokenRefresh = TokenRefreshLifecycle();
+  StreamSubscription<RemoteMessage>? _openedSubscription;
+  StreamSubscription<RemoteMessage>? _foregroundSubscription;
 
   Future<void> initialize({
     required bool enabled,
@@ -38,14 +44,24 @@ class PushNotificationService {
       FirebaseMessaging.onBackgroundMessage(
         tajgoFirebaseMessagingBackgroundHandler,
       );
-      FirebaseMessaging.onMessageOpenedApp.listen(
+      _openedSubscription = FirebaseMessaging.onMessageOpenedApp.listen(
         (message) => _handleTap(message, navigatorKey),
       );
       final initial = await _messaging.getInitialMessage();
       if (initial != null) _handleTap(initial, navigatorKey);
-      FirebaseMessaging.onMessage.listen(_onForeground);
+      _foregroundSubscription = FirebaseMessaging.onMessage.listen(
+        _onForeground,
+      );
     } catch (error) {
-      debugPrint('FCM init skipped: $error');
+      _initialized = false;
+      await _openedSubscription?.cancel();
+      await _foregroundSubscription?.cancel();
+      _openedSubscription = null;
+      _foregroundSubscription = null;
+      SafeDiagnostics.log(
+        'FCM_INIT_SKIPPED',
+        fields: {'code': SafeDiagnostics.errorCode(error)},
+      );
     }
   }
 
@@ -60,16 +76,24 @@ class PushNotificationService {
       if (!granted) return false;
       final token = await _messaging.getToken();
       if (token != null) await _storeToken(uid, token);
-      _messaging.onTokenRefresh.listen((next) => _storeToken(uid, next));
+      await _tokenRefresh.bind(
+        uid: uid,
+        stream: _messaging.onTokenRefresh,
+        onToken: _storeToken,
+      );
       return true;
     } catch (error) {
-      debugPrint('FCM enable skipped: $error');
+      SafeDiagnostics.log(
+        'FCM_ENABLE_SKIPPED',
+        fields: {'code': SafeDiagnostics.errorCode(error)},
+      );
       return false;
     }
   }
 
   /// Деактивирует токен на logout (не удаляет — backend перестаёт слать).
   Future<void> disableForUser(String uid) async {
+    await _tokenRefresh.unbind(uid);
     try {
       final token = await _messaging.getToken();
       if (token == null) return;
@@ -80,6 +104,15 @@ class PushNotificationService {
     } catch (_) {
       // graceful
     }
+  }
+
+  Future<void> dispose() async {
+    _initialized = false;
+    await _tokenRefresh.dispose();
+    await _openedSubscription?.cancel();
+    await _foregroundSubscription?.cancel();
+    _openedSubscription = null;
+    _foregroundSubscription = null;
   }
 
   Future<void> _storeToken(String uid, String token) async {
@@ -95,7 +128,10 @@ class PushNotificationService {
         'lastSeenAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
     } catch (error) {
-      debugPrint('FCM token store skipped: $error');
+      SafeDiagnostics.log(
+        'FCM_TOKEN_STORE_SKIPPED',
+        fields: {'code': SafeDiagnostics.errorCode(error)},
+      );
     }
   }
 
@@ -109,7 +145,7 @@ class PushNotificationService {
   void _onForeground(RemoteMessage message) {
     // Foreground: система баннер не показывает — можно логировать/обновлять UI.
     // Данные экранов приходят через Firestore-стримы, поэтому здесь no-op.
-    debugPrint('FCM foreground: ${message.messageId}');
+    SafeDiagnostics.log('FCM_FOREGROUND_RECEIVED');
   }
 
   void _handleTap(RemoteMessage message, GlobalKey<NavigatorState> key) {
@@ -123,5 +159,40 @@ class PushNotificationService {
         ),
       );
     }
+  }
+}
+
+class TokenRefreshLifecycle {
+  StreamSubscription<String>? _subscription;
+  String? _activeUid;
+
+  String? get activeUid => _activeUid;
+
+  Future<void> bind({
+    required String uid,
+    required Stream<String> stream,
+    required Future<void> Function(String uid, String token) onToken,
+  }) async {
+    if (_activeUid == uid && _subscription != null) return;
+    _activeUid = null;
+    await _subscription?.cancel();
+    _subscription = null;
+    _activeUid = uid;
+    _subscription = stream.listen((token) {
+      if (_activeUid == uid) unawaited(onToken(uid, token));
+    });
+  }
+
+  Future<void> unbind(String uid) async {
+    if (_activeUid != uid) return;
+    _activeUid = null;
+    await _subscription?.cancel();
+    _subscription = null;
+  }
+
+  Future<void> dispose() async {
+    _activeUid = null;
+    await _subscription?.cancel();
+    _subscription = null;
   }
 }

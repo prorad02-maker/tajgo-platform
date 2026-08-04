@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   CoreError,
+  assertOnlyKeys,
   canCourierTransition,
   commandDocumentId,
   evaluateCourierEligibility,
@@ -15,6 +16,20 @@ import {
 } from "../../src/domain";
 
 const origin = {latitude: 40.2833, longitude: 69.6222};
+
+test("authoritative payload rejects client supplied role/status escalation", () => {
+  assert.throws(
+    () =>
+      assertOnlyKeys(
+        {courierId: "courier-1", role: "admin", status: "approved"},
+        new Set(["courierId", "idempotencyKey", "reason"]),
+      ),
+    (error: unknown) =>
+      error instanceof CoreError &&
+      error.code === "invalid-argument" &&
+      error.details?.reason === "forbidden-fields",
+  );
+});
 
 function pointNorthAt(meters: number) {
   return {

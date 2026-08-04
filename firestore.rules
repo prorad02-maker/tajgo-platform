@@ -83,8 +83,7 @@ service cloud.firestore {
       allow get: if owner(uid) || isAdmin();
       allow list: if isAdmin();
       allow create: if false;
-      allow update: if isAdmin()
-        || (owner(uid) && safeOwnUserUpdate())
+      allow update: if (owner(uid) && safeOwnUserUpdate())
         || safeCourierApplicationUserSync(uid);
       allow delete: if false;
 
@@ -170,8 +169,8 @@ service cloud.firestore {
     match /courier_applications/{uid} {
       allow get: if owner(uid) || isAdmin();
       allow list: if isAdmin();
-      allow create: if isAdmin() || safeOwnerApplicationCreate(uid);
-      allow update: if isAdmin() || safeOwnerApplicationUpdate(uid);
+      allow create: if safeOwnerApplicationCreate(uid);
+      allow update: if safeOwnerApplicationUpdate(uid);
       allow delete: if false;
     }
 
@@ -228,9 +227,8 @@ service cloud.firestore {
     match /couriers/{uid} {
       allow get: if owner(uid) || isAdmin();
       allow list: if isAdmin();
-      allow create: if isAdmin();
-      allow update: if isAdmin()
-        || (
+      allow create: if false;
+      allow update: if (
           owner(uid)
           && isApprovedCourier()
           && safePresenceUpdate()
@@ -276,9 +274,8 @@ service cloud.firestore {
 
     match /courier_public/{uid} {
       allow read: if signedIn() && safePublicCourierRead();
-      allow create: if isAdmin();
-      allow update: if isAdmin()
-        || (
+      allow create: if false;
+      allow update: if (
           owner(uid)
           && isApprovedCourier()
           && validPublicCourierShape()

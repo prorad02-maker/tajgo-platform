@@ -30,5 +30,5 @@ TajGo — хидмати расонидани шаҳрӣ дар Хуҷанд.
 
 ## Тамос (иваз кунед)
 - Email: support@tajgo.tj
-- Сиёсати махфият: https://tajgo.tj/privacy
-- Нест кардани ҳисоб: https://tajgo.tj/account-deletion
+- Сиёсати махфият: https://tajgo.ru/privacy
+- Нест кардани ҳисоб: https://tajgo.ru/account-deletion

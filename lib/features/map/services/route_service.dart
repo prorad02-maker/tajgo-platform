@@ -1,6 +1,6 @@
-import 'package:flutter/foundation.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../../../core/services/safe_diagnostics.dart';
 import '../models/tajgo_route.dart';
 import 'direct_route_provider.dart';
 import 'map_performance_monitor.dart';
@@ -182,18 +182,22 @@ class RouteService {
     required String routeSource,
     required String cache,
   }) {
-    if (!kDebugMode) return;
     final route = result.route;
-    debugPrint(
-      '[TajGoRoute] from=${from.latitude},${from.longitude} '
-      'to=${to.latitude},${to.longitude} '
-      'directDistanceMeters=${result.directDistanceMeters.toStringAsFixed(1)} '
-      'providerDistanceMeters=${result.providerDistanceMeters?.toStringAsFixed(1)} '
-      'selectedDistanceMeters=${(route.distanceKm * 1000).toStringAsFixed(1)} '
-      'quality=${route.routeQuality.name} providerName=$providerName '
-      'selectedProvider=${route.providerName} '
-      'points=${route.points.length} source=$routeSource cache=$cache '
-      'fallbackReason=${result.reason ?? '-'}',
+    SafeDiagnostics.log(
+      'TAJGO_ROUTE',
+      fields: {
+        'directDistanceMeters': result.directDistanceMeters.toStringAsFixed(1),
+        'providerDistanceMeters': result.providerDistanceMeters
+            ?.toStringAsFixed(1),
+        'selectedDistanceMeters': (route.distanceKm * 1000).toStringAsFixed(1),
+        'quality': route.routeQuality.name,
+        'providerName': providerName,
+        'selectedProvider': route.providerName,
+        'points': route.points.length,
+        'source': routeSource,
+        'cache': cache,
+        'fallback': result.reason == null ? 'none' : 'present',
+      },
     );
   }
 }

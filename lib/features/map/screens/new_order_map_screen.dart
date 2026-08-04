@@ -10,6 +10,7 @@ import '../../../core/constants/tajgo_colors.dart';
 import '../../../core/models/tajgo_courier.dart';
 import '../../../core/services/authoritative_command_service.dart';
 import '../../../core/services/pricing.dart' as pricing;
+import '../../../core/services/safe_diagnostics.dart';
 import '../../../shared/widgets/tajgo_scope.dart';
 import '../../customer/order_tracking_screen.dart';
 import '../models/place_suggestion.dart';
@@ -380,10 +381,12 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
 
   void _debugConfirmedPoint(TajGoMapLocation location, String source) {
     if (!kDebugMode) return;
-    debugPrint(
-      '[TajGoPoint] activeField=${_stage == _Stage.pickFrom ? 'A' : 'B'} '
-      'lat=${location.latitude} lng=${location.longitude} '
-      'address=${location.address} source=$source',
+    SafeDiagnostics.log(
+      'TAJGO_POINT_CONFIRMED',
+      fields: {
+        'activeField': _stage == _Stage.pickFrom ? 'A' : 'B',
+        'source': source,
+      },
     );
   }
 

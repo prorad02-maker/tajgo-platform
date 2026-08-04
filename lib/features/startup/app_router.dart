@@ -4,6 +4,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/models/app_user.dart';
+import '../../core/services/safe_diagnostics.dart';
 import '../../shared/widgets/tajgo_scope.dart';
 import '../auth/profile_completion_screen.dart';
 import '../admin/admin_home_screen.dart';
@@ -81,7 +82,10 @@ class _AppStartupRouterState extends State<AppStartupRouter> {
   }
 
   void _onAuthChanged(String? uid) {
-    debugPrint('[AUTH_STATE_CHANGE] uid=$uid');
+    SafeDiagnostics.log(
+      'AUTH_STATE_CHANGE',
+      fields: {'auth': uid == null ? 'none' : 'present'},
+    );
     if (uid == _lastUid) return; // без изменений — не перезапускаем
     _lastUid = uid;
     // Смена авторизации во время активного resolve откладывается (коалесцируется),
@@ -118,8 +122,11 @@ class _AppStartupRouterState extends State<AppStartupRouter> {
       final code = error is FirebaseException
           ? error.code
           : error.runtimeType.toString();
-      debugPrint('[PROFILE_LOAD_ERROR] code=$code message=$error');
-      debugPrintStack(stackTrace: stackTrace);
+      SafeDiagnostics.log(
+        'PROFILE_LOAD_ERROR',
+        fields: {'code': code},
+        stackTrace: stackTrace,
+      );
       if (!mounted) return;
       setState(() {
         _profileError = error;
@@ -141,14 +148,17 @@ class _AppStartupRouterState extends State<AppStartupRouter> {
 
     // (1) Firebase Authentication.
     final firebaseUser = scope.authService.currentUser;
-    debugPrint('[AUTH_STATE] uid=${firebaseUser?.uid ?? 'null'}');
+    SafeDiagnostics.log(
+      'AUTH_STATE',
+      fields: {'auth': firebaseUser == null ? 'none' : 'present'},
+    );
     if (firebaseUser == null) {
-      debugPrint('[STARTUP_ROUTE] role=intent');
+      SafeDiagnostics.log('STARTUP_ROUTE', fields: {'role': 'intent'});
       return const StartupState(StartupDestination.intent, null);
     }
 
     // (2) Загрузка профиля users/{uid}.
-    debugPrint('[PROFILE_LOAD_START] uid=${firebaseUser.uid}');
+    SafeDiagnostics.log('PROFILE_LOAD_START');
     await scope.userRepository.ensureUser(
       uid: firebaseUser.uid,
       phoneNumber: firebaseUser.phoneNumber,
@@ -167,7 +177,7 @@ class _AppStartupRouterState extends State<AppStartupRouter> {
       );
       profile = await scope.userRepository.getUser(firebaseUser.uid);
     }
-    debugPrint('[PROFILE_LOAD_SUCCESS] uid=${firebaseUser.uid}');
+    SafeDiagnostics.log('PROFILE_LOAD_SUCCESS');
     if (profile != null) {
       await scope.rolePreferenceService.save(profile.lastMode);
     }
@@ -177,7 +187,10 @@ class _AppStartupRouterState extends State<AppStartupRouter> {
       authenticated: true,
       profile: profile,
     );
-    debugPrint('[STARTUP_ROUTE] role=${profile?.role ?? 'unknown'}');
+    SafeDiagnostics.log(
+      'STARTUP_ROUTE',
+      fields: {'role': profile?.role ?? 'unknown'},
+    );
     return StartupState(destination, profile);
   }
 
@@ -187,9 +200,7 @@ class _AppStartupRouterState extends State<AppStartupRouter> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     if (_profileError != null) {
-      return _ProfileErrorScreen(
-        onRetry: _inFlight ? null : () => _load(),
-      );
+      return _ProfileErrorScreen(onRetry: _inFlight ? null : () => _load());
     }
     final state = _state!;
     return switch (state.destination) {

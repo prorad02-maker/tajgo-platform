@@ -13,9 +13,40 @@ plugins {
 val keystoreProperties = Properties()
 val keystorePropertiesFile = rootProject.file("key.properties")
 val hasReleaseSigning = keystorePropertiesFile.exists()
+val releaseTaskRequested = gradle.startParameter.taskNames.any {
+    it.contains("release", ignoreCase = true)
+}
 
 if (hasReleaseSigning) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+}
+
+val requiredSigningProperties = listOf(
+    "storeFile",
+    "storePassword",
+    "keyAlias",
+    "keyPassword",
+)
+val missingSigningProperties = requiredSigningProperties.filter {
+    keystoreProperties.getProperty(it).isNullOrBlank()
+}
+
+if (releaseTaskRequested && (!hasReleaseSigning || missingSigningProperties.isNotEmpty())) {
+    throw GradleException(
+        "TajGo release signing is required. Create ignored android/key.properties " +
+            "from android/key.properties.example and provide storeFile, storePassword, " +
+            "keyAlias, and keyPassword. Debug signing fallback is forbidden.",
+    )
+}
+
+if (releaseTaskRequested) {
+    val configuredStore = file(keystoreProperties.getProperty("storeFile"))
+    if (!configuredStore.isFile) {
+        throw GradleException(
+            "TajGo release keystore was not found at the storeFile path from " +
+                "android/key.properties. No release artifact was created.",
+        )
+    }
 }
 
 android {
@@ -59,16 +90,10 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
-            // Keep local release builds available before the owner provides a
-            // private key. A production artifact must use key.properties.
             signingConfig = if (hasReleaseSigning) {
                 signingConfigs.getByName("release")
             } else {
-                logger.warn(
-                    "TajGo release signing is not configured; using the debug key. " +
-                        "Do not distribute this APK as a production build.",
-                )
-                signingConfigs.getByName("debug")
+                null
             }
         }
     }

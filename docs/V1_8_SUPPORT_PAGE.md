@@ -21,6 +21,6 @@
 без приложения.
 
 ## URL (заполнить)
-- Support: `https://tajgo.tj/support`
-- Privacy: `https://tajgo.tj/privacy`
-- Deletion: `https://tajgo.tj/account-deletion`
+- Support: `https://tajgo.ru/support`
+- Privacy: `https://tajgo.ru/privacy`
+- Deletion: `https://tajgo.ru/account-deletion`
