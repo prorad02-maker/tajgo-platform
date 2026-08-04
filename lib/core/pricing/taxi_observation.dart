@@ -67,7 +67,8 @@ class FirestoreTaxiObservationRepository implements TaxiObservationRepository {
     final snapshot = await firestore
         .collection('taxi_price_observations')
         .where('cityId', isEqualTo: cityId)
-        .limit(100)
+        .orderBy('observedAt', descending: true)
+        .limit(200)
         .get();
     return snapshot.docs
         .map((doc) => _fromMap(doc.data()))
@@ -87,6 +88,7 @@ class FirestoreTaxiObservationRepository implements TaxiObservationRepository {
       (value) => value.name == sourceName,
       orElse: () => TaxiObservationSource.observation,
     );
+    final local = _tajikLocalParts(observedAt.toDate());
     return TaxiPriceObservation(
       cityId: data['cityId'] as String? ?? '',
       provider: data['provider'] as String? ?? 'unknown',
@@ -97,10 +99,8 @@ class FirestoreTaxiObservationRepository implements TaxiObservationRepository {
       quotedPrice: price.toDouble(),
       currency: data['currency'] as String? ?? 'TJS',
       observedAt: observedAt.toDate(),
-      dayOfWeek:
-          (data['dayOfWeek'] as num?)?.toInt() ?? observedAt.toDate().weekday,
-      localHour:
-          (data['localHour'] as num?)?.toInt() ?? observedAt.toDate().hour,
+      dayOfWeek: local.$1,
+      localHour: local.$2,
       sourceType: source,
       quality: (data['quality'] as num?)?.toDouble() ?? 1,
     );
@@ -139,19 +139,55 @@ class ExistingDatabaseTaxiPriceProvider implements TaxiReferenceProvider {
     String? pickupBucket,
     String? dropoffBucket,
   }) async {
+    if (distanceMeters < 0 ||
+        distanceMeters > 100000 ||
+        durationSeconds < 0 ||
+        durationSeconds > 86400 ||
+        minimumSamples < 3) {
+      throw ArgumentError('Invalid taxi reference request.');
+    }
     final source = await repository.observationsForCity(cityId);
+    final seen = <String>{};
+    final providerCounts = <String, int>{};
     final candidates = source.where((item) {
+      final age = at.toUtc().difference(item.observedAt.toUtc());
       if (item.cityId != cityId ||
           item.currency != 'TJS' ||
-          item.quotedPrice <= 0) {
+          !item.quotedPrice.isFinite ||
+          item.quotedPrice <= 0 ||
+          item.quotedPrice > 10000 ||
+          item.distanceMeters <= 0 ||
+          item.distanceMeters > 100000 ||
+          item.durationSeconds <= 0 ||
+          item.durationSeconds > 86400 ||
+          !item.quality.isFinite ||
+          item.quality < .1 ||
+          item.quality > 1 ||
+          age < const Duration(minutes: -5) ||
+          age > const Duration(days: 45) ||
+          item.dayOfWeek < 1 ||
+          item.dayOfWeek > 7 ||
+          item.localHour < 0 ||
+          item.localHour > 23) {
         return false;
       }
+      final provider = item.provider.trim().toLowerCase();
+      final key =
+          '$cityId|$provider|${item.pickupBucket}|${item.dropoffBucket}|'
+          '${(item.distanceMeters / 50).round()}|${(item.durationSeconds / 30).round()}|'
+          '${item.quotedPrice.toStringAsFixed(2)}|${item.observedAt.millisecondsSinceEpoch ~/ 300000}';
+      if (!seen.add(key) || (providerCounts[provider] ?? 0) >= 10) return false;
       final distanceRatio = item.distanceMeters / math.max(distanceMeters, 1);
       final durationRatio = item.durationSeconds / math.max(durationSeconds, 1);
-      return distanceRatio >= .55 &&
+      final matches =
+          distanceRatio >= .55 &&
           distanceRatio <= 1.8 &&
           durationRatio >= .4 &&
           durationRatio <= 2.2;
+      if (matches) {
+        providerCounts[provider] = (providerCounts[provider] ?? 0) + 1;
+      }
+      return matches;
     }).toList();
     if (candidates.length < minimumSamples) return null;
 
@@ -163,38 +199,29 @@ class ExistingDatabaseTaxiPriceProvider implements TaxiReferenceProvider {
     final unitMedian = unitPrices[unitPrices.length ~/ 2];
     final filtered = candidates.where((item) {
       final unit = item.quotedPrice / math.max(item.distanceMeters, 1);
-      return unit >= unitMedian * .45 && unit <= unitMedian * 2.2;
+      return unit >= unitMedian * .5 && unit <= unitMedian * 2;
     }).toList();
     if (filtered.length < minimumSamples) return null;
 
     var weighted = 0.0;
     var totalWeight = 0.0;
     for (final item in filtered) {
-      final ageDays = at.difference(item.observedAt).inHours.abs() / 24;
+      final ageDays =
+          math.max(0, at.difference(item.observedAt).inMinutes) / 1440;
       final recency = 1 / (1 + ageDays / 14);
-      final hourDistance = (item.localHour - at.hour).abs();
+      final local = _tajikLocalParts(at);
+      final hourDistance = (item.localHour - local.$2).abs();
       final hourWeight =
           1 / (1 + math.min(hourDistance, 24 - hourDistance) / 4);
-      final dayWeight = item.dayOfWeek == at.weekday ? 1.2 : 1.0;
-      final zoneWeight =
-          pickupBucket != null &&
-              dropoffBucket != null &&
-              item.pickupBucket == pickupBucket &&
-              item.dropoffBucket == dropoffBucket
-          ? 1.5
-          : 1.0;
-      final weight =
-          recency *
-          hourWeight *
-          dayWeight *
-          zoneWeight *
-          item.quality.clamp(.1, 1);
+      final dayWeight = item.dayOfWeek == local.$1 ? 1.2 : 1.0;
+      final weight = recency * hourWeight * dayWeight * item.quality;
       weighted += item.quotedPrice * weight;
       totalWeight += weight;
     }
     final confidence =
-        (filtered.length / 8).clamp(.25, 1.0) *
-        (totalWeight / filtered.length).clamp(.25, 1.0);
+        ((filtered.length / 8).clamp(0, 1.0) *
+                (totalWeight / filtered.length).clamp(0, 1.0))
+            .toDouble();
     return TaxiReferenceSelection(
       priceTjs: weighted / totalWeight,
       sampleCount: filtered.length,
@@ -202,4 +229,9 @@ class ExistingDatabaseTaxiPriceProvider implements TaxiReferenceProvider {
       source: 'existing_database_observations',
     );
   }
+}
+
+(int, int) _tajikLocalParts(DateTime at) {
+  final local = at.toUtc().add(const Duration(hours: 5));
+  return (local.weekday, local.hour);
 }

@@ -36,7 +36,7 @@ class LocationFixQuality {
     double maxAccuracyMeters = 50,
   }) {
     final age = now.toUtc().difference(timestamp.toUtc());
-    if (age > maxAge) {
+    if (age < const Duration(seconds: -5) || age > maxAge) {
       return LocationFixQuality(
         state: LocationAvailability.stale,
         age: age,
@@ -95,4 +95,46 @@ class LatestRequestGate {
   int begin() => ++_generation;
   void cancel() => ++_generation;
   bool isCurrent(int generation) => generation == _generation;
+}
+
+class DeliveryRequestCoordinator {
+  int _cityOwnership = 0;
+  int _inputGeneration = 0;
+  int _gpsGeneration = 0;
+  int _reverseGeneration = 0;
+  int _routeGeneration = 0;
+  int _quoteGeneration = 0;
+
+  int get cityOwnership => _cityOwnership;
+  int get inputGeneration => _inputGeneration;
+
+  int beginGps() => ++_gpsGeneration;
+  int beginReverse() => ++_reverseGeneration;
+  int beginRoute() => ++_routeGeneration;
+  int beginQuote() => ++_quoteGeneration;
+
+  bool isGpsCurrent(int value) => value == _gpsGeneration;
+  bool isReverseCurrent(int value) => value == _reverseGeneration;
+  bool isRouteCurrent(int value) => value == _routeGeneration;
+  bool isQuoteCurrent(int value) => value == _quoteGeneration;
+
+  void inputChanged() {
+    _inputGeneration++;
+    _reverseGeneration++;
+    _routeGeneration++;
+    _quoteGeneration++;
+  }
+
+  void manualCitySwitch() {
+    _cityOwnership++;
+    _gpsGeneration++;
+    inputChanged();
+  }
+
+  void pause() {
+    _gpsGeneration++;
+    _reverseGeneration++;
+    _routeGeneration++;
+    _quoteGeneration++;
+  }
 }

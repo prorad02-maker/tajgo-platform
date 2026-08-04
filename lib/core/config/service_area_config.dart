@@ -56,7 +56,7 @@ class ServiceAreaRegistry {
     center: LatLng(40.2833, 69.6222),
     bounds: GeoBounds(south: 40.20, west: 69.50, north: 40.36, east: 69.76),
     defaultZoom: 13,
-    pricingProfileId: 'delivery_khujand_v2',
+    pricingProfileId: 'delivery_khujand_v3',
     routingProfile: 'bicycle',
     enabled: true,
   );
@@ -68,7 +68,7 @@ class ServiceAreaRegistry {
     center: LatLng(38.5598, 68.7870),
     bounds: GeoBounds(south: 38.44, west: 68.68, north: 38.68, east: 68.93),
     defaultZoom: 12.8,
-    pricingProfileId: 'delivery_dushanbe_v2',
+    pricingProfileId: 'delivery_dushanbe_v3',
     routingProfile: 'bicycle',
     enabled: true,
   );

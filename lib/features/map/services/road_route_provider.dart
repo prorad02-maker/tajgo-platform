@@ -53,8 +53,12 @@ class RoadRouteProvider implements RouteProvider {
     if (!configured) {
       throw StateError('Road route provider is disabled.');
     }
-    final effectiveMode = config.mode;
-    final uri = buildRequestUri(from: from, to: to, mode: effectiveMode);
+    if (!config.supportedModes.contains(mode)) {
+      throw UnsupportedError(
+        'Routing provider $name does not support ${mode.name}.',
+      );
+    }
+    final uri = buildRequestUri(from: from, to: to, mode: mode);
     _lastRequestUri = uri;
     _lastHttpStatus = null;
     _lastParseSuccess = null;

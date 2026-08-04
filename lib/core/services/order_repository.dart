@@ -3,10 +3,65 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/tajgo_order.dart';
 import 'authoritative_command_service.dart';
 
+class ServerDeliveryQuote {
+  const ServerDeliveryQuote({
+    required this.status,
+    required this.authoritative,
+    this.quoteId,
+    this.priceTjs,
+    this.expiresAt,
+    this.confidence,
+    this.source,
+    this.reason,
+  });
+
+  final String status;
+  final bool authoritative;
+  final String? quoteId;
+  final int? priceTjs;
+  final DateTime? expiresAt;
+  final String? confidence;
+  final String? source;
+  final String? reason;
+
+  bool get ready =>
+      status == 'ready' &&
+      authoritative &&
+      quoteId?.isNotEmpty == true &&
+      priceTjs != null &&
+      expiresAt?.isAfter(DateTime.now().toUtc()) == true;
+}
+
 class OrderRepository {
   OrderRepository(this._db, this._commands);
   final FirebaseFirestore _db;
   final AuthoritativeCommandService _commands;
+
+  Future<ServerDeliveryQuote> requestDeliveryQuote({
+    required GeoPoint pickup,
+    required GeoPoint dropoff,
+    required String cityId,
+    required String transportMode,
+  }) async {
+    final result = await _commands.call('getDeliveryQuote', {
+      'pickup': {'latitude': pickup.latitude, 'longitude': pickup.longitude},
+      'dropoff': {'latitude': dropoff.latitude, 'longitude': dropoff.longitude},
+      'cityId': cityId,
+      'transportMode': transportMode,
+    });
+    return ServerDeliveryQuote(
+      status: result['status'] as String? ?? 'degraded',
+      authoritative: result['authoritative'] == true,
+      quoteId: result['quoteId'] as String?,
+      priceTjs: (result['priceTjs'] as num?)?.round(),
+      expiresAt: DateTime.tryParse(
+        result['expiresAt'] as String? ?? '',
+      )?.toUtc(),
+      confidence: result['confidence'] as String?,
+      source: result['source'] as String?,
+      reason: result['reason'] as String?,
+    );
+  }
 
   Future<String> createOrder({
     required String customerId,
@@ -26,6 +81,7 @@ class OrderRepository {
     String? comment,
     bool isTestOrder = false,
     String? idempotencyKey,
+    required String quoteId,
   }) async {
     if (isTestOrder) {
       throw StateError('Тестовые заказы создаются только в Firebase Emulator.');
@@ -40,6 +96,7 @@ class OrderRepository {
       'idempotencyKey':
           idempotencyKey ??
           TajGoIdempotencyKey.create('create-custom-$customerId'),
+      'quoteId': quoteId,
       'fromText': fromText,
       'toText': toText,
       'type': type,

@@ -24,6 +24,7 @@ class PlaceSuggestion {
     this.isPartner = false,
     this.isPinned = false,
     this.tags = const [],
+    this.cityId,
   });
 
   final String id;
@@ -48,6 +49,7 @@ class PlaceSuggestion {
   final bool isPartner;
   final bool isPinned;
   final List<String> tags;
+  final String? cityId;
 
   LatLng get point => LatLng(lat, lng);
 
@@ -58,6 +60,7 @@ class PlaceSuggestion {
     DateTime? usedAt,
     String? recentType,
     bool? isPinned,
+    String? cityId,
   }) => PlaceSuggestion(
     id: id,
     title: title,
@@ -82,6 +85,7 @@ class PlaceSuggestion {
     isPartner: isPartner,
     isPinned: isPinned ?? this.isPinned,
     tags: tags,
+    cityId: cityId ?? this.cityId,
   );
 
   Map<String, dynamic> toJson({String? type, DateTime? usedAt}) {
@@ -104,6 +108,7 @@ class PlaceSuggestion {
       'isPartner': isPartner,
       'pinned': isPinned,
       'tags': tags,
+      'cityId': cityId,
     };
     if (type != null) json['type'] = type;
     if (usedAt != null) json['usedAt'] = usedAt.toIso8601String();
@@ -139,5 +144,6 @@ class PlaceSuggestion {
     tags:
         (json['tags'] as List<dynamic>?)?.whereType<String>().toList() ??
         const [],
+    cityId: json['cityId'] as String?,
   );
 }

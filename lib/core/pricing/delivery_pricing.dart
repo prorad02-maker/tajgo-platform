@@ -34,7 +34,7 @@ class DeliveryPricingProfiles {
   // Existing TajGo pilot baseline (7 + 3/km, min 10) is preserved as the
   // low-confidence fallback until enough city observations exist.
   static const khujand = DeliveryPricingProfile(
-    id: 'delivery_khujand_v2',
+    id: 'delivery_khujand_v3',
     cityId: 'khujand',
     taxiReferenceMultiplier: 0.50,
     minimumDeliveryPrice: 10,
@@ -46,7 +46,7 @@ class DeliveryPricingProfiles {
   );
 
   static const dushanbe = DeliveryPricingProfile(
-    id: 'delivery_dushanbe_v2',
+    id: 'delivery_dushanbe_v3',
     cityId: 'dushanbe',
     taxiReferenceMultiplier: 0.50,
     minimumDeliveryPrice: 10,
@@ -110,6 +110,26 @@ class DeliveryQuoteEngine {
     }
     if (!durationMinutes.isFinite || durationMinutes < 0) {
       throw ArgumentError.value(durationMinutes, 'durationMinutes');
+    }
+    final profileValues = [
+      profile.minimumDeliveryPrice,
+      profile.minimumCourierPayout,
+      profile.platformMinimumMargin,
+      profile.fallbackBasePrice,
+      profile.fallbackPerKm,
+      profile.fallbackPerMinute,
+    ];
+    if (profileValues.any((value) => !value.isFinite || value < 0) ||
+        !profile.taxiReferenceMultiplier.isFinite ||
+        profile.taxiReferenceMultiplier <= 0 ||
+        profile.taxiReferenceMultiplier > 1 ||
+        !profile.surgeFactor.isFinite ||
+        profile.surgeFactor < .5 ||
+        profile.surgeFactor > 3 ||
+        (taxiReference != null &&
+            (!taxiReference.priceTjs.isFinite ||
+                taxiReference.priceTjs <= 0))) {
+      throw ArgumentError('Invalid pricing inputs.');
     }
     final fallback =
         profile.fallbackBasePrice +

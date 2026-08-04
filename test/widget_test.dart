@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:tajgo/core/config/service_area_config.dart';
 import 'package:tajgo/core/models/courier_offer.dart';
 import 'package:tajgo/core/models/tajgo_order.dart';
 import 'package:tajgo/core/models/app_user.dart';
@@ -697,7 +698,7 @@ void main() {
         timeout: Duration(seconds: 2),
         mode: RouteMode.bicycle,
         debugLogging: false,
-        profileOverride: 'driving',
+        profileOverride: '',
       ),
     );
     final route = provider.parseResponse({
@@ -806,7 +807,7 @@ void main() {
         timeout: Duration(seconds: 7),
         mode: RouteMode.bicycle,
         debugLogging: false,
-        profileOverride: 'driving',
+        profileOverride: '',
       ),
     );
     final uri = provider.buildRequestUri(
@@ -816,12 +817,46 @@ void main() {
     );
     expect(
       uri.path,
-      contains('/route/v1/driving/69.6222,40.2833;69.6322,40.2933'),
+      contains('/route/v1/bike/69.6222,40.2833;69.6322,40.2933'),
     );
     expect(uri.queryParameters['geometries'], 'geojson');
     expect(uri.queryParameters['steps'], 'true');
     expect(uri.queryParameters, isNot(contains('language')));
   });
+
+  test(
+    'routing mode selects bicycle, driving, and rejects unsupported capability',
+    () async {
+      final provider = RoadRouteProvider(
+        config: const RoutingConfig(
+          enabled: true,
+          providerType: RoutingProviderType.osrm,
+          baseUrl: 'https://routing.example.tj',
+          apiKey: '',
+          timeout: Duration(seconds: 7),
+          mode: RouteMode.car,
+          debugLogging: false,
+          supportedModes: {RouteMode.car},
+        ),
+      );
+      final driving = provider.buildRequestUri(
+        from: const LatLng(40.2833, 69.6222),
+        to: const LatLng(40.2933, 69.6322),
+        mode: RouteMode.car,
+      );
+      expect(driving.path, contains('/route/v1/driving/'));
+      await expectLater(
+        provider.buildRoute(
+          from: const LatLng(40.2833, 69.6222),
+          to: const LatLng(40.2933, 69.6322),
+          mode: RouteMode.bicycle,
+        ),
+        throwsUnsupportedError,
+      );
+      expect(ServiceAreaRegistry.khujand.routingProfile, 'bicycle');
+      expect(ServiceAreaRegistry.dushanbe.routingProfile, 'bicycle');
+    },
+  );
 
   test('provider disabled даёт fallback и обновляет health', () async {
     const config = RoutingConfig(

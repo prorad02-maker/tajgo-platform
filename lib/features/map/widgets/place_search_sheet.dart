@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../../core/constants/tajgo_colors.dart';
+import '../../../core/config/service_area_config.dart';
 import '../models/place_suggestion.dart';
 import '../services/place_search_service.dart';
 import 'tajgo_address_result_tile.dart';
@@ -13,6 +14,7 @@ Future<PlaceSuggestion?> showPlaceSearchSheet({
   required PlaceSearchService service,
   required String title,
   LatLng? near,
+  ServiceAreaConfig? activeCity,
   String? recentType,
 }) => showModalBottomSheet<PlaceSuggestion>(
   context: context,
@@ -23,6 +25,7 @@ Future<PlaceSuggestion?> showPlaceSearchSheet({
     service: service,
     title: title,
     near: near,
+    activeCity: activeCity,
     recentType: recentType,
   ),
 );
@@ -32,12 +35,14 @@ class _PlaceSearchSheet extends StatefulWidget {
     required this.service,
     required this.title,
     required this.near,
+    required this.activeCity,
     required this.recentType,
   });
 
   final PlaceSearchService service;
   final String title;
   final LatLng? near;
+  final ServiceAreaConfig? activeCity;
   final String? recentType;
 
   @override
@@ -76,6 +81,7 @@ class _PlaceSearchSheetState extends State<_PlaceSearchSheet> {
     final results = await widget.service.search(
       value,
       near: widget.near,
+      activeCity: widget.activeCity,
       recentType: widget.recentType,
     );
     final favorites = await widget.service.savedPlaces.load();

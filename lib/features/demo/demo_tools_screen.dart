@@ -97,6 +97,7 @@ class _DemoToolsScreenState extends State<DemoToolsScreen> {
       etaMinutes: route.etaMinutes,
       comment: '[TEST] Демо-заказ v0.7.0',
       isTestOrder: true,
+      quoteId: 'demo-not-authoritative',
       orderType: 'customDelivery',
       suggestedPrice: pricing.suggestedPrice(route.distanceKm),
       clientPrice: pricing.suggestedPrice(route.distanceKm),

@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -7,7 +8,48 @@ import 'package:tajgo/core/config/service_area_config.dart';
 import 'package:tajgo/core/pricing/delivery_pricing.dart';
 import 'package:tajgo/core/pricing/taxi_observation.dart';
 import 'package:tajgo/features/map/models/map_session_state.dart';
+import 'package:tajgo/features/map/models/place_suggestion.dart';
 import 'package:tajgo/features/map/screens/new_order_map_screen.dart';
+import 'package:tajgo/features/map/services/geocoding_provider.dart';
+import 'package:tajgo/features/map/services/place_search_service.dart';
+
+class _FakeGeocoder implements GeocodingProvider {
+  LatLng? lastNear;
+
+  @override
+  Future<List<PlaceSuggestion>> search(String query, LatLng? near) async {
+    lastNear = near;
+    return const [
+      PlaceSuggestion(
+        id: 'khujand',
+        title: 'K',
+        subtitle: 'K',
+        shortTitle: 'K',
+        address: 'K',
+        lat: 40.2833,
+        lng: 69.6222,
+        source: 'remote',
+        confidence: 1,
+        category: 'address',
+      ),
+      PlaceSuggestion(
+        id: 'dushanbe',
+        title: 'D',
+        subtitle: 'D',
+        shortTitle: 'D',
+        address: 'D',
+        lat: 38.5598,
+        lng: 68.7870,
+        source: 'remote',
+        confidence: 1,
+        category: 'address',
+      ),
+    ];
+  }
+
+  @override
+  Future<PlaceSuggestion?> reverse(LatLng point) async => null;
+}
 
 class _MemoryObservationRepository implements TaxiObservationRepository {
   const _MemoryObservationRepository(this.values);
@@ -58,6 +100,23 @@ void main() {
       );
       expect(ServiceAreaRegistry.resolve(lastCityId: 'unknown').id, 'khujand');
     });
+
+    test('search is biased and filtered by selected city', () async {
+      final geocoder = _FakeGeocoder();
+      final service = PlaceSearchService(
+        remoteProvider: geocoder,
+        loadLocalStores: false,
+      );
+      final results = await service.search(
+        'address',
+        near: ServiceAreaRegistry.dushanbe.center,
+        activeCity: ServiceAreaRegistry.dushanbe,
+      );
+      expect(geocoder.lastNear, ServiceAreaRegistry.dushanbe.center);
+      expect(results.map((item) => item.id), contains('dushanbe'));
+      expect(results.map((item) => item.id), isNot(contains('khujand')));
+      expect(results.every((item) => item.cityId == 'dushanbe'), isTrue);
+    });
   });
 
   group('location and camera state', () {
@@ -99,6 +158,52 @@ void main() {
       expect(gate.isCurrent(first), isFalse);
       expect(gate.isCurrent(second), isTrue);
     });
+
+    test(
+      'request coordinator rejects stale GPS, reverse, route and quote work',
+      () {
+        final requests = DeliveryRequestCoordinator();
+        final gpsA = requests.beginGps();
+        requests.manualCitySwitch();
+        expect(requests.isGpsCurrent(gpsA), isFalse);
+
+        final reverseA = requests.beginReverse();
+        requests.inputChanged();
+        expect(requests.isReverseCurrent(reverseA), isFalse);
+
+        final routeA = requests.beginRoute();
+        final routeB = requests.beginRoute();
+        expect(requests.isRouteCurrent(routeA), isFalse);
+        expect(requests.isRouteCurrent(routeB), isTrue);
+
+        final quoteA = requests.beginQuote();
+        final quoteB = requests.beginQuote();
+        expect(requests.isQuoteCurrent(quoteA), isFalse);
+        expect(requests.isQuoteCurrent(quoteB), isTrue);
+        requests.pause();
+        expect(requests.isQuoteCurrent(quoteB), isFalse);
+      },
+    );
+
+    test(
+      'destination A to B to C keeps only latest route and quote generations',
+      () {
+        final requests = DeliveryRequestCoordinator();
+        requests.inputChanged();
+        final routeA = requests.beginRoute();
+        final quoteA = requests.beginQuote();
+        requests.inputChanged();
+        final routeB = requests.beginRoute();
+        requests.inputChanged();
+        final routeC = requests.beginRoute();
+        final quoteC = requests.beginQuote();
+        expect(requests.isRouteCurrent(routeA), isFalse);
+        expect(requests.isRouteCurrent(routeB), isFalse);
+        expect(requests.isRouteCurrent(routeC), isTrue);
+        expect(requests.isQuoteCurrent(quoteA), isFalse);
+        expect(requests.isQuoteCurrent(quoteC), isTrue);
+      },
+    );
   });
 
   group('delivery quote engine', () {
@@ -137,6 +242,72 @@ void main() {
         DeliveryPricingProfiles.dushanbe.id,
         isNot(DeliveryPricingProfiles.khujand.id),
       );
+    });
+
+    test('shared pricing contract fixtures enforce Flutter/backend parity', () {
+      final fixtures =
+          (jsonDecode(
+                    File(
+                      'test/fixtures/pricing_contract_v3.json',
+                    ).readAsStringSync(),
+                  )
+                  as List<dynamic>)
+              .cast<Map<String, dynamic>>();
+      for (final fixture in fixtures) {
+        final base = DeliveryPricingProfiles.forCity(
+          fixture['cityId'] as String,
+        );
+        final overrides =
+            (fixture['profileOverrides'] as Map<String, dynamic>?) ?? const {};
+        double value(String key, double fallback) =>
+            (overrides[key] as num?)?.toDouble() ?? fallback;
+        final profile = DeliveryPricingProfile(
+          id: base.id,
+          cityId: base.cityId,
+          taxiReferenceMultiplier: value(
+            'taxiReferenceMultiplier',
+            base.taxiReferenceMultiplier,
+          ),
+          minimumDeliveryPrice: value(
+            'minimumDeliveryPrice',
+            base.minimumDeliveryPrice,
+          ),
+          minimumCourierPayout: value(
+            'minimumCourierPayout',
+            base.minimumCourierPayout,
+          ),
+          platformMinimumMargin: value(
+            'platformMinimumMargin',
+            base.platformMinimumMargin,
+          ),
+          fallbackBasePrice: value('fallbackBasePrice', base.fallbackBasePrice),
+          fallbackPerKm: value('fallbackPerKm', base.fallbackPerKm),
+          fallbackPerMinute: value('fallbackPerMinute', base.fallbackPerMinute),
+          surgeFactor: value('surgeFactor', base.surgeFactor),
+        );
+        final referencePrice = fixture['referencePrice'] as num?;
+        final confidence = QuoteConfidence.values.byName(
+          fixture['referenceConfidence'] as String,
+        );
+        final quote = const DeliveryQuoteEngine().quote(
+          profile: profile,
+          distanceKm: (fixture['distanceMeters'] as num) / 1000,
+          durationMinutes: (fixture['durationSeconds'] as num) / 60,
+          taxiReference: referencePrice == null
+              ? null
+              : TaxiReference(
+                  priceTjs: referencePrice.toDouble(),
+                  source: 'fixture',
+                  confidence: confidence,
+                  sampleCount: 5,
+                ),
+        );
+        expect(
+          quote.priceTjs,
+          fixture['expectedPrice'],
+          reason: fixture['name'] as String,
+        );
+      }
     });
   });
 

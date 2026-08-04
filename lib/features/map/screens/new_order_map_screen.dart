@@ -13,11 +13,13 @@ import '../../../core/models/tajgo_courier.dart';
 import '../../../core/pricing/delivery_pricing.dart';
 import '../../../core/services/authoritative_command_service.dart';
 import '../../../core/services/city_selection_service.dart';
+import '../../../core/services/order_repository.dart';
 import '../../../core/services/pricing.dart' as pricing;
 import '../../../core/services/safe_diagnostics.dart';
 import '../../../shared/widgets/tajgo_scope.dart';
 import '../../customer/order_tracking_screen.dart';
 import '../models/place_suggestion.dart';
+import '../models/map_session_state.dart';
 import '../models/tajgo_map_location.dart';
 import '../models/tajgo_route.dart';
 import '../services/place_search_service.dart';
@@ -38,7 +40,8 @@ class NewOrderMapScreen extends StatefulWidget {
   State<NewOrderMapScreen> createState() => _NewOrderMapScreenState();
 }
 
-class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
+class _NewOrderMapScreenState extends State<NewOrderMapScreen>
+    with WidgetsBindingObserver {
   static const _types = {'package': 'Посылка'};
   final _map = MapController();
   final _camera = TajGoMapCamera();
@@ -58,6 +61,13 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
   String? _routeError;
   int _routeRequestId = 0;
   int _reverseRequestId = 0;
+  int _quoteRequestId = 0;
+  int _gpsRequestId = 0;
+  int _cityOwnershipGeneration = 0;
+  int _inputGeneration = 0;
+  ServerDeliveryQuote? _serverQuote;
+  bool _quoteLoading = false;
+  String? _quoteError;
   LatLng? _current;
   String _address = 'Определяем адрес...';
   bool _resolving = false, _locating = false, _busy = false;
@@ -71,12 +81,22 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
   bool _gpsWeak = false;
   String? _createOrderKey;
   Timer? _youAreHereTimer;
+  final DeliveryRequestCoordinator _requests = DeliveryRequestCoordinator();
 
   bool get _selectionMoving => _cameraMoving || _gestureMoving;
+
+  void _invalidateQuote() {
+    _requests.beginQuote();
+    _quoteRequestId++;
+    _serverQuote = null;
+    _quoteLoading = false;
+    _quoteError = null;
+  }
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _placeSearch = PlaceSearchService();
     unawaited(_loadLocateHint());
     WidgetsBinding.instance.addPostFrameCallback((_) => _prepareMap());
@@ -97,9 +117,12 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
   }
 
   Future<void> _prepareMap() async {
+    final ownership = _cityOwnershipGeneration;
     final locationService = TajGoScope.of(context).locationService;
     final storedCity = await _citySelection.load();
-    if (mounted && storedCity.id != _city.id) {
+    if (mounted &&
+        ownership == _cityOwnershipGeneration &&
+        storedCity.id != _city.id) {
       setState(() => _city = storedCity);
       _map.move(storedCity.center, storedCity.defaultZoom);
     }
@@ -115,29 +138,44 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
     final detected = ServiceAreaRegistry.detect(point);
     setState(() {
       _current = point;
-      if (detected != null) _city = detected;
+      if (detected != null && ownership == _cityOwnershipGeneration) {
+        _city = detected;
+      }
       _gpsWeak = position.accuracy > 50;
     });
-    if (detected != null) unawaited(_citySelection.save(detected));
+    if (detected != null && ownership == _cityOwnershipGeneration) {
+      unawaited(_citySelection.save(detected));
+    }
     await _moveToCurrent(point);
     await _resolveCenter();
     unawaited(_refreshFreshLocation());
   }
 
   Future<void> _refreshFreshLocation() async {
+    final coordinatorRequest = _requests.beginGps();
+    final requestId = ++_gpsRequestId;
+    final ownership = _cityOwnershipGeneration;
     try {
       final position = await TajGoScope.of(
         context,
       ).locationService.determineCurrentPosition();
-      if (!mounted) return;
+      if (!mounted ||
+          requestId != _gpsRequestId ||
+          !_requests.isGpsCurrent(coordinatorRequest)) {
+        return;
+      }
       final point = LatLng(position.latitude, position.longitude);
       final detected = ServiceAreaRegistry.detect(point);
       setState(() {
         _current = point;
         _gpsWeak = position.accuracy > 50;
-        if (detected != null) _city = detected;
+        if (detected != null && ownership == _cityOwnershipGeneration) {
+          _city = detected;
+        }
       });
-      if (detected != null) unawaited(_citySelection.save(detected));
+      if (detected != null && ownership == _cityOwnershipGeneration) {
+        unawaited(_citySelection.save(detected));
+      }
       if (!_userMovedCamera) {
         await _moveToCurrent(point);
         await _resolveCenter();
@@ -208,11 +246,34 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _gpsRequestId++;
+    _reverseRequestId++;
+    _routeRequestId++;
+    _quoteRequestId++;
     _camera.stop();
     _youAreHereTimer?.cancel();
     _price.dispose();
     _comment.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) return;
+    _requests.pause();
+    _gpsRequestId++;
+    _reverseRequestId++;
+    _routeRequestId++;
+    _quoteRequestId++;
+    if (mounted && (_routeLoading || _quoteLoading || _resolving)) {
+      setState(() {
+        _routeLoading = false;
+        _quoteLoading = false;
+        _resolving = false;
+        _quoteError = 'Расчёт остановлен в фоне. Повторите попытку.';
+      });
+    }
   }
 
   Future<void> _showAddressSearch(_Stage stage) async {
@@ -231,7 +292,8 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
       title: stage == _Stage.pickFrom
           ? 'Найти точку забора'
           : 'Найти точку доставки',
-      near: _current,
+      near: _city.center,
+      activeCity: _city,
       recentType: stage == _Stage.pickFrom ? 'pickup' : 'dropoff',
     );
     if (!mounted || selected == null) return;
@@ -255,8 +317,11 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
     });
     final point = _map.camera.center;
     final requestId = ++_reverseRequestId;
+    final coordinatorRequest = _requests.beginReverse();
     final result = await _placeSearch.reverse(point);
-    if (mounted && requestId == _reverseRequestId) {
+    if (mounted &&
+        requestId == _reverseRequestId &&
+        _requests.isReverseCurrent(coordinatorRequest)) {
       setState(() {
         _address = result.address;
         _pendingPlace = result;
@@ -357,6 +422,7 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
       source: _pendingPlace?.source ?? 'manual',
       confidence: _pendingPlace?.confidence ?? 0.5,
       category: _pendingPlace?.category ?? 'mapPoint',
+      cityId: _city.id,
     );
     final source =
         _pendingPlace?.source ??
@@ -385,6 +451,9 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
         await _placeSearch.recentPlaces.save(recentPlace, type: 'pickup');
       } catch (_) {}
       setState(() {
+        _inputGeneration++;
+        _requests.inputChanged();
+        _invalidateQuote();
         _from = location;
         _stage = _Stage.pickTo;
         _pendingPlace = null;
@@ -401,6 +470,9 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
         await _placeSearch.recentPlaces.save(recentPlace, type: 'dropoff');
       } catch (_) {}
       setState(() {
+        _inputGeneration++;
+        _requests.inputChanged();
+        _invalidateQuote();
         _to = location;
         _stage = _Stage.details;
         _pendingPlace = null;
@@ -418,7 +490,12 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
         (_) => _map.fitCamera(
           CameraFit.coordinates(
             coordinates: [_from!.toLatLng(), location.toLatLng()],
-            padding: const EdgeInsets.all(60),
+            padding: EdgeInsets.fromLTRB(
+              60,
+              60,
+              60,
+              _panelHeight(MediaQuery.sizeOf(context)) + 32,
+            ),
           ),
         ),
       );
@@ -431,16 +508,25 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
     final to = _to?.toLatLng();
     if (from == null || to == null) return;
     final requestId = ++_routeRequestId;
+    final coordinatorRequest = _requests.beginRoute();
+    final inputGeneration = _inputGeneration;
     setState(() {
+      _invalidateQuote();
       _route = null;
       _routeLoading = true;
       _routeError = null;
     });
     try {
-      final route = await TajGoScope.of(
-        context,
-      ).routeService.buildRoute(from: from, to: to, mode: RouteMode.bicycle);
-      if (!mounted || requestId != _routeRequestId) return;
+      final route = await TajGoScope.of(context).routeService.buildRoute(
+        from: from,
+        to: to,
+        mode: routeModeFromString(_city.routingProfile),
+      );
+      if (!mounted ||
+          requestId != _routeRequestId ||
+          !_requests.isRouteCurrent(coordinatorRequest)) {
+        return;
+      }
       final quote = const DeliveryQuoteEngine().quote(
         profile: DeliveryPricingProfiles.forCity(_city.id),
         distanceKm: route.distanceKm,
@@ -451,13 +537,74 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
         _routeLoading = false;
         _price.text = quote.priceTjs.toString();
       });
+      await _requestAuthoritativeQuote(
+        routeRequestId: requestId,
+        inputGeneration: inputGeneration,
+      );
     } catch (_) {
-      if (!mounted || requestId != _routeRequestId) return;
+      if (!mounted ||
+          requestId != _routeRequestId ||
+          !_requests.isRouteCurrent(coordinatorRequest)) {
+        return;
+      }
       setState(() {
         _route = null;
         _routeLoading = false;
         _routeError = 'Не удалось построить маршрут. Повторите попытку.';
         _price.clear();
+        _invalidateQuote();
+      });
+    }
+  }
+
+  Future<void> _requestAuthoritativeQuote({
+    required int routeRequestId,
+    required int inputGeneration,
+  }) async {
+    final from = _from;
+    final to = _to;
+    if (from == null || to == null || _route == null) return;
+    final requestId = ++_quoteRequestId;
+    final coordinatorRequest = _requests.beginQuote();
+    setState(() {
+      _quoteLoading = true;
+      _quoteError = null;
+      _serverQuote = null;
+    });
+    try {
+      final result = await TajGoScope.of(context).orderRepository
+          .requestDeliveryQuote(
+            pickup: from.toGeoPoint(),
+            dropoff: to.toGeoPoint(),
+            cityId: _city.id,
+            transportMode: _city.routingProfile,
+          );
+      if (!mounted ||
+          requestId != _quoteRequestId ||
+          !_requests.isQuoteCurrent(coordinatorRequest) ||
+          routeRequestId != _routeRequestId ||
+          inputGeneration != _inputGeneration) {
+        return;
+      }
+      setState(() {
+        _quoteLoading = false;
+        if (result.ready) {
+          _serverQuote = result;
+          _price.text = result.priceTjs.toString();
+        } else {
+          _quoteError =
+              'Финальный расчёт пока недоступен. Показана только предварительная цена.';
+        }
+      });
+    } on TajGoCommandException catch (error) {
+      if (!mounted ||
+          requestId != _quoteRequestId ||
+          !_requests.isQuoteCurrent(coordinatorRequest)) {
+        return;
+      }
+      setState(() {
+        _quoteLoading = false;
+        _quoteError = error.message;
       });
     }
   }
@@ -480,7 +627,12 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
     _map.fitCamera(
       CameraFit.coordinates(
         coordinates: points,
-        padding: const EdgeInsets.all(50),
+        padding: EdgeInsets.fromLTRB(
+          50,
+          50,
+          50,
+          _panelHeight(MediaQuery.sizeOf(context)) + 24,
+        ),
       ),
     );
   }
@@ -504,6 +656,9 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
 
   void _edit(_Stage stage) {
     setState(() {
+      _inputGeneration++;
+      _requests.inputChanged();
+      _invalidateQuote();
       _stage = stage;
       _pendingPlace = null;
       _route = null;
@@ -519,7 +674,7 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
 
   Future<void> _createOrder() async {
     if (_busy) return;
-    if (_route == null || _price.text.isEmpty) {
+    if (_route == null || _price.text.isEmpty || _serverQuote?.ready != true) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
@@ -600,6 +755,7 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
         etaMinutes: pricing.etaMinutes(km),
         comment: _comment.text.trim().isEmpty ? null : _comment.text.trim(),
         idempotencyKey: _createOrderKey,
+        quoteId: _serverQuote!.quoteId!,
       );
       _createOrderKey = null;
       if (mounted) {
@@ -666,9 +822,15 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
       ),
     );
     if (selected == null || selected.id == _city.id || !mounted) return;
+    _cityOwnershipGeneration++;
+    _gpsRequestId++;
+    _requests.manualCitySwitch();
     await _citySelection.save(selected);
     if (!mounted) return;
     setState(() {
+      _inputGeneration++;
+      _requests.inputChanged();
+      _invalidateQuote();
       _city = selected;
       _from = null;
       _to = null;
@@ -922,6 +1084,9 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
                             directBaselineMeters: _directDistanceMeters,
                             routeLoading: _routeLoading,
                             routeError: _routeError,
+                            quoteLoading: _quoteLoading,
+                            quoteError: _quoteError,
+                            quoteReady: _serverQuote?.ready == true,
                             onType: (value) => setState(() => _type = value),
                             onPrice: (_) => setState(() {}),
                             onEdit: _edit,
@@ -1321,6 +1486,9 @@ class _DetailsPanel extends StatelessWidget {
     required this.directBaselineMeters,
     required this.routeLoading,
     required this.routeError,
+    required this.quoteLoading,
+    required this.quoteError,
+    required this.quoteReady,
     required this.onType,
     required this.onPrice,
     required this.onEdit,
@@ -1338,6 +1506,9 @@ class _DetailsPanel extends StatelessWidget {
   final double? directBaselineMeters;
   final bool routeLoading;
   final String? routeError;
+  final bool quoteLoading;
+  final String? quoteError;
+  final bool quoteReady;
   final ValueChanged<String> onType;
   final ValueChanged<String> onPrice;
   final ValueChanged<_Stage> onEdit;
@@ -1413,6 +1584,18 @@ class _DetailsPanel extends StatelessWidget {
                         child: const Text('Повторить'),
                       ),
                     ),
+                  if (quoteLoading) const LinearProgressIndicator(minHeight: 2),
+                  if (quoteError != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(
+                        quoteError!,
+                        style: const TextStyle(
+                          color: TajGoColors.muted,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
                   const SizedBox(height: 7),
                   TextField(
                     controller: comment,
@@ -1474,7 +1657,9 @@ class _DetailsPanel extends StatelessWidget {
               width: double.infinity,
               height: 48,
               child: FilledButton(
-                onPressed: busy || route == null ? null : onSubmit,
+                onPressed: busy || route == null || !quoteReady
+                    ? null
+                    : onSubmit,
                 child: Text(busy ? 'Оформляем...' : 'Оформить доставку'),
               ),
             ),
@@ -1707,6 +1892,9 @@ Widget buildNewOrderDetailsPanelForTest() => SizedBox(
     directBaselineMeters: 400,
     routeLoading: false,
     routeError: null,
+    quoteLoading: false,
+    quoteError: null,
+    quoteReady: true,
     onType: (_) {},
     onPrice: (_) {},
     onEdit: (_) {},

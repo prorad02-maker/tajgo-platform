@@ -33,6 +33,8 @@ class TajGoLocationException implements Exception {
 class TajGoLocationService {
   StreamController<Position>? _positionController;
   StreamSubscription<Position>? _nativePositionSubscription;
+  Future<void> _nativeLifecycle = Future<void>.value();
+  int _nativeLifecycleGeneration = 0;
 
   Future<Position> determineCurrentPosition() async {
     final enabled = await Geolocator.isLocationServiceEnabled();
@@ -190,26 +192,35 @@ class TajGoLocationService {
   }
 
   void _startNativePositionStream(StreamController<Position> controller) {
-    if (_nativePositionSubscription != null) {
-      return;
-    }
-    _nativePositionSubscription =
-        Geolocator.getPositionStream(
-          locationSettings: const LocationSettings(
-            accuracy: LocationAccuracy.bestForNavigation,
-            distanceFilter: 5,
-          ),
-        ).listen(
-          controller.add,
-          onError: (Object error) =>
-              controller.addError(userFacingException(error)),
-        );
+    final generation = ++_nativeLifecycleGeneration;
+    _nativeLifecycle = _nativeLifecycle.then((_) async {
+      if (generation != _nativeLifecycleGeneration ||
+          !controller.hasListener ||
+          _nativePositionSubscription != null) {
+        return;
+      }
+      _nativePositionSubscription =
+          Geolocator.getPositionStream(
+            locationSettings: const LocationSettings(
+              accuracy: LocationAccuracy.bestForNavigation,
+              distanceFilter: 5,
+            ),
+          ).listen(
+            controller.add,
+            onError: (Object error) =>
+                controller.addError(userFacingException(error)),
+          );
+    });
   }
 
   Future<void> _stopNativePositionStream() async {
-    final subscription = _nativePositionSubscription;
-    _nativePositionSubscription = null;
-    await subscription?.cancel();
+    _nativeLifecycleGeneration++;
+    _nativeLifecycle = _nativeLifecycle.then((_) async {
+      final subscription = _nativePositionSubscription;
+      _nativePositionSubscription = null;
+      await subscription?.cancel();
+    });
+    await _nativeLifecycle;
   }
 
   TajGoMapLocation _fallback(double latitude, double longitude) {
