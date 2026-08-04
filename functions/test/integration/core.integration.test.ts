@@ -147,7 +147,18 @@ before(() => {
   );
   app = initializeApp({projectId: "demo-tajgo"});
   db = getFirestore(app);
-  core = new TajGoAuthoritativeCore(db, () => now, () => "4321");
+  core = new TajGoAuthoritativeCore(
+    db,
+    () => now,
+    () => "4321",
+    async () => {},
+    async (request) => ({
+      distanceMeters: 4200,
+      durationSeconds: 1100,
+      provider: "test-authoritative-router",
+      transportMode: request.transportMode,
+    }),
+  );
 });
 
 beforeEach(async () => {
@@ -161,8 +172,18 @@ after(async () => {
 
 test("duplicate custom-order request creates exactly one order", async () => {
   await seedUser(customer, "customer");
+  const quote = await core.getDeliveryQuote({
+    principal: customer,
+    data: {
+      pickup: {latitude: 40.2800, longitude: 69.6200},
+      dropoff: {latitude: 40.2900, longitude: 69.6300},
+      cityId: "khujand",
+      transportMode: "bicycle",
+    },
+  });
   const data = {
     idempotencyKey: "same-create-request",
+    quoteId: quote.quoteId,
     fromText: "Pickup",
     toText: "Dropoff",
     type: "parcel",
@@ -202,14 +223,26 @@ test("callable wrapper rejects an unauthenticated request", async () => {
 
 test("custom order ignores manipulated client preview price", async () => {
   await seedUser(customer, "customer");
+  const quote = await core.getDeliveryQuote({
+    principal: customer,
+    data: {
+      pickup: {latitude: 40.2800, longitude: 69.6200},
+      dropoff: {latitude: 40.2900, longitude: 69.6300},
+      cityId: "khujand",
+      transportMode: "bicycle",
+    },
+  });
   const result = await core.createCustomDeliveryOrder({
     principal: customer,
     data: {
       idempotencyKey: "manipulated-price",
+      quoteId: quote.quoteId,
       fromText: "Pickup",
       toText: "Dropoff",
       type: "parcel",
       clientPrice: 9999,
+      clientDistanceKm: 0.001,
+      clientEtaMinutes: 1,
       fromLocation: {latitude: 40.2800, longitude: 69.6200},
       toLocation: {latitude: 40.2900, longitude: 69.6300},
     },
@@ -218,7 +251,86 @@ test("custom order ignores manipulated client preview price", async () => {
   assert.ok(order != null);
   assert.notEqual(order.clientPrice, 9999);
   assert.equal(order.clientPrice, order.suggestedPrice);
-  assert.equal(order.pricingVersion, "server-v2-authoritative");
+  assert.equal(order.pricingVersion, "delivery-quote-v3");
+  assert.equal(order.quoteId, quote.quoteId);
+  assert.equal(order.distanceKm, 4.2);
+  assert.equal(order.etaMinutes, 19);
+});
+
+test("quote rejects mismatched city and unavailable route stays degraded", async () => {
+  await assert.rejects(
+    core.getDeliveryQuote({
+      principal: customer,
+      data: {
+        pickup: {latitude: 40.2800, longitude: 69.6200},
+        dropoff: {latitude: 40.2900, longitude: 69.6300},
+        cityId: "dushanbe",
+        transportMode: "bicycle",
+      },
+    }),
+    (error: unknown) =>
+      error instanceof CoreError && error.details?.reason === "city-mismatch",
+  );
+  const degradedCore = new TajGoAuthoritativeCore(db, () => now);
+  const degraded = await degradedCore.getDeliveryQuote({
+    principal: customer,
+    data: {
+      pickup: {latitude: 40.2800, longitude: 69.6200},
+      dropoff: {latitude: 40.2900, longitude: 69.6300},
+      cityId: "khujand",
+      transportMode: "bicycle",
+      routeHint: {distanceMeters: 1},
+      finalPrice: 1,
+    },
+  });
+  assert.equal(degraded.status, "degraded");
+  assert.equal(degraded.authoritative, false);
+  assert.equal(degraded.quoteId, undefined);
+});
+
+test("expired and route-mismatched quotes cannot create an order", async () => {
+  await seedUser(customer, "customer");
+  const quote = await core.getDeliveryQuote({
+    principal: customer,
+    data: {
+      pickup: {latitude: 40.2800, longitude: 69.6200},
+      dropoff: {latitude: 40.2900, longitude: 69.6300},
+      cityId: "khujand",
+      transportMode: "bicycle",
+    },
+  });
+  const base = {
+    quoteId: quote.quoteId,
+    fromText: "Pickup",
+    toText: "Dropoff",
+    type: "parcel",
+    clientPrice: 9999,
+    fromLocation: {latitude: 40.2800, longitude: 69.6200},
+    toLocation: {latitude: 40.2910, longitude: 69.6310},
+  };
+  await assert.rejects(
+    core.createCustomDeliveryOrder({
+      principal: customer,
+      data: {...base, idempotencyKey: "mismatched-quote-route"},
+    }),
+    (error: unknown) =>
+      error instanceof CoreError && error.details?.reason === "quote-input-mismatch",
+  );
+  await db.collection("delivery_quotes").doc(String(quote.quoteId)).update({
+    expiresAt: Timestamp.fromMillis(now.getTime() - 1),
+  });
+  await assert.rejects(
+    core.createCustomDeliveryOrder({
+      principal: customer,
+      data: {
+        ...base,
+        idempotencyKey: "expired-quote-route",
+        toLocation: {latitude: 40.2900, longitude: 69.6300},
+      },
+    }),
+    (error: unknown) =>
+      error instanceof CoreError && error.details?.reason === "quote-expired",
+  );
 });
 
 test("courier admin callable rejects an unauthenticated request", async () => {

@@ -1,0 +1,12 @@
+[
+  {"name":"normal taxi reference","cityId":"khujand","distanceMeters":5000,"durationSeconds":1200,"referencePrice":40,"referenceConfidence":"high","expectedPrice":20},
+  {"name":"minimum delivery floor","cityId":"khujand","distanceMeters":100,"durationSeconds":60,"referencePrice":4,"referenceConfidence":"high","profileOverrides":{"minimumDeliveryPrice":12},"expectedPrice":12},
+  {"name":"courier payout margin floor","cityId":"khujand","distanceMeters":100,"durationSeconds":60,"referencePrice":4,"referenceConfidence":"high","profileOverrides":{"minimumDeliveryPrice":5,"minimumCourierPayout":14,"platformMinimumMargin":3},"expectedPrice":17},
+  {"name":"surge one","cityId":"dushanbe","distanceMeters":4000,"durationSeconds":900,"referencePrice":36,"referenceConfidence":"medium","expectedPrice":18},
+  {"name":"city fallback","cityId":"khujand","distanceMeters":4000,"durationSeconds":900,"referencePrice":null,"referenceConfidence":"low","expectedPrice":19},
+  {"name":"zero distance","cityId":"dushanbe","distanceMeters":0,"durationSeconds":0,"referencePrice":null,"referenceConfidence":"low","expectedPrice":10},
+  {"name":"near zero distance","cityId":"khujand","distanceMeters":1,"durationSeconds":1,"referencePrice":null,"referenceConfidence":"low","expectedPrice":10},
+  {"name":"large distance","cityId":"dushanbe","distanceMeters":99999,"durationSeconds":20000,"referencePrice":null,"referenceConfidence":"low","expectedPrice":307},
+  {"name":"rounding edge","cityId":"khujand","distanceMeters":1001,"durationSeconds":600,"referencePrice":20.0002,"referenceConfidence":"medium","expectedPrice":11},
+  {"name":"decimal surge after floors","cityId":"dushanbe","distanceMeters":1000,"durationSeconds":300,"referencePrice":20,"referenceConfidence":"high","profileOverrides":{"surgeFactor":1.15},"expectedPrice":12}
+]

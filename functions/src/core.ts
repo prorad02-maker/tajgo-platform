@@ -7,6 +7,7 @@ import {
   Transaction,
 } from "firebase-admin/firestore";
 import {getAuth} from "firebase-admin/auth";
+import {randomUUID} from "node:crypto";
 import {
   ACTION_RADIUS_METERS,
   CoreError,
@@ -39,11 +40,15 @@ import {
   waitingOrderStatuses,
 } from "./domain";
 import {
+  DeliveryTransportMode,
   TaxiObservation,
   calculateDeliveryQuote,
+  deliveryInputFingerprint,
   detectServiceCity,
   pricingProfile,
   selectTaxiReference,
+  tajikLocalParts,
+  validateRouteMetrics,
 } from "./pricing";
 
 type Data = Record<string, unknown>;
@@ -53,6 +58,24 @@ interface CommandContext {
   principal: Principal;
   data: Data;
 }
+
+export interface AuthoritativeRouteRequest {
+  pickup: {latitude: number; longitude: number};
+  dropoff: {latitude: number; longitude: number};
+  cityId: string;
+  transportMode: DeliveryTransportMode;
+}
+
+export interface AuthoritativeRouteResult {
+  distanceMeters: number;
+  durationSeconds: number;
+  provider: string;
+  transportMode: DeliveryTransportMode;
+}
+
+export type AuthoritativeRouteResolver = (
+  request: AuthoritativeRouteRequest,
+) => Promise<AuthoritativeRouteResult | null>;
 
 export class TajGoAuthoritativeCore {
   constructor(
@@ -64,37 +87,82 @@ export class TajGoAuthoritativeCore {
     ) => {
       await getAuth().deleteUser(uid);
     },
+    private readonly routeResolver: AuthoritativeRouteResolver = async () => null,
   ) {}
 
   async getDeliveryQuote(context: CommandContext): Promise<Result> {
-    const {data} = context;
+    const {principal, data} = context;
     assertOnlyKeys(data, new Set([
       "pickup",
       "dropoff",
       "cityId",
+      "transportMode",
       "routeHint",
       "finalPrice",
       "clientPrice",
     ]));
     const pickup = parseCoordinate(data.pickup, "pickup");
     const dropoff = parseCoordinate(data.dropoff, "dropoff");
-    const cityId = requiredString(data, "cityId", {min: 3, max: 40});
+    const requestedCityId = requiredString(data, "cityId", {min: 3, max: 40});
+    const pickupCityId = detectServiceCity(pickup);
+    const dropoffCityId = detectServiceCity(dropoff);
+    if (pickupCityId == null || pickupCityId !== dropoffCityId ||
+        requestedCityId !== pickupCityId) {
+      throw new CoreError(
+        "failed-precondition",
+        "Точки и выбранный город не соответствуют одной зоне доставки.",
+        {reason: "city-mismatch"},
+      );
+    }
+    const cityId = pickupCityId;
+    const modeValue = requiredString(data, "transportMode", {min: 3, max: 20});
+    if (!new Set(["bicycle", "scooter", "driving"]).has(modeValue)) {
+      throw new CoreError("invalid-argument", "Неподдерживаемый режим маршрута.");
+    }
+    const transportMode = modeValue as DeliveryTransportMode;
     const profile = pricingProfile(cityId);
-    // Client route/price fields are deliberately ignored. Until an authorized
-    // road provider is selected server-side, distance uses a conservative
-    // trusted geometric estimate and is explicitly low-confidence.
-    const directMeters = haversineDistanceMeters(pickup, dropoff);
-    const trustedDistanceMeters = Math.ceil(directMeters * 1.25);
-    const trustedDurationSeconds = Math.ceil(trustedDistanceMeters / 5);
+    const route = await this.routeResolver({
+      pickup,
+      dropoff,
+      cityId,
+      transportMode,
+    });
+    if (route == null) {
+      return {
+        status: "degraded",
+        authoritative: false,
+        reason: "authoritative-route-unavailable",
+        routeSource: "none",
+        pricingVersion: "delivery-quote-v3",
+      };
+    }
+    if (route.transportMode !== transportMode) {
+      throw new CoreError(
+        "failed-precondition",
+        "Провайдер не подтвердил запрошенный режим маршрута.",
+        {reason: "route-mode-mismatch"},
+      );
+    }
+    try {
+      validateRouteMetrics(route.distanceMeters, route.durationSeconds);
+    } catch (_) {
+      throw new CoreError(
+        "failed-precondition",
+        "Провайдер вернул некорректный маршрут.",
+        {reason: "invalid-authoritative-route"},
+      );
+    }
     const snapshot = await this.db
       .collection("taxi_price_observations")
       .where("cityId", "==", cityId)
-      .limit(100)
+      .orderBy("observedAt", "desc")
+      .limit(200)
       .get();
     const observations = snapshot.docs.flatMap((doc): TaxiObservation[] => {
       const value = doc.data();
       const observedAt = dateFromStored(value.observedAt);
       if (observedAt == null) return [];
+      const local = tajikLocalParts(observedAt);
       return [{
         cityId: String(value.cityId ?? ""),
         provider: String(value.provider ?? "unknown"),
@@ -105,8 +173,8 @@ export class TajGoAuthoritativeCore {
         quotedPrice: Number(value.quotedPrice ?? 0),
         currency: "TJS",
         observedAt,
-        dayOfWeek: Number(value.dayOfWeek ?? 0),
-        localHour: Number(value.localHour ?? 0),
+        dayOfWeek: local.isoWeekday,
+        localHour: local.hour,
         sourceType: String(value.sourceType ?? "observation"),
         quality: Number(value.quality ?? 1),
       }];
@@ -114,22 +182,51 @@ export class TajGoAuthoritativeCore {
     const reference = selectTaxiReference({
       observations,
       cityId,
-      distanceMeters: trustedDistanceMeters,
-      durationSeconds: trustedDurationSeconds,
+      distanceMeters: route.distanceMeters,
+      durationSeconds: route.durationSeconds,
       at: this.now(),
     });
-    return {
-      ...calculateDeliveryQuote({
-        profile,
-        distanceMeters: trustedDistanceMeters,
-        durationSeconds: trustedDurationSeconds,
-        taxiReference: reference,
-      }),
-      distanceMeters: trustedDistanceMeters,
-      durationSeconds: trustedDurationSeconds,
-      pricingProfileId: profile.id,
+    const quote = calculateDeliveryQuote({
+      profile,
+      distanceMeters: route.distanceMeters,
+      durationSeconds: route.durationSeconds,
+      taxiReference: reference,
+    });
+    const fingerprint = deliveryInputFingerprint({
+      cityId,
+      pickup,
+      dropoff,
+      transportMode,
+    });
+    const issuedAt = this.now();
+    const expiresAt = new Date(issuedAt.getTime() + 10 * 60_000);
+    const quoteId = randomUUID();
+    await this.db.collection("delivery_quotes").doc(quoteId).create({
+      ownerId: principal.uid,
+      inputFingerprint: fingerprint,
+      cityId,
+      pickup: toGeoPoint(pickup),
+      dropoff: toGeoPoint(dropoff),
+      transportMode,
+      distanceMeters: route.distanceMeters,
+      durationSeconds: route.durationSeconds,
+      routeProvider: route.provider,
       authoritative: true,
-      routeSource: "server_geometric_fallback_pending_authorized_provider",
+      ...quote,
+      issuedAt: Timestamp.fromDate(issuedAt),
+      expiresAt: Timestamp.fromDate(expiresAt),
+      consumedByOrderId: null,
+    });
+    return {
+      status: "ready",
+      authoritative: true,
+      quoteId,
+      expiresAt: expiresAt.toISOString(),
+      inputFingerprint: fingerprint,
+      distanceMeters: route.distanceMeters,
+      durationSeconds: route.durationSeconds,
+      routeSource: route.provider,
+      ...quote,
     };
   }
 
@@ -510,7 +607,23 @@ export class TajGoAuthoritativeCore {
     context: CommandContext,
   ): Promise<Result> {
     const {principal, data} = context;
+    assertOnlyKeys(data, new Set([
+      "idempotencyKey",
+      "quoteId",
+      "fromText",
+      "toText",
+      "type",
+      "comment",
+      "clientPrice",
+      "suggestedPrice",
+      "priceNegotiable",
+      "fromLocation",
+      "toLocation",
+      "clientDistanceKm",
+      "clientEtaMinutes",
+    ]));
     const key = requiredIdempotencyKey(data);
+    const quoteId = requiredString(data, "quoteId", {min: 32, max: 128});
     const fromText = requiredString(data, "fromText", {min: 2, max: 240});
     const toText = requiredString(data, "toText", {min: 2, max: 240});
     const type = requiredString(data, "type", {max: 40});
@@ -532,19 +645,6 @@ export class TajGoAuthoritativeCore {
         "Точки должны находиться в одной доступной зоне доставки.",
       );
     }
-    const trustedDistanceMeters = Math.ceil(
-      haversineDistanceMeters(from, to) * 1.25,
-    );
-    const trustedDurationSeconds = Math.ceil(trustedDistanceMeters / 5);
-    const serverQuote = calculateDeliveryQuote({
-      profile: pricingProfile(fromCityId),
-      distanceMeters: trustedDistanceMeters,
-      durationSeconds: trustedDurationSeconds,
-    });
-    const distanceKm = trustedDistanceMeters / 1000;
-    const suggestedPrice = serverQuote.priceTjs;
-    const clientPrice = suggestedPrice;
-    const etaMinutes = Math.ceil(trustedDurationSeconds / 60);
     const code = this.codeGenerator();
     const secret = hashDeliveryCode(code);
     return this.runIdempotent(
@@ -560,14 +660,67 @@ export class TajGoAuthoritativeCore {
           key,
         );
         const orderRef = this.db.collection("orders").doc(orderId);
+        const quoteRef = this.db.collection("delivery_quotes").doc(quoteId);
         const secretRef = this.db.collection("order_secrets").doc(orderId);
         const codeRef = this.db
           .collection("order_customer_codes")
           .doc(orderId);
-        const existingOrder = await transaction.get(orderRef);
+        const [quoteDoc, existingOrder] = await Promise.all([
+          transaction.get(quoteRef),
+          transaction.get(orderRef),
+        ]);
         if (existingOrder.exists) {
           return {orderId};
         }
+        const quote = quoteDoc.data();
+        if (quote == null || quote.ownerId !== principal.uid) {
+          throw new CoreError("not-found", "Server quote не найден.");
+        }
+        const expiresAt = dateFromStored(quote.expiresAt);
+        if (expiresAt == null || expiresAt.getTime() <= this.now().getTime()) {
+          throw new CoreError(
+            "failed-precondition",
+            "Server quote устарел. Рассчитайте цену снова.",
+            {reason: "quote-expired"},
+          );
+        }
+        const transportMode = String(quote.transportMode) as DeliveryTransportMode;
+        const expectedFingerprint = deliveryInputFingerprint({
+          cityId: fromCityId,
+          pickup: from,
+          dropoff: to,
+          transportMode,
+        });
+        if (quote.authoritative !== true ||
+            quote.cityId !== fromCityId ||
+            quote.inputFingerprint !== expectedFingerprint ||
+            quote.pricingVersion !== "delivery-quote-v3") {
+          throw new CoreError(
+            "failed-precondition",
+            "Server quote не соответствует маршруту заказа.",
+            {reason: "quote-input-mismatch"},
+          );
+        }
+        if (quote.consumedByOrderId != null && quote.consumedByOrderId !== orderId) {
+          throw new CoreError(
+            "failed-precondition",
+            "Server quote уже использован.",
+            {reason: "quote-consumed"},
+          );
+        }
+        const suggestedPrice = Number(quote.priceTjs);
+        const trustedDistanceMeters = Number(quote.distanceMeters);
+        const trustedDurationSeconds = Number(quote.durationSeconds);
+        try {
+          validateRouteMetrics(trustedDistanceMeters, trustedDurationSeconds);
+        } catch (_) {
+          throw new CoreError("failed-precondition", "Server quote повреждён.");
+        }
+        if (!Number.isInteger(suggestedPrice) || suggestedPrice < 1) {
+          throw new CoreError("failed-precondition", "Server quote повреждён.");
+        }
+        const distanceKm = trustedDistanceMeters / 1000;
+        const etaMinutes = Math.max(1, Math.ceil(trustedDurationSeconds / 60));
         transaction.create(orderRef, {
           customerId: principal.uid,
           customerName: user.displayName ?? user.name ?? "Клиент",
@@ -582,12 +735,19 @@ export class TajGoAuthoritativeCore {
           toLocation: toGeoPoint(to),
           distanceKm: Number(distanceKm.toFixed(2)),
           etaMinutes,
-          price: clientPrice,
+          price: suggestedPrice,
           suggestedPrice,
-          clientPrice,
+          clientPrice: suggestedPrice,
           priceNegotiable: true,
           offersCount: 0,
-          pricingVersion: "server-v2-authoritative",
+          pricingVersion: quote.pricingVersion,
+          pricingProfileId: quote.pricingProfileId,
+          pricingConfidence: quote.confidence,
+          pricingSource: quote.source,
+          quoteId,
+          quoteInputFingerprint: quote.inputFingerprint,
+          routeProvider: quote.routeProvider,
+          routeMode: quote.transportMode,
           currency: "TJS",
           codeAvailable: true,
           ...(comment != null && comment.length > 0 ? {comment} : {}),
@@ -596,6 +756,10 @@ export class TajGoAuthoritativeCore {
           schemaVersion: 8,
           createdAt: FieldValue.serverTimestamp(),
           updatedAt: FieldValue.serverTimestamp(),
+        });
+        transaction.update(quoteRef, {
+          consumedByOrderId: orderId,
+          consumedAt: FieldValue.serverTimestamp(),
         });
         this.writeDeliverySecret(
           transaction,
@@ -1744,7 +1908,6 @@ export class TajGoAuthoritativeCore {
             : {}),
           updatedAt: FieldValue.serverTimestamp(),
         });
-
         if (action === "approve") {
           const displayName =
             typeof application?.displayName === "string"
