@@ -1,211 +1,34 @@
 <!doctype html>
 <html lang="ru">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Удаление аккаунта — TajGo</title>
-  <style>
-    :root {
-      --green: #16a34a;
-      --dark-green: #15803d;
-      --ink: #12301e;
-      --muted: #54705e;
-      --bg: #f4f9f3;
-      --card: #ffffff;
-      --border: rgba(18, 48, 30, 0.1);
-      --field: #ffffff;
-    }
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --ink: #e8f3ec;
-        --muted: #9db4a6;
-        --bg: #0f1c15;
-        --card: #16241c;
-        --border: rgba(255, 255, 255, 0.12);
-        --field: #0f1c15;
-      }
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
-      background: var(--bg);
-      color: var(--ink);
-      line-height: 1.55;
-    }
-    .wrap { max-width: 720px; margin: 0 auto; padding: 32px 20px 64px; }
-    header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
-    .logo {
-      width: 44px; height: 44px; border-radius: 14px;
-      background: linear-gradient(135deg, var(--dark-green), var(--green));
-      color: #fff; display: grid; place-items: center;
-      font-weight: 900; font-size: 20px;
-    }
-    h1 { font-size: 26px; margin: 0; }
-    h2 { font-size: 19px; margin: 28px 0 8px; }
-    .card {
-      background: var(--card); border: 1px solid var(--border);
-      border-radius: 18px; padding: 20px; margin: 16px 0;
-    }
-    ul { margin: 8px 0; padding-left: 20px; }
-    li { margin: 4px 0; }
-    .muted { color: var(--muted); }
-    ol { padding-left: 22px; }
-    label { display: block; font-weight: 600; margin: 14px 0 4px; }
-    input, textarea {
-      width: 100%; padding: 12px 14px; border-radius: 12px;
-      border: 1px solid var(--border); background: var(--field);
-      color: var(--ink); font-size: 16px; font-family: inherit;
-    }
-    textarea { min-height: 84px; resize: vertical; }
-    .check { display: flex; gap: 10px; align-items: flex-start; margin-top: 14px; }
-    .check input { width: auto; margin-top: 4px; }
-    .btn {
-      display: inline-block; margin-top: 16px; padding: 13px 22px;
-      background: var(--green); color: #fff; border: 0; border-radius: 12px;
-      font-weight: 800; font-size: 16px; cursor: pointer; width: 100%;
-    }
-    .btn.secondary {
-      background: transparent; color: var(--green);
-      border: 1px solid var(--green); margin-top: 10px;
-    }
-    .note { font-size: 13px; color: var(--muted); margin-top: 10px; }
-    code { background: var(--border); padding: 1px 6px; border-radius: 6px; }
-    footer { margin-top: 40px; font-size: 13px; color: var(--muted); }
-    .sr { position: absolute; left: -9999px; }
-  </style>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Удаление аккаунта и данных — TajGo</title><meta name="description" content="Инструкция и публичный способ запросить удаление аккаунта TajGo и связанных данных.">
+  <link rel="canonical" href="https://tajgo.ru/account-deletion"><meta property="og:type" content="article"><meta property="og:title" content="Удаление аккаунта TajGo"><meta property="og:description" content="Как удалить аккаунт TajGo и связанные с ним данные."><meta property="og:url" content="https://tajgo.ru/account-deletion"><meta property="og:image" content="https://tajgo.ru/og.png"><meta property="og:image:alt" content="TajGo — доставка по городу в Худжанде и Душанбе"><meta name="theme-color" content="#08783f">
+  <link rel="icon" type="image/png" href="/favicon.png"><link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-  <div class="wrap">
-    <header>
-      <div class="logo">TG</div>
-      <h1>Удаление аккаунта TajGo</h1>
-    </header>
-
-    <p><strong>TajGo</strong> — сервис городской доставки в Худжанде. На этой
-      странице вы можете отправить запрос на удаление аккаунта и данных.
-      <strong>Переустанавливать приложение не нужно.</strong></p>
-
-    <h2>Отправить запрос на удаление</h2>
-    <div class="card">
-      <p>Заполните форму — она откроет ваш почтовый клиент с готовым письмом в
-        поддержку TajGo. Мы подтвердим владение номером и удалим аккаунт.</p>
-      <form id="delForm">
-        <label for="phone">Номер телефона аккаунта</label>
-        <input id="phone" name="phone" type="tel" inputmode="tel"
-               placeholder="+992 XX XXX XX XX" autocomplete="tel" required />
-
-        <label for="reason">Причина (необязательно)</label>
-        <textarea id="reason" name="reason"
-                  placeholder="Например: больше не пользуюсь сервисом"></textarea>
-
-        <div class="check">
-          <input id="consent" type="checkbox" required />
-          <label for="consent" style="margin:0;font-weight:500">
-            Я подтверждаю, что хочу удалить аккаунт TajGo, связанный с этим
-            номером, и понимаю, что действие необратимо.
-          </label>
-        </div>
-
-        <button class="btn" type="submit">Отправить запрос по email</button>
-        <button class="btn secondary" type="button" id="copyBtn">
-          Скопировать адрес поддержки
-        </button>
-        <p class="note" id="hint">
-          Если письмо не открылось автоматически, напишите на
-          <code>support@tajgo.tj</code> и укажите номер телефона аккаунта.
-          Не указывайте пароли или коды из SMS.
-        </p>
-      </form>
+  <a class="skip-link" href="#main">Перейти к содержанию</a>
+  <header class="site-header"><div class="container header-inner"><a class="brand" href="/"><img class="brand-mark" src="/favicon.png" alt="" width="38" height="38">TajGo</a><nav class="site-nav" aria-label="Основная навигация"><a href="/#how">Как это работает</a><a href="/#cities">Города</a><a href="/support">Помощь</a></nav></div></header>
+  <main class="legal-main" id="main"><div class="container">
+    <header class="legal-hero"><p class="eyebrow">Управление данными</p><h1>Удаление аккаунта TajGo</h1><p class="lead">Пользователь TajGo может удалить аккаунт и связанные персональные данные в приложении или отправить публичный запрос по email. Переустанавливать приложение не нужно.</p></header>
+    <div class="legal-content">
+      <section><h2>Способ 1: в приложении</h2><ol><li>Откройте TajGo и войдите по номеру телефона.</li><li>Перейдите: «Профиль → Безопасность и данные → Удалить аккаунт».</li><li>Подтвердите владение аккаунтом кодом из SMS.</li><li>Подтвердите необратимое удаление.</li></ol><p>Если есть активный заказ, сначала завершите доставку, затем повторите удаление.</p></section>
+      <section><h2>Способ 2: запрос без приложения</h2><p>Заполните форму ниже. Она не отправляет данные на сайт: после нажатия откроется ваше почтовое приложение с готовым письмом на <a href="mailto:support@tajgo.tj">support@tajgo.tj</a>.</p>
+        <form class="request-form" id="deletion-form">
+          <label for="phone">Номер телефона аккаунта<input id="phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="+992 XX XXX XX XX" required></label>
+          <label for="reason">Причина (необязательно)<textarea id="reason" name="reason" placeholder="Например: больше не пользуюсь сервисом"></textarea></label>
+          <label class="check-row" for="consent"><input id="consent" type="checkbox" required><span>Я подтверждаю, что хочу удалить аккаунт TajGo, связанный с этим номером, и понимаю, что действие необратимо.</span></label>
+          <button class="button" type="submit">Подготовить запрос по email</button>
+          <p class="form-status" id="form-status" aria-live="polite">Не указывайте пароль или код из SMS.</p>
+          <noscript><p>Если JavaScript отключён, напишите на <a href="mailto:support@tajgo.tj?subject=Удаление%20аккаунта%20TajGo">support@tajgo.tj</a> и укажите номер телефона аккаунта. Не отправляйте SMS-коды.</p></noscript>
+        </form>
+      </section>
+      <section><h2>Что удаляется или обезличивается</h2><ul><li>имя, номер телефона и данные профиля;</li><li>сохранённые адреса;</li><li>активные данные присутствия и геолокации курьера;</li><li>токены push-уведомлений;</li><li>связь персонального профиля с завершёнными заказами.</li></ul></section>
+      <section><h2>Что может сохраняться</h2><p>Обезличенная операционная история заказов и сведения, необходимые для исполнения юридических обязанностей, разрешения споров и защиты от мошенничества, могут храниться до 24 месяцев. Эти записи больше не используются как активный профиль пользователя.</p></section>
+      <section><h2>Срок обработки</h2><p>Удаление в приложении выполняется после SMS-подтверждения. Запрос по email обрабатывается после проверки владения номером телефона — в течение 30 дней. Поддержка сообщит о завершении на адрес, с которого отправлен запрос.</p></section>
+      <section><h2>Нужна помощь?</h2><p>Напишите на <a href="mailto:support@tajgo.tj">support@tajgo.tj</a>. Для защиты аккаунта не отправляйте пароль и SMS-коды.</p></section>
     </div>
-
-    <h2>Способ в приложении</h2>
-    <div class="card">
-      <ol>
-        <li>Откройте TajGo и войдите по номеру телефона.</li>
-        <li>Профиль → «Безопасность и данные» → «Удалить аккаунт».</li>
-        <li>Подтвердите личность кодом из SMS и удаление.</li>
-      </ol>
-      <p class="muted">Удаление недоступно при активном заказе — сначала
-        завершите доставку.</p>
-    </div>
-
-    <h2>Какие данные удаляются или обезличиваются</h2>
-    <div class="card">
-      <ul>
-        <li>Имя и номер телефона;</li>
-        <li>Сохранённые адреса;</li>
-        <li>Присутствие курьера и геолокация;</li>
-        <li>Токены push-уведомлений.</li>
-      </ul>
-    </div>
-
-    <h2>Какие данные сохраняются и почему</h2>
-    <div class="card">
-      <p>Для выполнения юридических и операционных обязательств (налоговый учёт,
-        разрешение споров, защита от мошенничества) мы сохраняем обезличенную
-        историю заказов и записи по спорным заказам. Эти данные больше не
-        связаны с вашей личностью.</p>
-      <p class="muted">Срок хранения обезличенных операционных записей —
-        до 24 месяцев.</p>
-    </div>
-
-    <h2>Сроки обработки</h2>
-    <div class="card">
-      <p>Удаление в приложении — сразу. Запрос через эту форму/поддержку — после
-        подтверждения владения номером, <strong>в течение 30 дней</strong>.</p>
-    </div>
-
-    <p class="muted">Тоҷикӣ: Барои нест кардани ҳисоб дар TajGo ин формаро пур
-      кунед ё ба воситаи барнома (Профиль → «Бехатарӣ ва маълумот» → «Нест кардани
-      ҳисоб»). Барнаро аз нав насб кардан лозим нест.</p>
-
-    <footer>
-      TajGo · Худжанд, Таджикистан · Поддержка:
-      <code>support@tajgo.tj</code>
-      <br /><a href="https://tajgo.ru/privacy">Конфиденциальность</a> ·
-      <a href="https://tajgo.ru/terms">Условия</a> ·
-      <a href="https://tajgo.ru/support">Поддержка</a>
-    </footer>
-  </div>
-
-  <script>
-    (function () {
-      var SUPPORT = "support@tajgo.tj";
-      var form = document.getElementById("delForm");
-      var hint = document.getElementById("hint");
-      form.addEventListener("submit", function (e) {
-        e.preventDefault();
-        var phone = document.getElementById("phone").value.trim();
-        var reason = document.getElementById("reason").value.trim();
-        if (!phone) { return; }
-        var subject = "Запрос на удаление аккаунта TajGo";
-        var body =
-          "Прошу удалить мой аккаунт TajGo.\n\n" +
-          "Номер телефона аккаунта: " + phone + "\n" +
-          "Причина: " + (reason || "не указана") + "\n\n" +
-          "Я подтверждаю, что хочу удалить этот аккаунт. " +
-          "Готов(а) подтвердить владение номером.";
-        var url =
-          "mailto:" + SUPPORT +
-          "?subject=" + encodeURIComponent(subject) +
-          "&body=" + encodeURIComponent(body);
-        window.location.href = url;
-        hint.textContent =
-          "Открываем почтовый клиент. Если ничего не произошло, напишите на " +
-          SUPPORT + " и укажите номер телефона аккаунта.";
-      });
-      document.getElementById("copyBtn").addEventListener("click", function () {
-        var done = function () {
-          hint.textContent = "Адрес поддержки скопирован: " + SUPPORT;
-        };
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(SUPPORT).then(done, done);
-        } else {
-          done();
-        }
-      });
-    })();
-  </script>
-</body>
-</html>
+  </div></main>
+  <footer class="site-footer"><div class="container footer-inner"><div><a class="brand" href="/">TajGo</a><p class="footer-copy">Курьерская доставка в Худжанде и Душанбе.</p></div><nav class="footer-links" aria-label="Юридическая информация"><a href="/privacy">Конфиденциальность</a><a href="/terms">Условия</a><a href="/support">Поддержка</a><a href="/account-deletion" aria-current="page">Удаление аккаунта</a></nav></div></footer>
+  <script src="/account-deletion.js" defer></script>
+</body></html>
