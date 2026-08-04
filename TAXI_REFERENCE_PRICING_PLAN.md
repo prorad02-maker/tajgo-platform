@@ -33,3 +33,14 @@ minimum 10 TJS) and marketplace price imports, but no populated historical taxi-
 collection in source. Those useful delivery constants are preserved as the fallback.
 `taxi_price_observations` source/repository support is ready; populating it requires an
 owner-approved lawful acquisition/import process and data quality review.
+
+## Phase 3A status
+
+**PARTIAL / NOT READY for production authority.** Selectors now reject non-finite,
+non-positive, extreme, future and stale observations; deduplicate obvious repeats;
+cap per-provider contribution; enforce city isolation and a three-sample minimum;
+use Tajikistan UTC+05:00 with ISO weekday semantics; reject unit-price outliers; and
+return an explicit confidence level. The Firestore query is ordered by observation
+time and its source index is declared. Empty or weak data still uses `city_fallback`
+and must be described to the customer as a preliminary price. No live Maxim API,
+scraper or production dataset has been added.

@@ -37,4 +37,17 @@ document does not select or connect a paid provider.
 3. Keep secrets outside the APK; add quotas, health probes and redacted telemetry.
 4. Validate a Khujand/Dushanbe route corpus and outage behavior.
 5. Enable in a controlled build, run physical device/profile tests, then remove the
-   pilot adapter only after parity is demonstrated.
+pilot adapter only after parity is demonstrated.
+
+## Phase 3A capability contract
+
+The requested transport mode is now passed through unchanged. Khujand and Dushanbe
+select `bicycle` from `ServiceAreaRegistry`; GraphHopper maps it to `bike`, while an
+OSRM adapter maps it to the configured bicycle profile. A provider must explicitly
+declare supported modes. The public `router.project-osrm.org` configuration is treated
+as driving-only: a bicycle request returns an unsupported/degraded result and is never
+silently changed to `driving`.
+
+This remains a pilot limitation, not production readiness. Production authority still
+requires an owner-approved server-side route adapter, a documented bicycle-capable
+profile, both-city corpus results, quotas/SLA/privacy review and device outage tests.
