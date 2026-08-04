@@ -40,7 +40,10 @@ class RoutingConfig {
       defaultValue: 'bicycle',
     );
     const modeValue = preferredMode == '' ? legacyMode : preferredMode;
-    const preferredBaseUrl = String.fromEnvironment('ROUTING_BASE_URL');
+    const preferredBaseUrl = String.fromEnvironment(
+      'ROUTING_BASE_URL',
+      defaultValue: 'https://router.project-osrm.org',
+    );
     const legacyBaseUrl = String.fromEnvironment('TAJGO_ROUTE_ENDPOINT');
     const preferredKey = String.fromEnvironment('ROUTING_API_KEY');
     const legacyKey = String.fromEnvironment('TAJGO_ROUTE_API_KEY');
@@ -53,12 +56,10 @@ class RoutingConfig {
       defaultValue: 7000,
     );
     return RoutingConfig(
-      enabled:
-          const bool.fromEnvironment('ROUTING_ENABLED', defaultValue: false) ||
-          const bool.fromEnvironment(
-            'TAJGO_ROUTE_ENABLED',
-            defaultValue: false,
-          ),
+      enabled: const bool.fromEnvironment(
+        'TAJGO_ROUTING_ENABLED',
+        defaultValue: kDebugMode,
+      ),
       providerType: provider == 'graphhopper'
           ? RoutingProviderType.graphHopper
           : RoutingProviderType.osrm,
@@ -71,7 +72,10 @@ class RoutingConfig {
       ),
       mode: routeModeFromString(modeValue),
       debugLogging: kDebugMode,
-      profileOverride: const String.fromEnvironment('ROUTING_PROFILE'),
+      profileOverride: const String.fromEnvironment(
+        'ROUTING_PROFILE',
+        defaultValue: 'driving',
+      ),
     );
   }
 

@@ -57,6 +57,10 @@ class _CourierHomeScreenState extends State<CourierHomeScreen>
         _lastOnline &&
         _positionSubscription == null) {
       _retryLocation();
+    } else if (state != AppLifecycleState.resumed) {
+      final subscription = _positionSubscription;
+      _positionSubscription = null;
+      unawaited(subscription?.cancel());
     }
   }
 

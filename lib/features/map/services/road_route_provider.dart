@@ -63,15 +63,22 @@ class RoadRouteProvider implements RouteProvider {
       SafeDiagnostics.log('ROUTING_REQUEST', fields: {'provider': name});
     }
     try {
-      final response = await _client
-          .get(
-            uri,
-            headers: const {
-              'Accept': 'application/json',
-              'User-Agent': 'TajGo-Pilot/1.0.1 (routing field test)',
-            },
-          )
-          .timeout(config.timeout);
+      late http.Response response;
+      for (var attempt = 0; attempt < 2; attempt++) {
+        response = await _client
+            .get(
+              uri,
+              headers: const {
+                'Accept': 'application/json',
+                'User-Agent': 'TajGo/1.8 (contact: support@tajgo.ru)',
+              },
+            )
+            .timeout(config.timeout);
+        final retryable =
+            response.statusCode == 429 || response.statusCode >= 500;
+        if (!retryable || attempt == 1) break;
+        await Future<void>.delayed(const Duration(milliseconds: 250));
+      }
       _lastHttpStatus = response.statusCode;
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw StateError('Route provider returned ${response.statusCode}.');

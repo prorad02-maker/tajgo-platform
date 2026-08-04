@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../../../core/config/service_area_config.dart';
 import '../models/place_suggestion.dart';
 import 'address_normalizer.dart';
 import 'geocoding_provider.dart';
@@ -63,7 +64,8 @@ class PlaceSearchService {
 
     addMatches(favorites, 'favorite');
     addMatches(recent, 'recent');
-    addMatches(local, 'local');
+    final activeCity = near == null ? null : ServiceAreaRegistry.detect(near);
+    if (activeCity?.id != 'dushanbe') addMatches(local, 'local');
 
     if (query.length >= 2) {
       final remote = await _remoteProvider.search(input.trim(), near);

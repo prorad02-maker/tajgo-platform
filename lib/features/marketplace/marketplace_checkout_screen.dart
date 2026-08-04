@@ -6,6 +6,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../core/constants/tajgo_colors.dart';
+import '../../core/config/map_provider_config.dart';
 import '../../core/design/tajgo_money.dart';
 import '../../core/models/marketplace_cart.dart';
 import '../../core/models/marketplace_partner.dart';
@@ -520,8 +521,9 @@ class _MarketplaceDeliveryPointScreenState
             ),
             children: [
               TileLayer(
-                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'tj.tajgo.app',
+                urlTemplate: MapProviderConfig.current.tileUrlTemplate,
+                userAgentPackageName:
+                    MapProviderConfig.current.userAgentPackageName,
                 maxZoom: 19,
               ),
               if (_route != null)
@@ -558,7 +560,7 @@ class _MarketplaceDeliveryPointScreenState
               ),
               RichAttributionWidget(
                 attributions: const [
-                  TextSourceAttribution('OpenStreetMap contributors'),
+                  TextSourceAttribution(MapProviderConfig.attributionText),
                 ],
               ),
             ],

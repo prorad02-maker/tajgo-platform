@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../../../core/config/map_provider_config.dart';
 import '../../../shared/design/tajgo_components.dart';
 import '../../../shared/widgets/tajgo_scope.dart';
 
@@ -65,14 +66,19 @@ class _MapPointPickerScreenState extends State<MapPointPickerScreen> {
               initialZoom: 15,
               minZoom: 3,
               maxZoom: 19,
-              onPositionChanged: (camera, _) =>
-                  _center = camera.center,
+              onPositionChanged: (camera, _) => _center = camera.center,
             ),
             children: [
               TileLayer(
-                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'tj.tajgo.app',
+                urlTemplate: MapProviderConfig.current.tileUrlTemplate,
+                userAgentPackageName:
+                    MapProviderConfig.current.userAgentPackageName,
                 maxZoom: 19,
+              ),
+              RichAttributionWidget(
+                attributions: const [
+                  TextSourceAttribution(MapProviderConfig.attributionText),
+                ],
               ),
             ],
           ),

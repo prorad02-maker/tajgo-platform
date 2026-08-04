@@ -3,6 +3,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../core/constants/tajgo_colors.dart';
+import '../../core/config/map_provider_config.dart';
 import '../../core/models/app_user.dart';
 import '../../core/models/tajgo_courier.dart';
 import '../../core/models/tajgo_order.dart';
@@ -435,16 +436,17 @@ class _OrderMap extends StatelessWidget {
       options: MapOptions(initialCenter: from ?? to ?? center, initialZoom: 13),
       children: [
         TileLayer(
-          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-          userAgentPackageName: 'tj.tajgo.app',
+          urlTemplate: MapProviderConfig.current.tileUrlTemplate,
+          userAgentPackageName: MapProviderConfig.current.userAgentPackageName,
         ),
         if (route != null)
           PolylineLayer(
             polylines: [
               Polyline(
                 points: route.polylinePoints,
-                color: TajGoColors.green,
-                strokeWidth: 4,
+                color: TajGoColors.warning,
+                strokeWidth: 3,
+                pattern: StrokePattern.dashed(segments: const [8, 8]),
               ),
             ],
           ),
@@ -479,6 +481,11 @@ class _OrderMap extends StatelessWidget {
                   ),
                 ),
               ),
+          ],
+        ),
+        RichAttributionWidget(
+          attributions: const [
+            TextSourceAttribution(MapProviderConfig.attributionText),
           ],
         ),
       ],

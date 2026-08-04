@@ -841,7 +841,15 @@ void main() {
       healthMonitor: health,
       performanceMonitor: performance,
     );
-    final route = await service.buildRoute(
+    await expectLater(
+      service.buildRoute(
+        from: const LatLng(40.2833, 69.6222),
+        to: const LatLng(40.2933, 69.6322),
+        mode: RouteMode.bicycle,
+      ),
+      throwsA(isA<RouteUnavailableException>()),
+    );
+    final route = service.directRoute(
       from: const LatLng(40.2833, 69.6222),
       to: const LatLng(40.2933, 69.6322),
       mode: RouteMode.bicycle,

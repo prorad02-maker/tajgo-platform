@@ -1,6 +1,7 @@
 import 'package:geocoding/geocoding.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../../../core/config/service_area_config.dart';
 import '../models/place_suggestion.dart';
 
 abstract class GeocodingProvider {
@@ -14,9 +15,10 @@ class NativeGeocodingProvider implements GeocodingProvider {
   @override
   Future<List<PlaceSuggestion>> search(String query, LatLng? near) async {
     if (query.trim().length < 2) return const [];
+    final city = ServiceAreaRegistry.resolve(point: near);
     try {
       final locations = await Geocoding()
-          .locationFromAddress('$query, Худжанд, Таджикистан')
+          .locationFromAddress('$query, ${city.displayNameRu}, Таджикистан')
           .timeout(const Duration(seconds: 5));
       return locations.take(5).indexed.map((entry) {
         final location = entry.$2;
@@ -25,7 +27,7 @@ class NativeGeocodingProvider implements GeocodingProvider {
           title: query.trim(),
           subtitle: 'Результат геокодера · уточните точку на карте',
           shortTitle: query.trim(),
-          address: '$query, Худжанд',
+          address: '$query, ${city.displayNameRu}',
           lat: location.latitude,
           lng: location.longitude,
           source: 'remote',

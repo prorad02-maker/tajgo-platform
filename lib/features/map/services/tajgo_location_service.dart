@@ -4,8 +4,17 @@ import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../models/tajgo_map_location.dart';
+import '../models/map_session_state.dart';
 
-enum TajGoLocationIssue { serviceDisabled, denied, deniedForever, unavailable }
+enum TajGoLocationIssue {
+  serviceDisabled,
+  denied,
+  deniedForever,
+  timeout,
+  poorAccuracy,
+  stale,
+  unavailable,
+}
 
 class TajGoLocationException implements Exception {
   const TajGoLocationException(this.issue, this.message);
@@ -66,6 +75,8 @@ class TajGoLocationService {
           permission != LocationPermission.whileInUse) {
         return null;
       }
+      final lastKnown = await Geolocator.getLastKnownPosition();
+      if (lastKnown != null) return lastKnown;
       return await _readCurrentPosition();
     } catch (_) {
       // Пассивная проверка не должна мешать открытию карты. Полная ошибка с
@@ -76,16 +87,42 @@ class TajGoLocationService {
 
   Future<Position> _readCurrentPosition() async {
     try {
-      return await Geolocator.getCurrentPosition(
+      final position = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high,
           timeLimit: Duration(seconds: 15),
         ),
       );
+      final quality = qualityOf(position);
+      if (quality.state == LocationAvailability.stale) {
+        throw const TajGoLocationException(
+          TajGoLocationIssue.stale,
+          'Геопозиция устарела. Попробуйте ещё раз или выберите точку вручную.',
+        );
+      }
+      if (quality.state == LocationAvailability.poorAccuracy) {
+        throw const TajGoLocationException(
+          TajGoLocationIssue.poorAccuracy,
+          'GPS пока неточен. Перейдите на открытое место или выберите точку вручную.',
+        );
+      }
+      return position;
+    } on TimeoutException {
+      throw const TajGoLocationException(
+        TajGoLocationIssue.timeout,
+        'GPS не ответил вовремя. Повторите или выберите точку вручную.',
+      );
     } catch (error) {
       throw userFacingException(error);
     }
   }
+
+  LocationFixQuality qualityOf(Position position, {DateTime? now}) =>
+      LocationFixQuality.evaluate(
+        timestamp: position.timestamp,
+        accuracyMeters: position.accuracy,
+        now: now ?? DateTime.now().toUtc(),
+      );
 
   TajGoLocationException userFacingException(Object error) {
     if (error is TajGoLocationException) {

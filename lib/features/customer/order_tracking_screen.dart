@@ -5,6 +5,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../core/constants/tajgo_colors.dart';
+import '../../core/config/map_provider_config.dart';
 import '../../core/models/tajgo_courier.dart';
 import '../../core/models/courier_offer.dart';
 import '../../core/models/tajgo_order.dart';
@@ -394,9 +395,9 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
                 ),
                 children: [
                   TileLayer(
-                    urlTemplate:
-                        'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                    userAgentPackageName: 'tj.tajgo.app',
+                    urlTemplate: MapProviderConfig.current.tileUrlTemplate,
+                    userAgentPackageName:
+                        MapProviderConfig.current.userAgentPackageName,
                     maxZoom: 19,
                   ),
                   if (from != null && to != null)
@@ -471,7 +472,7 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
                   ),
                   RichAttributionWidget(
                     attributions: const [
-                      TextSourceAttribution('OpenStreetMap contributors'),
+                      TextSourceAttribution(MapProviderConfig.attributionText),
                     ],
                   ),
                 ],

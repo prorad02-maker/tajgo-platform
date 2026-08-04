@@ -4,6 +4,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../core/constants/tajgo_colors.dart';
+import '../../core/config/map_provider_config.dart';
 import '../../core/models/marketplace_partner.dart';
 import '../../core/models/marketplace_product.dart';
 import '../../shared/widgets/tajgo_scope.dart';
@@ -1013,13 +1014,14 @@ class _AdminPartnerLocationScreenState
           ),
           children: [
             TileLayer(
-              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-              userAgentPackageName: 'tj.tajgo.app',
+              urlTemplate: MapProviderConfig.current.tileUrlTemplate,
+              userAgentPackageName:
+                  MapProviderConfig.current.userAgentPackageName,
               maxZoom: 19,
             ),
             RichAttributionWidget(
               attributions: const [
-                TextSourceAttribution('OpenStreetMap contributors'),
+                TextSourceAttribution(MapProviderConfig.attributionText),
               ],
             ),
           ],

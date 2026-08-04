@@ -9,6 +9,15 @@ import 'route_cache.dart';
 import 'route_sanity_service.dart';
 import 'routing_health_monitor.dart';
 
+class RouteUnavailableException implements Exception {
+  const RouteUnavailableException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
 class RouteService {
   RouteService({
     RoadRouteProvider? roadProvider,
@@ -65,8 +74,11 @@ class RouteService {
           to: to,
           mode: mode,
         );
-        if (checked.usedFallback) {
-          _cache.put(from, to, mode, checked.route);
+        if (checked.usedFallback ||
+            checked.route.routeQuality != RouteQuality.road) {
+          return Future.error(
+            const RouteUnavailableException('Дорожный маршрут недоступен.'),
+          );
         }
         health.recordCacheHit(checked.route);
         _debugRoute(
@@ -86,7 +98,14 @@ class RouteService {
     if (running != null && !forceRefresh) return running;
     final request = _build(from: from, to: to, mode: mode);
     _inFlight[key] = request;
-    request.whenComplete(() => _inFlight.remove(key));
+    request.then<void>(
+      (_) {
+        _inFlight.remove(key);
+      },
+      onError: (Object _, StackTrace _) {
+        _inFlight.remove(key);
+      },
+    );
     return request;
   }
 
@@ -97,7 +116,7 @@ class RouteService {
   }) async {
     final stopwatch = Stopwatch()..start();
     late RouteSanityResult checked;
-    var routeSource = 'direct';
+    var routeSource = 'unavailable';
 
     if (_road.configured) {
       try {
@@ -122,6 +141,9 @@ class RouteService {
             parseSuccess: _road.lastParseSuccess,
             route: checked.route,
           );
+          throw RouteUnavailableException(
+            checked.reason ?? 'Провайдер вернул некорректный маршрут.',
+          );
         } else {
           health.recordSuccess(
             checked.route,
@@ -132,32 +154,41 @@ class RouteService {
           );
         }
       } catch (error) {
-        checked = _sanity.sanitize(
+        if (error is RouteUnavailableException) {
+          stopwatch.stop();
+          performance.recordRoute(stopwatch.elapsed);
+          rethrow;
+        }
+        final fallback = _sanity.sanitize(
           candidate: null,
           from: from,
           to: to,
           mode: mode,
           missingReason: error.toString(),
         );
-        routeSource = 'provider_error_fallback';
+        routeSource = 'provider_error';
         health.recordFallback(
           error.toString(),
           stopwatch.elapsed,
           requestUrl: _road.lastRequestUrl,
           httpStatus: _road.lastHttpStatus,
           parseSuccess: _road.lastParseSuccess,
-          route: checked.route,
+          route: fallback.route,
+        );
+        stopwatch.stop();
+        performance.recordRoute(stopwatch.elapsed);
+        throw const RouteUnavailableException(
+          'Не удалось построить дорожный маршрут. Проверьте связь и повторите.',
         );
       }
     } else {
-      checked = _sanity.sanitize(
-        candidate: null,
-        from: from,
-        to: to,
-        mode: mode,
-        missingReason: 'Road route endpoint is disabled.',
+      final fallback = _direct.buildSync(from: from, to: to, mode: mode);
+      health.recordDisabledFallback(fallback);
+      stopwatch.stop();
+      performance.recordRoute(stopwatch.elapsed);
+      throw const RouteUnavailableException(
+        'Дорожный маршрут пока недоступен. Настройте pilot provider или повторите позже.',
       );
-      health.recordDisabledFallback(checked.route);
     }
 
     stopwatch.stop();

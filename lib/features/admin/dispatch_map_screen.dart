@@ -3,6 +3,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../core/constants/tajgo_colors.dart';
+import '../../core/config/map_provider_config.dart';
 import '../../core/models/tajgo_courier.dart';
 import '../../core/models/tajgo_order.dart';
 import '../../shared/widgets/tajgo_scope.dart';
@@ -188,8 +189,9 @@ class _DispatchMapScreenState extends State<DispatchMapScreen> {
               routeLines.add(
                 Polyline(
                   points: route.polylinePoints,
-                  color: TajGoColors.green.withValues(alpha: 0.45),
+                  color: TajGoColors.warning.withValues(alpha: 0.7),
                   strokeWidth: 3,
+                  pattern: StrokePattern.dashed(segments: const [8, 8]),
                 ),
               );
             }
@@ -203,9 +205,9 @@ class _DispatchMapScreenState extends State<DispatchMapScreen> {
                   ),
                   children: [
                     TileLayer(
-                      urlTemplate:
-                          'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                      userAgentPackageName: 'tj.tajgo.app',
+                      urlTemplate: MapProviderConfig.current.tileUrlTemplate,
+                      userAgentPackageName:
+                          MapProviderConfig.current.userAgentPackageName,
                     ),
                     PolylineLayer(polylines: routeLines),
                     MarkerLayer(
@@ -288,6 +290,13 @@ class _DispatchMapScreenState extends State<DispatchMapScreen> {
                             height: 44,
                             child: const TajGoCurrentLocationMarker(),
                           ),
+                      ],
+                    ),
+                    RichAttributionWidget(
+                      attributions: const [
+                        TextSourceAttribution(
+                          MapProviderConfig.attributionText,
+                        ),
                       ],
                     ),
                   ],

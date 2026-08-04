@@ -6,6 +6,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../core/constants/tajgo_colors.dart';
+import '../../core/config/map_provider_config.dart';
 import '../../core/models/tajgo_order.dart';
 import '../../core/services/external_navigator_service.dart';
 import '../../core/services/delivery_code_input.dart';
@@ -87,6 +88,10 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed && _positionSubscription == null) {
       _startLocation();
+    } else if (state != AppLifecycleState.resumed) {
+      final subscription = _positionSubscription;
+      _positionSubscription = null;
+      unawaited(subscription?.cancel());
     }
   }
 
@@ -582,8 +587,9 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
                       children: [
                         TileLayer(
                           urlTemplate:
-                              'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                          userAgentPackageName: 'tj.tajgo.app',
+                              MapProviderConfig.current.tileUrlTemplate,
+                          userAgentPackageName:
+                              MapProviderConfig.current.userAgentPackageName,
                           maxZoom: 19,
                         ),
                         PolylineLayer(
@@ -674,7 +680,9 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
                         ),
                         RichAttributionWidget(
                           attributions: const [
-                            TextSourceAttribution('OpenStreetMap contributors'),
+                            TextSourceAttribution(
+                              MapProviderConfig.attributionText,
+                            ),
                           ],
                         ),
                       ],
