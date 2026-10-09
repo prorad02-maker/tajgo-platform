@@ -22,7 +22,11 @@ class PlaceSearchService {
   }) : _remoteProvider = remoteProvider ?? const NativeGeocodingProvider(),
        recentPlaces = recentPlaces ?? RecentPlacesService(),
        _normalizer = normalizer ?? const AddressNormalizer(),
-       _reverseGeocoding = reverseGeocoding ?? const ReverseGeocodingService(),
+       _reverseGeocoding =
+           reverseGeocoding ??
+           ReverseGeocodingService(
+             provider: remoteProvider ?? const NativeGeocodingProvider(),
+           ),
        savedPlaces = savedPlaces ?? SavedPlacesService(),
        performance = performanceMonitor ?? MapPerformanceMonitor.shared;
 

@@ -1,3 +1,4 @@
+import '../../core/services/user_error_message.dart';
 import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -13,6 +14,7 @@ import '../../shared/widgets/tajgo_scope.dart';
 import '../customer/order_tracking_screen.dart';
 import '../map/models/place_suggestion.dart';
 import '../map/models/tajgo_route.dart';
+import '../map/models/tajgo_map_location.dart';
 import '../map/services/place_search_service.dart';
 import '../map/widgets/tajgo_location_widgets.dart';
 import '../map/widgets/place_search_sheet.dart';
@@ -20,14 +22,14 @@ import '../map/widgets/tajgo_route_summary_card.dart';
 
 class MarketplaceDeliverySelection {
   const MarketplaceDeliverySelection({
-    required this.location,
-    required this.address,
+    required this.destination,
     required this.distanceKm,
     required this.etaMinutes,
   });
 
-  final GeoPoint location;
-  final String address;
+  final TajGoMapLocation destination;
+  GeoPoint get location => destination.toGeoPoint();
+  String get address => destination.address;
   final double distanceKm;
   final int etaMinutes;
 }
@@ -116,7 +118,7 @@ class _MarketplaceCheckoutScreenState extends State<MarketplaceCheckoutScreen> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('$error')));
+        ).showSnackBar(SnackBar(content: Text(userErrorMessage(error))));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -333,6 +335,8 @@ class _MarketplaceDeliveryPointScreenState
   int _requestId = 0;
   LatLng? _currentPosition;
   Timer? _moveDebounce;
+  LatLng? _selectedPoint;
+  bool _overview = false;
 
   LatLng get _pickup => LatLng(
     widget.partner.location.latitude,
@@ -353,10 +357,11 @@ class _MarketplaceDeliveryPointScreenState
   }
 
   Future<void> _prepare() async {
+    final initialRequest = _requestId;
     final position = await TajGoScope.of(
       context,
     ).locationService.currentPositionIfAuthorized();
-    if (!mounted) return;
+    if (!mounted || initialRequest != _requestId) return;
     final point = position == null
         ? LatLng(_pickup.latitude + 0.008, _pickup.longitude + 0.006)
         : LatLng(position.latitude, position.longitude);
@@ -390,6 +395,12 @@ class _MarketplaceDeliveryPointScreenState
 
   void _scheduleRefresh() {
     _moveDebounce?.cancel();
+    _requestId++;
+    setState(() {
+      _loading = true;
+      _overview = false;
+      _route = null;
+    });
     _moveDebounce = Timer(const Duration(milliseconds: 450), _refresh);
   }
 
@@ -403,19 +414,24 @@ class _MarketplaceDeliveryPointScreenState
     );
     if (selected == null || !mounted) return;
     _map.move(selected.point, 16);
-    await _refresh();
+    await _refresh(selected: selected);
   }
 
-  Future<void> _refresh({bool fitRoute = false}) async {
+  Future<void> _refresh({
+    bool fitRoute = false,
+    PlaceSuggestion? selected,
+  }) async {
+    _moveDebounce?.cancel();
     final request = ++_requestId;
     final point = _map.camera.center;
     setState(() {
       _loading = true;
+      _overview = false;
       _route = null;
       _address = 'Определяем адрес…';
     });
     final results = await Future.wait([
-      _places.reverse(point),
+      selected == null ? _places.reverse(point) : Future.value(selected),
       TajGoScope.of(context).routeService.buildRoute(
         from: _pickup,
         to: point,
@@ -427,12 +443,14 @@ class _MarketplaceDeliveryPointScreenState
     final route = results[1] as TajGoRoute;
     setState(() {
       _address = place.address;
+      _selectedPoint = point;
       _route = route;
       _loading = false;
     });
     if (fitRoute && route.points.length > 1) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
+        if (!mounted || request != _requestId) return;
+        setState(() => _overview = true);
         _map.fitCamera(
           CameraFit.coordinates(
             coordinates: route.points,
@@ -446,6 +464,7 @@ class _MarketplaceDeliveryPointScreenState
   void _showEntireRoute() {
     final points = _route?.points;
     if (points == null || points.length < 2) return;
+    setState(() => _overview = true);
     _map.fitCamera(
       CameraFit.coordinates(
         coordinates: points,
@@ -456,13 +475,16 @@ class _MarketplaceDeliveryPointScreenState
 
   void _confirm() {
     final route = _route;
-    if (route == null) return;
-    final point = _map.camera.center;
+    if (route == null || _loading || _selectedPoint == null) return;
+    final point = _selectedPoint!;
     Navigator.pop(
       context,
       MarketplaceDeliverySelection(
-        location: GeoPoint(point.latitude, point.longitude),
-        address: _address,
+        destination: TajGoMapLocation(
+          latitude: point.latitude,
+          longitude: point.longitude,
+          address: _address,
+        ),
         distanceKm: route.distanceKm,
         etaMinutes: route.etaMinutes,
       ),
@@ -492,7 +514,28 @@ class _MarketplaceDeliveryPointScreenState
               minZoom: 3,
               maxZoom: 19,
               onMapEvent: (event) {
-                if (event is MapEventMoveEnd) _scheduleRefresh();
+                if (event.source == MapEventSource.fitCamera ||
+                    event.source == MapEventSource.mapController ||
+                    event.source == MapEventSource.nonRotatedSizeChange) {
+                  return;
+                }
+                if (event is MapEventMoveStart ||
+                    event is MapEventFlingAnimationStart ||
+                    event is MapEventDoubleTapZoomStart) {
+                  _requestId++;
+                  _moveDebounce?.cancel();
+                  setState(() {
+                    _loading = true;
+                    _overview = false;
+                    _route = null;
+                  });
+                }
+                if (event is MapEventMoveEnd ||
+                    event is MapEventFlingAnimationEnd ||
+                    event is MapEventDoubleTapZoomEnd ||
+                    event is MapEventScrollWheelZoom) {
+                  _scheduleRefresh();
+                }
               },
             ),
             children: [
@@ -518,6 +561,13 @@ class _MarketplaceDeliveryPointScreenState
                 ),
               MarkerLayer(
                 markers: [
+                  if (_overview && _selectedPoint != null)
+                    Marker(
+                      point: _selectedPoint!,
+                      width: 44,
+                      height: 44,
+                      child: const _MapPoint(label: 'B'),
+                    ),
                   Marker(
                     point: _pickup,
                     width: 44,
@@ -541,14 +591,15 @@ class _MarketplaceDeliveryPointScreenState
             ],
           ),
         ),
-        IgnorePointer(
-          child: Center(
-            child: Transform.translate(
-              offset: const Offset(0, -24),
-              child: const _MapPoint(label: 'B'),
+        if (!_overview)
+          IgnorePointer(
+            child: Center(
+              child: Transform.translate(
+                offset: const Offset(0, -24),
+                child: const _MapPoint(label: 'B'),
+              ),
             ),
           ),
-        ),
         Positioned(
           right: 16,
           bottom: 190,

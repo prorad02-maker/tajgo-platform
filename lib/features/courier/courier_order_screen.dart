@@ -1,3 +1,4 @@
+import '../../core/services/user_error_message.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -160,7 +161,7 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
         });
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('$error')));
+        ).showSnackBar(SnackBar(content: Text(userErrorMessage(error))));
       }
     } finally {
       if (mounted) {
@@ -342,7 +343,7 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('$error')));
+        ).showSnackBar(SnackBar(content: Text(userErrorMessage(error))));
       }
     } finally {
       if (mounted) {
@@ -505,8 +506,22 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
       body: StreamBuilder<TajGoOrder?>(
         stream: repository.orderStream(widget.orderId),
         builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text(
+                  userErrorMessage(snapshot.error),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            );
+          }
           final order = snapshot.data;
           if (order == null) {
+            if (snapshot.connectionState != ConnectionState.waiting) {
+              return const Center(child: Text('Заказ больше недоступен.'));
+            }
             return const Center(child: CircularProgressIndicator());
           }
           final from = order.fromLocation == null

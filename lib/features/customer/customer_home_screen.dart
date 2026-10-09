@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/constants/tajgo_colors.dart';
 import '../../core/models/tajgo_order.dart';
+import '../../core/services/user_error_message.dart';
 import '../../shared/widgets/tajgo_scope.dart';
 import '../../shared/widgets/tajgo_order_history_tile.dart';
 import '../account/account_profile_screen.dart';
@@ -149,7 +150,12 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
           children: [
             StreamBuilder<TajGoOrder?>(
               stream: scope.orderRepository.activeOrderStream(uid),
-              builder: (context, snapshot) => snapshot.data == null
+              builder: (context, snapshot) => snapshot.hasError
+                  ? Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Text(userErrorMessage(snapshot.error)),
+                    )
+                  : snapshot.data == null
                   ? const SizedBox.shrink()
                   : Padding(
                       padding: const EdgeInsets.only(bottom: 14),
@@ -243,6 +249,16 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
             StreamBuilder<List<TajGoOrder>>(
               stream: scope.orderRepository.recentOrdersStream(uid),
               builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Text(userErrorMessage(snapshot.error)),
+                  );
+                }
+                if (snapshot.connectionState == ConnectionState.waiting &&
+                    !snapshot.hasData) {
+                  return const LinearProgressIndicator();
+                }
                 final orders = snapshot.data ?? const <TajGoOrder>[];
                 if (orders.isEmpty) {
                   return const Card(
@@ -276,7 +292,15 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
         const SizedBox(height: 14),
         StreamBuilder<TajGoOrder?>(
           stream: scope.orderRepository.activeOrderStream(uid),
-          builder: (context, snapshot) => snapshot.data == null
+          builder: (context, snapshot) => snapshot.hasError
+              ? Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Text(userErrorMessage(snapshot.error)),
+                )
+              : snapshot.connectionState == ConnectionState.waiting &&
+                    !snapshot.hasData
+              ? const LinearProgressIndicator()
+              : snapshot.data == null
               ? const Card(
                   child: Padding(
                     padding: EdgeInsets.all(16),
@@ -288,11 +312,16 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
         const SizedBox(height: 14),
         StreamBuilder<List<TajGoOrder>>(
           stream: scope.orderRepository.recentOrdersStream(uid),
-          builder: (context, snapshot) => Column(
-            children: (snapshot.data ?? const <TajGoOrder>[])
-                .map((order) => TajGoOrderHistoryTile(order: order))
-                .toList(growable: false),
-          ),
+          builder: (context, snapshot) => snapshot.hasError
+              ? Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Text(userErrorMessage(snapshot.error)),
+                )
+              : Column(
+                  children: (snapshot.data ?? const <TajGoOrder>[])
+                      .map((order) => TajGoOrderHistoryTile(order: order))
+                      .toList(growable: false),
+                ),
         ),
       ],
     ),

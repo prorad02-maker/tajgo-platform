@@ -1,3 +1,4 @@
+import '../../core/services/user_error_message.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/constants/tajgo_colors.dart';
@@ -42,7 +43,7 @@ class PartnerCatalogScreen extends StatelessWidget {
       if (context.mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('$error')));
+        ).showSnackBar(SnackBar(content: Text(userErrorMessage(error))));
       }
     }
   }

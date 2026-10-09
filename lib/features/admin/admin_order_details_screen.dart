@@ -1,3 +1,4 @@
+import '../../core/services/user_error_message.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -95,7 +96,7 @@ class _AdminOrderDetailsBodyState extends State<_AdminOrderDetailsBody> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('$error')));
+        ).showSnackBar(SnackBar(content: Text(userErrorMessage(error))));
       }
     }
   }
@@ -111,7 +112,7 @@ class _AdminOrderDetailsBodyState extends State<_AdminOrderDetailsBody> {
           final order = snapshot.data;
           if (order == null) {
             if (snapshot.hasError) {
-              return Center(child: Text('${snapshot.error}'));
+              return Center(child: Text(userErrorMessage(snapshot.error)));
             }
             return const Center(child: CircularProgressIndicator());
           }
@@ -263,9 +264,9 @@ class _AdminOrderDetailsBodyState extends State<_AdminOrderDetailsBody> {
                           );
                         } catch (error) {
                           if (context.mounted) {
-                            ScaffoldMessenger.of(
-                              context,
-                            ).showSnackBar(SnackBar(content: Text('$error')));
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text(userErrorMessage(error))),
+                            );
                           }
                         }
                       },

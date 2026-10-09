@@ -1,3 +1,4 @@
+import '../../../core/services/user_error_message.dart';
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -51,7 +52,8 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
   int _reverseRequestId = 0;
   LatLng? _current;
   String _address = 'Определяем адрес...';
-  bool _resolving = false, _locating = false, _busy = false;
+  bool _resolving = true, _locating = false, _busy = false;
+  LatLng? _resolvedPoint;
   bool _cameraMoving = false;
   bool _gestureMoving = false;
   bool _mapLoading = true;
@@ -78,10 +80,11 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
   }
 
   Future<void> _prepareMap() async {
+    final selectionVersion = _reverseRequestId;
     final position = await TajGoScope.of(
       context,
     ).locationService.currentPositionIfAuthorized();
-    if (!mounted) {
+    if (!mounted || selectionVersion != _reverseRequestId) {
       return;
     }
     if (position == null) {
@@ -176,8 +179,11 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
       recentType: stage == _Stage.pickFrom ? 'pickup' : 'dropoff',
     );
     if (!mounted || selected == null) return;
+    _reverseRequestId++;
     setState(() {
       _pendingPlace = selected;
+      _resolvedPoint = selected.point;
+      _resolving = false;
       _address = selected.address;
       _cameraMoving = true;
     });
@@ -187,7 +193,7 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
   }
 
   Future<void> _resolveCenter() async {
-    if (_stage == _Stage.details) {
+    if (!mounted || _stage == _Stage.details) {
       return;
     }
     setState(() {
@@ -201,6 +207,7 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
       setState(() {
         _address = result.address;
         _pendingPlace = result;
+        _resolvedPoint = point;
         _resolving = false;
       });
     }
@@ -272,6 +279,11 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
       return;
     }
     final point = _map.camera.center;
+    if (_resolvedPoint == null ||
+        const Distance().as(LengthUnit.Meter, point, _resolvedPoint!) > 1) {
+      await _resolveCenter();
+      return;
+    }
     final location = TajGoMapLocation(
       latitude: point.latitude,
       longitude: point.longitude,
@@ -312,9 +324,12 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
     }
     _debugConfirmedPoint(location, source);
     if (_stage == _Stage.pickFrom) {
-      try {
-        await _placeSearch.recentPlaces.save(recentPlace, type: 'pickup');
-      } catch (_) {}
+      unawaited(
+        _placeSearch.recentPlaces
+            .save(recentPlace, type: 'pickup')
+            .catchError((Object _) {}),
+      );
+      if (!mounted) return;
       setState(() {
         _from = location;
         _stage = _Stage.pickTo;
@@ -327,9 +342,12 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
       });
       await _resolveCenter();
     } else {
-      try {
-        await _placeSearch.recentPlaces.save(recentPlace, type: 'dropoff');
-      } catch (_) {}
+      unawaited(
+        _placeSearch.recentPlaces
+            .save(recentPlace, type: 'dropoff')
+            .catchError((Object _) {}),
+      );
+      if (!mounted) return;
       setState(() {
         _to = location;
         _stage = _Stage.details;
@@ -374,6 +392,7 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
       _routeLoading = false;
       _price.text = pricing.suggestedPrice(route.distanceKm).toString();
     });
+    if (!route.isFallback) _showEntireRoute();
   }
 
   void _debugConfirmedPoint(TajGoMapLocation location, String source) {
@@ -392,7 +411,12 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
     _map.fitCamera(
       CameraFit.coordinates(
         coordinates: points,
-        padding: const EdgeInsets.all(50),
+        padding: EdgeInsets.fromLTRB(
+          32,
+          80,
+          32,
+          _panelHeight(MediaQuery.sizeOf(context)) + 24,
+        ),
       ),
     );
   }
@@ -423,12 +447,16 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
       _directDistanceMeters = null;
       _routeRequestId++;
       _address = stage == _Stage.pickFrom ? _from!.address : _to!.address;
+      _resolvedPoint = (stage == _Stage.pickFrom ? _from! : _to!).toLatLng();
+      _reverseRequestId++;
+      _resolving = false;
     });
     final location = stage == _Stage.pickFrom ? _from! : _to!;
     _map.move(location.toLatLng(), 16);
   }
 
   Future<void> _createOrder() async {
+    if (_busy || _routeLoading || _from == null || _to == null) return;
     final km =
         _route?.distanceKm ??
         pricing.distanceKm(_from!.toLatLng(), _to!.toLatLng());
@@ -495,10 +523,10 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
         clientPrice: amount,
         orderType: 'customDelivery',
         priceNegotiable: true,
-        fromLocation: _from!.toGeoPoint(),
-        toLocation: _to!.toGeoPoint(),
+        pickup: _from!,
+        dropoff: _to!,
         distanceKm: km,
-        etaMinutes: pricing.etaMinutes(km),
+        etaMinutes: _route?.etaMinutes ?? pricing.etaMinutes(km),
         comment: _comment.text.trim().isEmpty ? null : _comment.text.trim(),
         isTestOrder: kDebugMode && user.isAnonymous,
       );
@@ -514,7 +542,7 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('$error')));
+        ).showSnackBar(SnackBar(content: Text(userErrorMessage(error))));
       }
     } finally {
       if (mounted) {
@@ -551,10 +579,22 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
                         maxZoom: 19,
                         onMapEvent: (event) {
                           if (!selecting || _cameraMoving) return;
-                          if (event is MapEventMoveStart && !_gestureMoving) {
-                            setState(() => _gestureMoving = true);
+                          if ((event is MapEventMoveStart ||
+                                  event is MapEventFlingAnimationStart ||
+                                  event is MapEventDoubleTapZoomStart) &&
+                              !_gestureMoving) {
+                            _reverseRequestId++;
+                            setState(() {
+                              _gestureMoving = true;
+                              _pendingPlace = null;
+                              _resolvedPoint = null;
+                              _resolving = true;
+                            });
                           }
-                          if (event is MapEventMoveEnd) {
+                          if (event is MapEventMoveEnd ||
+                              event is MapEventFlingAnimationEnd ||
+                              event is MapEventDoubleTapZoomEnd ||
+                              event is MapEventScrollWheelZoom) {
                             if (_gestureMoving) {
                               setState(() => _gestureMoving = false);
                             }

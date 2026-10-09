@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../models/tajgo_order.dart';
+import '../../features/map/models/tajgo_map_location.dart';
 import 'pricing.dart';
 
 class OrderRepository {
@@ -20,11 +21,15 @@ class OrderRepository {
     bool priceNegotiable = true,
     GeoPoint? fromLocation,
     GeoPoint? toLocation,
+    TajGoMapLocation? pickup,
+    TajGoMapLocation? dropoff,
     num? distanceKm,
     int? etaMinutes,
     String? comment,
     bool isTestOrder = false,
   }) async {
+    pickup?.validate();
+    dropoff?.validate();
     final ref = _db.collection('orders').doc();
     final order = TajGoOrder(
       id: ref.id,
@@ -33,12 +38,12 @@ class OrderRepository {
       status: OrderStatus.waiting,
       type: type,
       city: 'Худжанд',
-      fromText: fromText,
-      toText: toText,
+      fromText: pickup?.address ?? fromText,
+      toText: dropoff?.address ?? toText,
       price: price,
       currency: 'TJS',
-      fromLocation: fromLocation,
-      toLocation: toLocation,
+      fromLocation: pickup?.toGeoPoint() ?? fromLocation,
+      toLocation: dropoff?.toGeoPoint() ?? toLocation,
       distanceKm: distanceKm,
       etaMinutes: etaMinutes,
       confirmationCode: generateConfirmationCode(),

@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../features/map/models/tajgo_map_location.dart';
 
 enum OrderStatus {
   waiting,
@@ -141,6 +142,12 @@ class TajGoOrder {
   final num? distanceKm;
   final int? etaMinutes;
   final GeoPoint? fromLocation, toLocation;
+  TajGoMapLocation? get pickup => fromLocation == null
+      ? null
+      : TajGoMapLocation.fromGeoPoint(fromLocation!, address: fromText);
+  TajGoMapLocation? get dropoff => toLocation == null
+      ? null
+      : TajGoMapLocation.fromGeoPoint(toLocation!, address: toText);
   final List<String> declinedBy;
   final DateTime? createdAt, acceptedAt, updatedAt;
   final String? confirmationCode;

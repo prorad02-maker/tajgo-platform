@@ -1,4 +1,5 @@
 import 'package:latlong2/latlong.dart';
+import 'tajgo_map_location.dart';
 
 class PlaceSuggestion {
   const PlaceSuggestion({
@@ -50,6 +51,8 @@ class PlaceSuggestion {
   final List<String> tags;
 
   LatLng get point => LatLng(lat, lng);
+  TajGoMapLocation get location =>
+      TajGoMapLocation(latitude: lat, longitude: lng, address: address);
 
   PlaceSuggestion copyWith({
     double? distanceMetersFromUser,

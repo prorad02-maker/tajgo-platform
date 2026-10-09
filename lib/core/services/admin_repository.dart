@@ -72,6 +72,7 @@ class AdminRepository {
       final data = orderDoc.data();
       const allowed = {
         'waiting',
+        'waitingOffers',
         'accepted',
         'pickedUp',
         'delivered',

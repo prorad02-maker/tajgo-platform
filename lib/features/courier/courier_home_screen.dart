@@ -1,3 +1,4 @@
+import '../../core/services/user_error_message.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -130,7 +131,7 @@ class _CourierHomeScreenState extends State<CourierHomeScreen>
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('$error')));
+        ).showSnackBar(SnackBar(content: Text(userErrorMessage(error))));
       }
     } finally {
       if (mounted) {
@@ -332,7 +333,7 @@ class _CourierHomeScreenState extends State<CourierHomeScreen>
               _locationErrorShown = true;
               ScaffoldMessenger.of(
                 context,
-              ).showSnackBar(SnackBar(content: Text('$error')));
+              ).showSnackBar(SnackBar(content: Text(userErrorMessage(error))));
             }
           }
         },
@@ -362,7 +363,7 @@ class _CourierHomeScreenState extends State<CourierHomeScreen>
         _locationErrorShown = true;
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('$error')));
+        ).showSnackBar(SnackBar(content: Text(userErrorMessage(error))));
       }
     }
   }
@@ -424,6 +425,17 @@ class _CourierHomeScreenState extends State<CourierHomeScreen>
         body: StreamBuilder<TajGoCourier?>(
           stream: repository.courierStream(_uid),
           builder: (context, courierSnapshot) {
+            if (courierSnapshot.hasError) {
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Text(
+                    userErrorMessage(courierSnapshot.error),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              );
+            }
             final courier = courierSnapshot.data;
             final online = courier?.online ?? false;
             _lastOnline = online && _profileReady;
@@ -437,6 +449,17 @@ class _CourierHomeScreenState extends State<CourierHomeScreen>
                   ? Stream<TajGoOrder?>.value(null)
                   : repository.orderStream(courier!.activeOrderId!),
               builder: (context, activeSnapshot) {
+                if (activeSnapshot.hasError) {
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Text(
+                        userErrorMessage(activeSnapshot.error),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  );
+                }
                 final activeOrder = activeSnapshot.data;
                 return Column(
                   children: [
@@ -716,6 +739,16 @@ class _PilotOrdersFeed extends StatelessWidget {
   Widget build(BuildContext context) => StreamBuilder<List<TajGoOrder>>(
     stream: repository.waitingOrdersStream(),
     builder: (context, snapshot) {
+      if (snapshot.hasError) {
+        return Padding(
+          padding: const EdgeInsets.all(16),
+          child: Text(userErrorMessage(snapshot.error)),
+        );
+      }
+      if (snapshot.connectionState == ConnectionState.waiting &&
+          !snapshot.hasData) {
+        return const Center(child: CircularProgressIndicator());
+      }
       final orders =
           (snapshot.data ?? const <TajGoOrder>[])
               .where(

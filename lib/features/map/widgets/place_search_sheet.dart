@@ -67,6 +67,11 @@ class _PlaceSearchSheetState extends State<_PlaceSearchSheet> {
 
   void _onChanged(String value) {
     _debounce?.cancel();
+    _requestId++;
+    setState(() {
+      _loading = true;
+      _results = const [];
+    });
     _debounce = Timer(const Duration(milliseconds: 320), () => _search(value));
   }
 
@@ -129,6 +134,7 @@ class _PlaceSearchSheetState extends State<_PlaceSearchSheet> {
                     ? null
                     : IconButton(
                         onPressed: () {
+                          _debounce?.cancel();
                           _query.clear();
                           setState(() {});
                           _search('');

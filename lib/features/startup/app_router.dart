@@ -7,6 +7,7 @@ import '../courier/courier_home_screen.dart';
 import '../courier/courier_onboarding_screen.dart';
 import '../courier/courier_application_status_screen.dart';
 import '../customer/customer_home_screen.dart';
+import '../admin/admin_home_screen.dart';
 import 'intent_selection_screen.dart';
 import 'role_onboarding_screen.dart';
 import 'startup_decision.dart';
@@ -100,6 +101,7 @@ class _AppStartupRouterState extends State<AppStartupRouter> {
       }
       final state = snapshot.data!;
       return switch (state.destination) {
+        StartupDestination.adminHome => const AdminHomeScreen(),
         StartupDestination.intent => const IntentSelectionScreen(),
         StartupDestination.roleOnboarding => const RoleOnboardingScreen(),
         StartupDestination.profileCompletion => ProfileCompletionScreen(

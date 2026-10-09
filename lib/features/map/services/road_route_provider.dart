@@ -53,8 +53,7 @@ class RoadRouteProvider implements RouteProvider {
     if (!configured) {
       throw StateError('Road route provider is disabled.');
     }
-    final effectiveMode = config.mode;
-    final uri = buildRequestUri(from: from, to: to, mode: effectiveMode);
+    final uri = buildRequestUri(from: from, to: to, mode: mode);
     _lastRequestUri = uri;
     _lastHttpStatus = null;
     _lastParseSuccess = null;
@@ -107,11 +106,20 @@ class RoadRouteProvider implements RouteProvider {
     final profile = config.profileOverride.trim().isEmpty
         ? modeProfile
         : config.profileOverride.trim();
-    final base = config.baseUrl.replaceAll(RegExp(r'/+$'), '');
-    return Uri.parse(
-      '$base/route/v1/$profile/${from.longitude},${from.latitude};${to.longitude},${to.latitude}',
-    ).replace(
+    final base = Uri.parse(config.baseUrl);
+    var path = base.path.replaceAll(RegExp(r'/+$'), '');
+    var requestProfile = profile;
+    // This host runs a separate dataset for each transport mode. The URL
+    // profile name alone does not select the underlying OSRM dataset.
+    if (base.host == 'routing.openstreetmap.de') {
+      path = mode == RouteMode.car ? '/routed-car' : '/routed-bike';
+      requestProfile = 'driving';
+    }
+    return base.replace(
+      path:
+          '$path/route/v1/$requestProfile/${from.longitude},${from.latitude};${to.longitude},${to.latitude}',
       queryParameters: {
+        ...base.queryParameters,
         'overview': 'full',
         'geometries': 'geojson',
         'steps': 'true',
@@ -238,6 +246,12 @@ class RoadRouteProvider implements RouteProvider {
     required List<TajGoNavigationStep> steps,
   }) {
     if (points.length < 2) throw StateError('Route geometry is empty.');
+    if (!distanceMeters.isFinite ||
+        distanceMeters <= 0 ||
+        !durationMilliseconds.isFinite ||
+        durationMilliseconds < 0) {
+      throw StateError('Route metrics are invalid.');
+    }
     return TajGoRoute(
       points: points,
       distanceKm: distanceMeters / 1000,

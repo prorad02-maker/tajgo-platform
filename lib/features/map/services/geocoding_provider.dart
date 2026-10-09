@@ -18,21 +18,26 @@ class NativeGeocodingProvider implements GeocodingProvider {
       final locations = await Geocoding()
           .locationFromAddress('$query, Худжанд, Таджикистан')
           .timeout(const Duration(seconds: 5));
-      return locations.take(5).indexed.map((entry) {
-        final location = entry.$2;
-        return PlaceSuggestion(
-          id: 'remote_${location.latitude}_${location.longitude}_${entry.$1}',
-          title: query.trim(),
-          subtitle: 'Результат геокодера · уточните точку на карте',
-          shortTitle: query.trim(),
-          address: '$query, Худжанд',
-          lat: location.latitude,
-          lng: location.longitude,
-          source: 'remote',
-          confidence: entry.$1 == 0 ? 0.72 : 0.58,
-          category: 'address',
-        );
-      }).toList();
+      return await Future.wait(
+        locations.take(5).indexed.map((entry) async {
+          final location = entry.$2;
+          final resolved = await reverse(
+            LatLng(location.latitude, location.longitude),
+          );
+          return PlaceSuggestion(
+            id: 'remote_${location.latitude}_${location.longitude}_${entry.$1}',
+            title: resolved?.title ?? query.trim(),
+            subtitle: resolved?.address ?? 'Уточните точку на карте',
+            shortTitle: resolved?.shortTitle ?? query.trim(),
+            address: resolved?.address ?? '$query, Худжанд',
+            lat: location.latitude,
+            lng: location.longitude,
+            source: 'remote',
+            confidence: entry.$1 == 0 ? 0.72 : 0.58,
+            category: 'address',
+          );
+        }),
+      );
     } catch (_) {
       return const [];
     }
@@ -46,18 +51,13 @@ class NativeGeocodingProvider implements GeocodingProvider {
           .timeout(const Duration(seconds: 5));
       if (places.isEmpty) return null;
       final place = places.first;
-      final parts = [
-        place.street,
-        place.subLocality,
-        place.locality,
-      ].whereType<String>().where((part) => part.trim().isNotEmpty).toList();
-      if (parts.isEmpty) return null;
-      final address = parts.join(', ');
+      final address = formatPlacemarkAddress(place);
+      if (address.isEmpty) return null;
       return PlaceSuggestion(
         id: 'manual_${point.latitude}_${point.longitude}',
-        title: parts.first,
+        title: address.split(',').first,
         subtitle: address,
-        shortTitle: parts.first,
+        shortTitle: address.split(',').first,
         address: address,
         lat: point.latitude,
         lng: point.longitude,
@@ -69,4 +69,19 @@ class NativeGeocodingProvider implements GeocodingProvider {
       return null;
     }
   }
+}
+
+String formatPlacemarkAddress(Placemark place) {
+  final street = (place.street ?? '').trim();
+  final road = (place.thoroughfare ?? '').trim();
+  final house = (place.subThoroughfare ?? '').trim();
+  final first = road.isNotEmpty
+      ? [road, if (house.isNotEmpty) house].join(', ')
+      : street;
+  final seen = <String>{};
+  return [first, place.subLocality, place.locality]
+      .whereType<String>()
+      .map((part) => part.trim())
+      .where((part) => part.isNotEmpty && seen.add(part.toLowerCase()))
+      .join(', ');
 }

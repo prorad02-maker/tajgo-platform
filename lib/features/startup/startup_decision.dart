@@ -8,6 +8,7 @@ enum StartupDestination {
   customerHome,
   courierOnboarding,
   courierHome,
+  adminHome,
 }
 
 StartupDestination resolveStartupDestination({
@@ -15,6 +16,7 @@ StartupDestination resolveStartupDestination({
   AppUser? profile,
 }) {
   if (!authenticated) return StartupDestination.intent;
+  if (profile?.isAdmin == true) return StartupDestination.adminHome;
   if (profile == null || !profile.profileComplete) {
     return StartupDestination.profileCompletion;
   }
