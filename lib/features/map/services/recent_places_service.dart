@@ -21,7 +21,11 @@ class RecentPlacesService {
           decoded
               .whereType<Map<String, dynamic>>()
               .map((item) => PlaceSuggestion.fromJson(item, source: 'recent'))
-              .where((place) => place.lat != 0 || place.lng != 0)
+              .where(
+                (place) =>
+                    place.location.isValid &&
+                    (place.lat != 0 || place.lng != 0),
+              )
               .where((place) => type == null || place.recentType == type)
               .toList()
             ..sort(
@@ -32,12 +36,15 @@ class RecentPlacesService {
             );
       return places.take(_limit).toList();
     } catch (_) {
-      await _preferences.remove(_key);
+      try {
+        await _preferences.remove(_key);
+      } catch (_) {}
       return const [];
     }
   }
 
   Future<void> save(PlaceSuggestion place, {required String type}) async {
+    place.location.validate();
     final places = await load();
     final unique = places
         .where(

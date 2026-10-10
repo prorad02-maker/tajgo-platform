@@ -12,6 +12,7 @@ import '../../core/services/courier_application_repository.dart';
 import '../../core/services/external_navigator_service.dart';
 import '../../core/services/marketplace_repository.dart';
 import '../../core/services/order_repository.dart';
+import '../../core/services/order_command_service.dart';
 import '../../core/services/route_service.dart';
 import '../../core/services/user_repository.dart';
 import '../../core/services/role_preference_service.dart';
@@ -23,6 +24,7 @@ class TajGoScope extends InheritedWidget {
     final db = FirebaseFirestore.instance;
     final auth = AuthService(FirebaseAuth.instance);
     final users = UserRepository(db);
+    final commands = OrderCommandService();
     final rolePreferences = RolePreferenceService();
     return TajGoScope._(
       key: key,
@@ -31,15 +33,15 @@ class TajGoScope extends InheritedWidget {
       accountModeService: AccountModeService(auth, users, rolePreferences),
       rolePreferenceService: rolePreferences,
       accountMigrationService: AccountMigrationService(db),
-      adminRepository: AdminRepository(db),
-      courierRepository: CourierRepository(db),
-      courierOfferRepository: CourierOfferRepository(db),
+      adminRepository: AdminRepository(db, commands: commands),
+      courierRepository: CourierRepository(db, commands: commands),
+      courierOfferRepository: CourierOfferRepository(db, commands: commands),
       courierApplicationRepository: CourierApplicationRepository(db),
-      orderRepository: OrderRepository(db),
+      orderRepository: OrderRepository(db, commands: commands),
       routeService: RouteService(),
       locationService: TajGoLocationService(),
       externalNavigatorService: ExternalNavigatorService(),
-      marketplaceRepository: MarketplaceRepository(db),
+      marketplaceRepository: MarketplaceRepository(db, commands: commands),
       marketplaceCart: MarketplaceCart(),
       child: child,
     );

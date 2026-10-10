@@ -68,7 +68,7 @@ class TajGoRouteSummaryCard extends StatelessWidget {
                     formatRouteQuality(value),
                     style: TextStyle(
                       color: fallback
-                          ? TajGoColors.warning
+                          ? TajGoColors.warningText
                           : TajGoColors.darkGreen,
                       fontSize: 12,
                     ),

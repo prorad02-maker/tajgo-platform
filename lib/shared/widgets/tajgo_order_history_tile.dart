@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/constants/tajgo_colors.dart';
 import '../../core/models/tajgo_order.dart';
+import '../../core/utils/money_formatter.dart';
 import 'tajgo_badge.dart';
 
 /// Строка истории заказов: тип, маршрут, дата, цена и бейдж статуса.
@@ -11,13 +12,14 @@ class TajGoOrderHistoryTile extends StatelessWidget {
   final TajGoOrder order;
   final VoidCallback? onTap;
 
-  static const _emoji = <String, String>{
-    'package': '📦',
-    'food': '🍔',
-    'shops': '🛒',
-    'pharmacy': '💊',
-    'flowers': '🌸',
-    'docs': '📄',
+  static const _icons = <String, IconData>{
+    'package': Icons.inventory_2_outlined,
+    'food': Icons.restaurant_rounded,
+    'shops': Icons.shopping_basket_outlined,
+    'groceries': Icons.shopping_basket_outlined,
+    'pharmacy': Icons.local_pharmacy_outlined,
+    'flowers': Icons.local_florist_outlined,
+    'docs': Icons.description_outlined,
   };
 
   String _dateLabel() {
@@ -35,7 +37,7 @@ class TajGoOrderHistoryTile extends StatelessWidget {
       return 'вчера';
     }
     String two(int value) => value.toString().padLeft(2, '0');
-    return '${two(created.day)}.${two(created.month)}';
+    return '${two(created.day)}.${two(created.month)}${created.year == now.year ? '' : '.${created.year}'}';
   }
 
   (String, Color, Color) get _badge => switch (order.status) {
@@ -49,7 +51,28 @@ class TajGoOrderHistoryTile extends StatelessWidget {
       const Color(0xFFFEE2E2),
       TajGoColors.error,
     ),
-    _ => ('✖ Отменён', TajGoColors.soonBg, TajGoColors.soonText),
+    OrderStatus.cancelled => (
+      '✖ Отменён',
+      TajGoColors.soonBg,
+      TajGoColors.soonText,
+    ),
+    OrderStatus.waiting => (
+      'Поиск курьера',
+      TajGoColors.mint,
+      TajGoColors.darkGreen,
+    ),
+    OrderStatus.accepted ||
+    OrderStatus.pickedUp => ('В пути', TajGoColors.mint, TajGoColors.darkGreen),
+    OrderStatus.delivered => (
+      'Ожидает подтверждения',
+      TajGoColors.mint,
+      TajGoColors.darkGreen,
+    ),
+    OrderStatus.unknown => (
+      'Статус недоступен',
+      TajGoColors.soonBg,
+      TajGoColors.soonText,
+    ),
   };
 
   @override
@@ -62,49 +85,50 @@ class TajGoOrderHistoryTile extends StatelessWidget {
         borderRadius: BorderRadius.circular(18),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          child: Row(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                _emoji[order.type] ?? '📦',
-                style: const TextStyle(fontSize: 22),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    _icons[order.type] ?? Icons.inventory_2_outlined,
+                    color: TajGoColors.darkGreen,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
                       '${order.fromText} → ${order.toText}',
-                      maxLines: 1,
+                      maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         fontWeight: FontWeight.w700,
                         fontSize: 13.5,
                       ),
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      _dateLabel(),
-                      style: const TextStyle(
-                        color: TajGoColors.muted,
-                        fontSize: 11,
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-              const SizedBox(width: 10),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 12,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
                   Text(
-                    '${order.price} ${order.currency}',
+                    _dateLabel(),
+                    style: const TextStyle(
+                      color: TajGoColors.muted,
+                      fontSize: 11,
+                    ),
+                  ),
+                  Text(
+                    '${formatMoney(order.price)} ${order.currency}',
                     style: const TextStyle(
                       fontWeight: FontWeight.w800,
                       fontSize: 13,
                     ),
                   ),
-                  const SizedBox(height: 4),
                   TajGoBadge(
                     text: badge.$1,
                     background: badge.$2,

@@ -1,9 +1,10 @@
 import 'dart:async';
 
-import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:latlong2/latlong.dart';
 
 import '../models/tajgo_map_location.dart';
+import 'geocoding_provider.dart';
 
 enum TajGoLocationIssue { serviceDisabled, denied, deniedForever, unavailable }
 
@@ -112,26 +113,10 @@ class TajGoLocationService {
     required double longitude,
   }) async {
     try {
-      final places = await Geocoding()
-          .placemarkFromCoordinates(latitude, longitude)
-          .timeout(const Duration(seconds: 5));
-      if (places.isEmpty) {
-        return _fallback(latitude, longitude);
-      }
-      final place = places.first;
-      final parts = [
-        place.street,
-        place.subLocality,
-        place.locality,
-      ].whereType<String>().where((part) => part.trim().isNotEmpty).toList();
-      if (parts.isEmpty) {
-        return _fallback(latitude, longitude);
-      }
-      return TajGoMapLocation(
-        latitude: latitude,
-        longitude: longitude,
-        address: parts.join(', '),
+      final place = await const NativeGeocodingProvider().reverse(
+        LatLng(latitude, longitude),
       );
+      return place?.location ?? _fallback(latitude, longitude);
     } catch (_) {
       return _fallback(latitude, longitude);
     }

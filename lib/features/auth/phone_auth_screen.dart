@@ -254,13 +254,15 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
                 border: OutlineInputBorder(),
               ),
             ),
-            Row(
+            Wrap(
+              alignment: WrapAlignment.spaceBetween,
+              spacing: 12,
+              runSpacing: 4,
               children: [
                 TextButton(
                   onPressed: _loading ? null : _changePhone,
                   child: const Text('Изменить номер'),
                 ),
-                const Spacer(),
                 TextButton(
                   onPressed: _loading || _resendSeconds > 0
                       ? null

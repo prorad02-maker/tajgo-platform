@@ -1,3 +1,4 @@
+import '../../core/services/user_error_message.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/constants/tajgo_colors.dart';
@@ -87,7 +88,7 @@ class _AdminOrdersScreenState extends State<AdminOrdersScreen> {
                 if (snapshot.hasError) {
                   return _Message(
                     icon: Icons.lock_rounded,
-                    text: '${snapshot.error}',
+                    text: userErrorMessage(snapshot.error),
                   );
                 }
                 final orders = (snapshot.data ?? const <TajGoOrder>[])
@@ -178,6 +179,7 @@ String orderStatusLabel(OrderStatus status) => switch (status) {
   OrderStatus.completed => 'Завершён',
   OrderStatus.disputed => 'Спорный',
   OrderStatus.cancelled => 'Отменён',
+  OrderStatus.unknown => 'Статус недоступен',
 };
 
 class _Message extends StatelessWidget {

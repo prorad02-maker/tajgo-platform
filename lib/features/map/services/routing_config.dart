@@ -54,15 +54,16 @@ class RoutingConfig {
     );
     return RoutingConfig(
       enabled:
-          const bool.fromEnvironment('ROUTING_ENABLED', defaultValue: false) ||
-          const bool.fromEnvironment(
-            'TAJGO_ROUTE_ENABLED',
-            defaultValue: false,
-          ),
+          const bool.fromEnvironment('ROUTING_ENABLED', defaultValue: true) &&
+          const bool.fromEnvironment('TAJGO_ROUTE_ENABLED', defaultValue: true),
       providerType: provider == 'graphhopper'
           ? RoutingProviderType.graphHopper
           : RoutingProviderType.osrm,
-      baseUrl: preferredBaseUrl == '' ? legacyBaseUrl : preferredBaseUrl,
+      baseUrl: preferredBaseUrl.isNotEmpty
+          ? preferredBaseUrl
+          : legacyBaseUrl.isNotEmpty
+          ? legacyBaseUrl
+          : 'https://routing.openstreetmap.de',
       apiKey: preferredKey == '' ? legacyKey : preferredKey,
       timeout: Duration(
         milliseconds: timeoutSeconds > 0
@@ -80,7 +81,16 @@ class RoutingConfig {
   List<String> get validationIssues => [
     if (enabled && baseUrl.trim().isEmpty) 'ROUTING_BASE_URL не задан',
     if (timeout <= Duration.zero) 'Timeout должен быть больше нуля',
-    if (baseUrl.isNotEmpty && Uri.tryParse(baseUrl)?.hasScheme != true)
-      'ROUTING_BASE_URL должен быть абсолютным URL',
+    if (baseUrl.isNotEmpty && !_validEndpoint(baseUrl))
+      'ROUTING_BASE_URL должен быть HTTP(S) URL с именем сервера',
   ];
+
+  static bool _validEndpoint(String value) {
+    final uri = Uri.tryParse(value);
+    return uri != null &&
+        (uri.scheme == 'https' || uri.scheme == 'http') &&
+        uri.host.isNotEmpty &&
+        uri.userInfo.isEmpty &&
+        !uri.hasFragment;
+  }
 }

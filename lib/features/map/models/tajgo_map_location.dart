@@ -10,6 +10,21 @@ class TajGoMapLocation {
   final double latitude, longitude;
   final String address;
 
+  bool get isValid =>
+      address.trim().isNotEmpty &&
+      latitude.isFinite &&
+      longitude.isFinite &&
+      latitude >= -90 &&
+      latitude <= 90 &&
+      longitude >= -180 &&
+      longitude <= 180;
+
+  void validate() {
+    if (!isValid) {
+      throw ArgumentError('Укажите адрес и корректную точку на карте.');
+    }
+  }
+
   GeoPoint toGeoPoint() => GeoPoint(latitude, longitude);
   LatLng toLatLng() => LatLng(latitude, longitude);
   factory TajGoMapLocation.fromGeoPoint(

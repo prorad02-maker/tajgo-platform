@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../features/map/models/tajgo_map_location.dart';
 
 enum OrderStatus {
   waiting,
@@ -8,6 +9,7 @@ enum OrderStatus {
   completed,
   disputed,
   cancelled,
+  unknown,
 }
 
 class CatalogOrderItem {
@@ -46,8 +48,8 @@ OrderStatus orderStatusFromString(String? value) {
     'completed' => OrderStatus.completed,
     'disputed' => OrderStatus.disputed,
     'cancelled' => OrderStatus.cancelled,
-    'draft' || 'waiting' || 'waitingOffers' || null => OrderStatus.waiting,
-    _ => OrderStatus.waiting,
+    'draft' || 'waiting' || 'waitingOffers' => OrderStatus.waiting,
+    _ => OrderStatus.unknown,
   };
 }
 
@@ -59,6 +61,7 @@ String orderStatusToString(OrderStatus status) => switch (status) {
   OrderStatus.completed => 'completed',
   OrderStatus.disputed => 'disputed',
   OrderStatus.cancelled => 'cancelled',
+  OrderStatus.unknown => 'unknown',
 };
 
 class TajGoOrder {
@@ -113,6 +116,7 @@ class TajGoOrder {
     this.subtotal,
     this.deliveryFee,
     this.total,
+    this.commandVersion,
   });
 
   final String id,
@@ -135,13 +139,30 @@ class TajGoOrder {
   final String? selectedOfferId, selectedCourierId;
   final DateTime? offerExpiresAt;
   final String pricingVersion;
+  final String? commandVersion;
+  bool get isServerManaged => commandVersion == 'server-v1';
   final String? partnerId, partnerName;
   final List<CatalogOrderItem> items;
   final num? subtotal, deliveryFee, total;
   final num? distanceKm;
   final int? etaMinutes;
   final GeoPoint? fromLocation, toLocation;
+  TajGoMapLocation? get pickup => fromLocation == null
+      ? null
+      : TajGoMapLocation.fromGeoPoint(fromLocation!, address: fromText);
+  TajGoMapLocation? get dropoff => toLocation == null
+      ? null
+      : TajGoMapLocation.fromGeoPoint(toLocation!, address: toText);
   final List<String> declinedBy;
+  bool get isActive =>
+      completedAt == null &&
+      const {
+        OrderStatus.waiting,
+        OrderStatus.accepted,
+        OrderStatus.pickedUp,
+        OrderStatus.delivered,
+        OrderStatus.disputed,
+      }.contains(status);
   final DateTime? createdAt, acceptedAt, updatedAt;
   final String? confirmationCode;
   final DateTime? arrivedAtPickupAt,
@@ -206,6 +227,7 @@ class TajGoOrder {
           data['selectedCourierId'] as String? ?? data['courierId'] as String?,
       offerExpiresAt: date('offerExpiresAt'),
       pricingVersion: data['pricingVersion'] as String? ?? 'legacy',
+      commandVersion: data['commandVersion'] as String?,
       partnerId: data['partnerId'] as String?,
       partnerName: data['partnerName'] as String?,
       items: (data['items'] as List<dynamic>? ?? const [])

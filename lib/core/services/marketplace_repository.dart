@@ -6,11 +6,24 @@ import '../models/marketplace_product.dart';
 import '../models/marketplace_sample_catalog.dart';
 import 'marketplace_import_service.dart';
 import 'pricing.dart';
+import 'order_command_service.dart';
+import '../utils/money_formatter.dart';
 
 class MarketplaceRepository {
-  MarketplaceRepository(this._db);
+  MarketplaceRepository(
+    this._db, {
+    OrderCommandService? commands,
+    this.allowPreview = const bool.fromEnvironment(
+      'TAJGO_CATALOG_PREVIEW_ENABLED',
+    ),
+  })
+    // Public injection name deliberately differs from the private field.
+    // ignore: prefer_initializing_formals
+    : _commands = commands;
 
   final FirebaseFirestore _db;
+  final OrderCommandService? _commands;
+  final bool allowPreview;
 
   Stream<List<MarketplacePartner>> partnersStream({String? category}) async* {
     Query<Map<String, dynamic>> query = _db
@@ -24,7 +37,7 @@ class MarketplaceRepository {
         final partners = snapshot.docs
             .map(MarketplacePartner.fromDoc)
             .toList(growable: false);
-        if (partners.isEmpty) {
+        if (partners.isEmpty && allowPreview) {
           yield samplePartnersForCategory(category);
           continue;
         }
@@ -38,6 +51,7 @@ class MarketplaceRepository {
         yield partners;
       }
     } catch (_) {
+      if (!allowPreview) rethrow;
       yield samplePartnersForCategory(category);
     }
   }
@@ -273,96 +287,126 @@ class MarketplaceRepository {
     required num distanceKm,
     required int etaMinutes,
     String? comment,
-  }) => _db.runTransaction((transaction) async {
-    if (cartLines.isEmpty) throw StateError('Корзина пока пуста.');
-    final partnerRef = _db.collection('partners').doc(partner.id);
-    final partnerDoc = await transaction.get(partnerRef);
-    final freshPartner = partnerDoc.exists
-        ? MarketplacePartner.fromMap(partner.id, partnerDoc.data()!)
-        : null;
-    if (freshPartner == null || !freshPartner.isActive) {
-      throw StateError('Партнёр сейчас недоступен.');
-    }
-    if (!freshPartner.isOpen) {
-      throw StateError('Партнёр сейчас закрыт.');
-    }
-
-    final items = <Map<String, dynamic>>[];
-    num subtotal = 0;
-    for (final line in cartLines) {
-      final productDoc = await transaction.get(
-        _db.collection('products').doc(line.product.id),
-      );
-      if (!productDoc.exists) throw StateError('Один из товаров не найден.');
-      final product = MarketplaceProduct.fromMap(
-        productDoc.id,
-        productDoc.data()!,
-      );
-      if (product.partnerId != partner.id ||
-          product.hidden ||
-          !product.isAvailable) {
-        throw StateError('Некоторые товары закончились. Обновите корзину.');
-      }
-      if (product.price != line.product.price) {
-        throw StateError('Цена товара изменилась. Обновите корзину.');
-      }
-      if (line.quantity <= 0) throw StateError('Количество товара неверно.');
-      final lineTotal = product.price * line.quantity;
-      subtotal += lineTotal;
-      items.add({
-        'productId': product.id,
-        'name': product.name,
-        'unit': product.unit,
-        'unitPrice': product.price,
-        'quantity': line.quantity,
-        'lineTotal': lineTotal,
+  }) async {
+    if (_commands?.enabled == true) {
+      final result = await _commands!.run('checkout', {
+        'partnerId': partner.id,
+        'dropoff': {
+          'latitude': deliveryLocation.latitude,
+          'longitude': deliveryLocation.longitude,
+          'address': deliveryAddress,
+        },
+        'items': [
+          for (final line in cartLines)
+            {
+              'productId': line.product.id,
+              'quantity': line.quantity,
+              'expectedPrice': line.product.price,
+            },
+        ],
+        'comment': comment ?? '',
       });
+      return result['orderId'] as String;
     }
-    if (subtotal < freshPartner.minimumOrder) {
-      final missing = freshPartner.minimumOrder - subtotal;
-      throw StateError('Добавьте товаров ещё на $missing TJS.');
-    }
+    return _db.runTransaction((transaction) async {
+      if (cartLines.isEmpty) throw StateError('Корзина пока пуста.');
+      final partnerRef = _db.collection('partners').doc(partner.id);
+      final partnerDoc = await transaction.get(partnerRef);
+      final freshPartner = partnerDoc.exists
+          ? MarketplacePartner.fromMap(partner.id, partnerDoc.data()!)
+          : null;
+      if (freshPartner == null || !freshPartner.isActive) {
+        throw StateError('Партнёр сейчас недоступен.');
+      }
+      if (!freshPartner.isOpen) {
+        throw StateError('Партнёр сейчас закрыт.');
+      }
 
-    final deliveryFee = freshPartner.deliveryFee < minimumPrice
-        ? minimumPrice
-        : freshPartner.deliveryFee;
-    final ref = _db.collection('orders').doc();
-    transaction.set(ref, {
-      'customerId': customerId,
-      'customerName': customerName,
-      'status': 'waitingOffers',
-      'orderType': 'catalogOrder',
-      'type': freshPartner.category,
-      'city': 'Худжанд',
-      'fromText': freshPartner.address,
-      'toText': deliveryAddress.trim(),
-      'fromLocation': freshPartner.location,
-      'toLocation': deliveryLocation,
-      'partnerId': freshPartner.id,
-      'partnerName': freshPartner.name,
-      'items': items,
-      'subtotal': subtotal,
-      'deliveryFee': deliveryFee,
-      'total': subtotal + deliveryFee,
-      'price': deliveryFee,
-      'suggestedPrice': deliveryFee,
-      'clientPrice': deliveryFee,
-      'priceNegotiable': false,
-      'offersCount': 0,
-      'pricingVersion': 'marketplace-v1',
-      'currency': 'TJS',
-      'confirmationCode': generateConfirmationCode(),
-      'distanceKm': distanceKm,
-      'etaMinutes': etaMinutes,
-      if (comment != null && comment.trim().isNotEmpty)
-        'comment': comment.trim(),
-      if (freshPartner.isTest) 'isTestOrder': true,
-      'declinedBy': <String>[],
-      'createdAt': FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
+      final items = <Map<String, dynamic>>[];
+      num subtotal = 0;
+      for (final line in cartLines) {
+        final productDoc = await transaction.get(
+          _db.collection('products').doc(line.product.id),
+        );
+        if (!productDoc.exists) throw StateError('Один из товаров не найден.');
+        final product = MarketplaceProduct.fromMap(
+          productDoc.id,
+          productDoc.data()!,
+        );
+        if (product.partnerId != partner.id ||
+            product.hidden ||
+            !product.isAvailable) {
+          throw StateError('Некоторые товары закончились. Обновите корзину.');
+        }
+        if (product.price != line.product.price) {
+          throw StateError('Цена товара изменилась. Обновите корзину.');
+        }
+        if (!line.quantity.isFinite ||
+            line.quantity <= 0 ||
+            line.quantity > 100 ||
+            (product.unit == 'kg'
+                ? line.quantity * 2 != (line.quantity * 2).roundToDouble()
+                : line.quantity != line.quantity.roundToDouble())) {
+          throw StateError('Количество товара неверно.');
+        }
+        final lineTotal =
+            ((product.price * 100).round() * line.quantity).round() / 100;
+        subtotal = roundMoney(subtotal + lineTotal);
+        items.add({
+          'productId': product.id,
+          'name': product.name,
+          'unit': product.unit,
+          'unitPrice': product.price,
+          'quantity': line.quantity,
+          'lineTotal': lineTotal,
+        });
+      }
+      if (subtotal < freshPartner.minimumOrder) {
+        final missing = freshPartner.minimumOrder - subtotal;
+        throw StateError('Добавьте товаров ещё на $missing TJS.');
+      }
+
+      final deliveryFee = freshPartner.deliveryFee < minimumPrice
+          ? minimumPrice
+          : freshPartner.deliveryFee;
+      final ref = _db.collection('orders').doc();
+      transaction.set(ref, {
+        'customerId': customerId,
+        'customerName': customerName,
+        'status': 'waitingOffers',
+        'orderType': 'catalogOrder',
+        'type': freshPartner.category,
+        'city': 'Худжанд',
+        'fromText': freshPartner.address,
+        'toText': deliveryAddress.trim(),
+        'fromLocation': freshPartner.location,
+        'toLocation': deliveryLocation,
+        'partnerId': freshPartner.id,
+        'partnerName': freshPartner.name,
+        'items': items,
+        'subtotal': subtotal,
+        'deliveryFee': deliveryFee,
+        'total': roundMoney(subtotal + deliveryFee),
+        'price': deliveryFee,
+        'suggestedPrice': deliveryFee,
+        'clientPrice': deliveryFee,
+        'priceNegotiable': false,
+        'offersCount': 0,
+        'pricingVersion': 'marketplace-v1',
+        'currency': 'TJS',
+        'confirmationCode': generateConfirmationCode(),
+        'distanceKm': distanceKm,
+        'etaMinutes': etaMinutes,
+        if (comment != null && comment.trim().isNotEmpty)
+          'comment': comment.trim(),
+        if (freshPartner.isTest) 'isTestOrder': true,
+        'declinedBy': <String>[],
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      return ref.id;
     });
-    return ref.id;
-  });
+  }
 }
 
 class MarketplaceImportResult {

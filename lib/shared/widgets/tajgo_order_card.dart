@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../../core/constants/tajgo_colors.dart';
 import '../../core/models/tajgo_order.dart';
+import '../../core/utils/money_formatter.dart';
+import '../../features/map/utils/route_display_formatter.dart';
 import 'tajgo_badge.dart';
 
 class TajGoOrderCard extends StatelessWidget {
@@ -22,6 +24,7 @@ class TajGoOrderCard extends StatelessWidget {
     'package': ('📦', 'Посылка'),
     'food': ('🍔', 'Еда'),
     'shops': ('🛒', 'Магазины'),
+    'groceries': ('🛒', 'Продукты'),
     'pharmacy': ('💊', 'Аптека'),
     'flowers': ('🌸', 'Цветы'),
     'docs': ('📄', 'Документы'),
@@ -31,9 +34,10 @@ class TajGoOrderCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final type = _types[order.type] ?? _types['package']!;
     final meta = <String>[
-      if (order.distanceKm != null) '${order.distanceKm} км',
+      if (order.distanceKm != null)
+        '≈ ${formatRouteDistance(order.distanceKm!.toDouble())}',
       if (order.etaMinutes != null) '~${order.etaMinutes} мин',
-      '${order.price} ${order.currency}',
+      '${formatMoney(order.price)} ${order.currency}',
     ].join(' · ');
     return Card(
       color: backgroundColor,
@@ -64,7 +68,7 @@ class TajGoOrderCard extends StatelessWidget {
                     const SizedBox(width: 6),
                   ],
                   TajGoBadge(
-                    text: '${order.price} ${order.currency}',
+                    text: '${formatMoney(order.price)} ${order.currency}',
                     background: TajGoColors.mint,
                     foreground: TajGoColors.darkGreen,
                   ),

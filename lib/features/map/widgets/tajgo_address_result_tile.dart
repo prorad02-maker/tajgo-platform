@@ -56,7 +56,7 @@ class TajGoAddressResultTile extends StatelessWidget {
               color: place.confidence >= 0.8
                   ? TajGoColors.darkGreen
                   : place.confidence >= 0.55
-                  ? TajGoColors.warning
+                  ? TajGoColors.warningText
                   : TajGoColors.error,
             ),
           ),

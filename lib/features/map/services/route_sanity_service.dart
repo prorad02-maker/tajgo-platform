@@ -44,7 +44,13 @@ class RouteSanityService {
     final providerMeters = candidate == null
         ? null
         : candidate.distanceKm * 1000;
-    final reason = _invalidReason(candidate, directMeters, providerMeters);
+    final reason = _invalidReason(
+      candidate,
+      directMeters,
+      providerMeters,
+      from,
+      to,
+    );
     if (reason == null) {
       final selectedFallback = candidate!.isFallback;
       return RouteSanityResult(
@@ -79,9 +85,21 @@ class RouteSanityService {
     TajGoRoute? route,
     double directMeters,
     double? routeMeters,
+    LatLng from,
+    LatLng to,
   ) {
     if (route == null) return 'route is null';
     if (route.points.length < 2) return 'route has fewer than two points';
+    if (route.points.any(
+      (point) =>
+          !point.latitude.isFinite ||
+          !point.longitude.isFinite ||
+          point.latitude.abs() > 90 ||
+          point.longitude.abs() > 180,
+    )) {
+      return 'route coordinates are invalid';
+    }
+    if (route.etaMinutes <= 0) return 'route ETA is not positive';
     if (routeMeters == null || !routeMeters.isFinite || routeMeters <= 0) {
       return 'route distance is not positive';
     }
@@ -92,6 +110,12 @@ class RouteSanityService {
         return 'fallback distance differs from direct baseline';
       }
       return null;
+    }
+
+    const distance = Distance();
+    if (distance.as(LengthUnit.Meter, from, route.points.first) > 500 ||
+        distance.as(LengthUnit.Meter, to, route.points.last) > 500) {
+      return 'route endpoints are too far from selected locations';
     }
 
     if (directMeters > 0 && routeMeters < directMeters * 0.6) {

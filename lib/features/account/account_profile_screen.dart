@@ -3,13 +3,18 @@ import 'package:flutter/material.dart';
 
 import '../../core/constants/tajgo_colors.dart';
 import '../../core/models/app_user.dart';
+import '../../core/services/user_error_message.dart';
 import '../../shared/widgets/tajgo_scope.dart';
+import '../../shared/widgets/tajgo_state_view.dart';
 import '../courier/courier_application_status_screen.dart';
 import '../courier/courier_home_screen.dart';
 import '../courier/courier_onboarding_screen.dart';
 import '../customer/customer_home_screen.dart';
 import '../startup/intent_selection_screen.dart';
 import 'settings_screen.dart';
+import 'order_history_screen.dart';
+import 'saved_places_screen.dart';
+import 'help_screen.dart';
 
 class CustomerProfileScreen extends StatelessWidget {
   const CustomerProfileScreen({super.key});
@@ -25,22 +30,56 @@ class CourierProfileScreen extends StatelessWidget {
       const AccountProfileScreen(currentMode: AppUserRole.courier);
 }
 
-class AccountProfileScreen extends StatelessWidget {
+class AccountProfileScreen extends StatefulWidget {
   const AccountProfileScreen({super.key, required this.currentMode});
   final String currentMode;
 
   @override
-  Widget build(BuildContext context) {
+  State<AccountProfileScreen> createState() => _AccountProfileScreenState();
+}
+
+class _AccountProfileScreenState extends State<AccountProfileScreen> {
+  Future<AppUser?>? _profile;
+  String get currentMode => widget.currentMode;
+
+  Future<AppUser?> _load() {
     final scope = TajGoScope.of(context);
-    final firebaseUser = scope.authService.currentUser!;
+    return scope.userRepository.getUser(scope.authService.currentUser!.uid);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _profile ??= _load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Профиль')),
       body: FutureBuilder<AppUser?>(
-        future: scope.userRepository.getUser(firebaseUser.uid),
+        future: _profile,
         builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return TajGoStateView(
+              icon: Icons.cloud_off_rounded,
+              title: 'Не удалось загрузить профиль',
+              message: userErrorMessage(snapshot.error),
+              onRetry: () => setState(() => _profile = _load()),
+            );
+          }
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
           final user = snapshot.data;
           if (user == null) {
-            return const Center(child: CircularProgressIndicator());
+            return TajGoStateView(
+              icon: Icons.person_off_outlined,
+              title: 'Профиль недоступен',
+              message:
+                  'Обновите страницу. Если профиль не появится, войдите в аккаунт заново.',
+              onRetry: () => setState(() => _profile = _load()),
+            );
           }
           return ListView(
             padding: const EdgeInsets.all(16),
@@ -88,12 +127,20 @@ class AccountProfileScreen extends StatelessWidget {
               _Tile(
                 icon: Icons.history_rounded,
                 title: 'История заказов',
-                onTap: () => _soon(context),
+                onTap: () => _open(
+                  context,
+                  OrderHistoryScreen(currentMode: currentMode),
+                ),
               ),
               _Tile(
                 icon: Icons.favorite_rounded,
                 title: 'Избранные адреса',
-                onTap: () => _soon(context),
+                onTap: () => _open(
+                  context,
+                  SavedPlacesScreen(
+                    canOrder: currentMode == AppUserRole.customer,
+                  ),
+                ),
               ),
               if (currentMode == AppUserRole.courier)
                 _Tile(
@@ -119,12 +166,12 @@ class AccountProfileScreen extends StatelessWidget {
               _Tile(
                 icon: Icons.help_outline_rounded,
                 title: 'Помощь',
-                onTap: () => _soon(context),
+                onTap: () => _open(context, const HelpScreen()),
               ),
               _Tile(
                 icon: Icons.privacy_tip_outlined,
-                title: 'Политика конфиденциальности',
-                onTap: () => _soon(context),
+                title: 'Данные и конфиденциальность',
+                onTap: () => _open(context, const PrivacyInfoScreen()),
               ),
               _Tile(
                 icon: Icons.logout_rounded,
@@ -268,11 +315,9 @@ class AccountProfileScreen extends StatelessWidget {
     );
   }
 
-  void _soon(BuildContext context) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Раздел готовится к пилоту TajGo.')),
-    );
-  }
+  void _open(BuildContext context, Widget screen) => Navigator.of(
+    context,
+  ).push(MaterialPageRoute<void>(builder: (_) => screen));
 }
 
 class _Tile extends StatelessWidget {

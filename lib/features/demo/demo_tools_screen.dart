@@ -1,3 +1,4 @@
+import '../../core/services/user_error_message.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -61,7 +62,7 @@ class _DemoToolsScreenState extends State<DemoToolsScreen> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('$error')));
+        ).showSnackBar(SnackBar(content: Text(userErrorMessage(error))));
       }
     } finally {
       if (mounted) setState(() => _busy = false);

@@ -8,11 +8,29 @@ import '../models/tajgo_courier.dart';
 import '../models/tajgo_order.dart';
 import 'courier_order_eligibility.dart';
 import 'pricing.dart';
+import 'order_command_service.dart';
 
 class CourierRepository {
-  CourierRepository(this._db);
+  CourierRepository(this._db, {OrderCommandService? commands})
+    // Public injection name deliberately differs from the private field.
+    // ignore: prefer_initializing_formals
+    : _commands = commands;
 
   final FirebaseFirestore _db;
+  final OrderCommandService? _commands;
+
+  Future<bool> _serverMutation(
+    String orderId,
+    String action, [
+    Map<String, dynamic> payload = const {},
+  ]) async {
+    if (_commands == null || !await _commands.handlesOrder(_db, orderId)) {
+      return false;
+    }
+    await _commands.run(action, {'orderId': orderId, ...payload});
+    return true;
+  }
+
   final Map<String, _PublishedLocation> _lastPublishedLocations = {};
   final Map<String, Future<void>> _locationWrites = {};
 
@@ -52,19 +70,25 @@ class CourierRepository {
   Stream<List<TajGoOrder>> activeCourierOrdersStream(String courierId) => _db
       .collection('orders')
       .where('courierId', isEqualTo: courierId)
-      .limit(5)
+      .where(
+        'status',
+        whereIn: const ['accepted', 'pickedUp', 'delivered', 'disputed'],
+      )
       .snapshots()
       .map(
         (snapshot) => snapshot.docs
             .map(TajGoOrder.fromDoc)
-            .where(
-              (order) =>
-                  order.status == OrderStatus.accepted ||
-                  order.status == OrderStatus.pickedUp ||
-                  order.status == OrderStatus.delivered,
-            )
+            .where((order) => order.isActive)
             .toList(),
       );
+
+  Stream<List<TajGoOrder>> historyStream(String courierId) => _db
+      .collection('orders')
+      .where('courierId', isEqualTo: courierId)
+      .orderBy('createdAt', descending: true)
+      .limit(100)
+      .snapshots()
+      .map((snapshot) => snapshot.docs.map(TajGoOrder.fromDoc).toList());
 
   Stream<List<TajGoCourier>> onlineCouriersStream() => _db
       .collection('courier_public')
@@ -351,53 +375,58 @@ class CourierRepository {
   Future<void> acceptOrder({
     required String orderId,
     required String courierId,
-  }) => _db.runTransaction((transaction) async {
-    final orderRef = _db.collection('orders').doc(orderId);
-    final courierRef = _db.collection('couriers').doc(courierId);
-    final orderDoc = await transaction.get(orderRef);
-    final courierDoc = await transaction.get(courierRef);
-    final courier = courierDoc.data();
-    final order = orderDoc.data();
-    if (courier == null || order == null) {
-      throw StateError('Заказ или профиль курьера не найден.');
-    }
-    final pickup = order['fromLocation'] as GeoPoint?;
-    final location = courier['location'] as GeoPoint?;
-    if (pickup == null) throw StateError('У заказа не указана точка забора.');
-    final eligibility = const CourierOrderEligibilityService().evaluate(
-      courierLocation: location == null
-          ? null
-          : LatLng(location.latitude, location.longitude),
-      locationUpdatedAt: (courier['locationUpdatedAt'] as Timestamp?)?.toDate(),
-      accuracyMeters: (courier['locationAccuracy'] as num?)?.toDouble(),
-      pickup: LatLng(pickup.latitude, pickup.longitude),
-      hasActiveOrder:
-          courier['activeOrderId'] != null || courier['isBusy'] == true,
-    );
-    if (!eligibility.allowed) throw StateError(eligibility.message);
-    if (!{'waiting', 'waitingOffers'}.contains(order['status']) ||
-        order['courierId'] != null ||
-        order['selectedCourierId'] != null) {
-      throw StateError('Заказ уже забрал другой курьер.');
-    }
-    transaction.update(orderRef, {
-      'status': 'accepted',
-      'courierId': courierId,
-      'acceptedAt': FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
+  }) async {
+    if (await _serverMutation(orderId, 'accept')) return;
+    await _db.runTransaction((transaction) async {
+      final orderRef = _db.collection('orders').doc(orderId);
+      final courierRef = _db.collection('couriers').doc(courierId);
+      final orderDoc = await transaction.get(orderRef);
+      final courierDoc = await transaction.get(courierRef);
+      final courier = courierDoc.data();
+      final order = orderDoc.data();
+      if (courier == null || order == null) {
+        throw StateError('Заказ или профиль курьера не найден.');
+      }
+      final pickup = order['fromLocation'] as GeoPoint?;
+      final location = courier['location'] as GeoPoint?;
+      if (pickup == null) throw StateError('У заказа не указана точка забора.');
+      final eligibility = const CourierOrderEligibilityService().evaluate(
+        courierLocation: location == null
+            ? null
+            : LatLng(location.latitude, location.longitude),
+        locationUpdatedAt: (courier['locationUpdatedAt'] as Timestamp?)
+            ?.toDate(),
+        accuracyMeters: (courier['locationAccuracy'] as num?)?.toDouble(),
+        pickup: LatLng(pickup.latitude, pickup.longitude),
+        hasActiveOrder:
+            courier['activeOrderId'] != null || courier['isBusy'] == true,
+      );
+      if (!eligibility.allowed) throw StateError(eligibility.message);
+      if (!{'waiting', 'waitingOffers'}.contains(order['status']) ||
+          order['courierId'] != null ||
+          order['selectedCourierId'] != null) {
+        throw StateError('Заказ уже забрал другой курьер.');
+      }
+      transaction.update(orderRef, {
+        'status': 'accepted',
+        'courierId': courierId,
+        'acceptedAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      transaction.set(courierRef, {
+        'activeOrderId': orderId,
+        'isBusy': true,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
     });
-    transaction.set(courierRef, {
-      'activeOrderId': orderId,
-      'isBusy': true,
-      'updatedAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
-  });
+  }
 
   Future<void> markArrived({
     required String orderId,
     required String courierId,
     double? distanceToPointKm,
   }) async {
+    if (await _serverMutation(orderId, 'arrive')) return;
     _checkDistance(distanceToPointKm, 'точки забора');
     await _db.runTransaction((transaction) async {
       final ref = _db.collection('orders').doc(orderId);
@@ -418,6 +447,7 @@ class CourierRepository {
     required String courierId,
     double? distanceToPointKm,
   }) async {
+    if (await _serverMutation(orderId, 'pickup')) return;
     _checkDistance(distanceToPointKm, 'точки забора');
     await _transition(
       orderId: orderId,
@@ -432,6 +462,7 @@ class CourierRepository {
     required String courierId,
     double? distanceToPointKm,
   }) async {
+    if (await _serverMutation(orderId, 'deliver')) return;
     _checkDistance(distanceToPointKm, 'точки доставки');
     await _transition(
       orderId: orderId,
@@ -447,6 +478,7 @@ class CourierRepository {
     required String code,
     double? distanceToPointKm,
   }) async {
+    if (await _serverMutation(orderId, 'complete', {'code': code})) return;
     _checkDistance(distanceToPointKm, 'точки доставки');
     await _db.runTransaction((transaction) async {
       final orderRef = _db.collection('orders').doc(orderId);

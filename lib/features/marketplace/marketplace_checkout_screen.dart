@@ -1,3 +1,4 @@
+import '../../core/services/user_error_message.dart';
 import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -9,31 +10,36 @@ import '../../core/constants/tajgo_colors.dart';
 import '../../core/models/marketplace_cart.dart';
 import '../../core/models/marketplace_partner.dart';
 import '../../core/models/marketplace_product.dart';
+import '../../core/utils/money_formatter.dart';
+import '../../shared/widgets/tajgo_state_view.dart';
 import '../../shared/widgets/tajgo_scope.dart';
 import '../customer/order_tracking_screen.dart';
 import '../map/models/place_suggestion.dart';
 import '../map/models/tajgo_route.dart';
+import '../map/models/tajgo_map_location.dart';
 import '../map/services/place_search_service.dart';
 import '../map/widgets/tajgo_location_widgets.dart';
 import '../map/widgets/place_search_sheet.dart';
 import '../map/widgets/tajgo_route_summary_card.dart';
+import '../map/widgets/address_details_dialog.dart';
 
 class MarketplaceDeliverySelection {
   const MarketplaceDeliverySelection({
-    required this.location,
-    required this.address,
+    required this.destination,
     required this.distanceKm,
     required this.etaMinutes,
   });
 
-  final GeoPoint location;
-  final String address;
+  final TajGoMapLocation destination;
+  GeoPoint get location => destination.toGeoPoint();
+  String get address => destination.address;
   final double distanceKm;
   final int etaMinutes;
 }
 
 class MarketplaceCheckoutScreen extends StatefulWidget {
-  const MarketplaceCheckoutScreen({super.key});
+  const MarketplaceCheckoutScreen({super.key, this.cart});
+  final MarketplaceCart? cart;
 
   @override
   State<MarketplaceCheckoutScreen> createState() =>
@@ -62,6 +68,7 @@ class _MarketplaceCheckoutScreenState extends State<MarketplaceCheckoutScreen> {
   }
 
   Future<void> _submit(MarketplaceCart cart) async {
+    if (_busy) return;
     final partner = cart.partner;
     final delivery = _delivery;
     if (partner == null || cart.isEmpty) return;
@@ -80,12 +87,14 @@ class _MarketplaceCheckoutScreenState extends State<MarketplaceCheckoutScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Добавьте товаров ещё на ${quote.missingForMinimum} TJS.',
+            'Добавьте товаров ещё на ${formatMoney(quote.missingForMinimum)} TJS.',
           ),
         ),
       );
       return;
     }
+    final submittedLines = List.of(cart.lines);
+    final comment = _comment.text;
     setState(() => _busy = true);
     try {
       final scope = TajGoScope.of(context);
@@ -96,14 +105,24 @@ class _MarketplaceCheckoutScreenState extends State<MarketplaceCheckoutScreen> {
         customerId: uid,
         customerName: user?.displayName ?? 'Клиент',
         partner: partner,
-        cartLines: List.of(cart.lines),
+        cartLines: submittedLines,
         deliveryLocation: delivery.location,
         deliveryAddress: delivery.address,
         distanceKm: delivery.distanceKm,
         etaMinutes: delivery.etaMinutes,
-        comment: _comment.text,
+        comment: comment,
       );
-      cart.clear();
+      if (cart.partner?.id == partner.id &&
+          cart.lines.length == submittedLines.length &&
+          cart.lines.every(
+            (line) => submittedLines.any(
+              (submitted) =>
+                  submitted.product.id == line.product.id &&
+                  submitted.quantity == line.quantity,
+            ),
+          )) {
+        cart.clear();
+      }
       if (!mounted) return;
       Navigator.pushAndRemoveUntil(
         context,
@@ -116,7 +135,7 @@ class _MarketplaceCheckoutScreenState extends State<MarketplaceCheckoutScreen> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('$error')));
+        ).showSnackBar(SnackBar(content: Text(userErrorMessage(error))));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -125,7 +144,7 @@ class _MarketplaceCheckoutScreenState extends State<MarketplaceCheckoutScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final cart = TajGoScope.of(context).marketplaceCart;
+    final cart = widget.cart ?? TajGoScope.of(context).marketplaceCart;
     return AnimatedBuilder(
       animation: cart,
       builder: (context, _) {
@@ -133,7 +152,11 @@ class _MarketplaceCheckoutScreenState extends State<MarketplaceCheckoutScreen> {
         return Scaffold(
           appBar: AppBar(title: const Text('Корзина и доставка')),
           body: partner == null || cart.isEmpty
-              ? const Center(child: Text('Корзина пока пуста.'))
+              ? const TajGoStateView(
+                  icon: Icons.shopping_bag_outlined,
+                  title: 'Корзина пока пуста',
+                  message: 'Выберите заведение и добавьте товары из каталога.',
+                )
               : ListView(
                   padding: const EdgeInsets.all(16),
                   children: [
@@ -146,7 +169,11 @@ class _MarketplaceCheckoutScreenState extends State<MarketplaceCheckoutScreen> {
                     ),
                     const SizedBox(height: 10),
                     ...cart.lines.map(
-                      (line) => _CartLineTile(line: line, cart: cart),
+                      (line) => _CartLineTile(
+                        line: line,
+                        cart: cart,
+                        enabled: !_busy,
+                      ),
                     ),
                     const SizedBox(height: 10),
                     _TotalsCard(cart: cart, partner: partner),
@@ -157,9 +184,8 @@ class _MarketplaceCheckoutScreenState extends State<MarketplaceCheckoutScreen> {
                         child: Padding(
                           padding: EdgeInsets.all(12),
                           child: Text(
-                            'Демо-карточка ещё не опубликована в базе. '
-                            'Оформление станет доступно после публикации '
-                            'каталога администратором.',
+                            'Это демонстрационный ассортимент. '
+                            'Оформить заказ у этого заведения пока нельзя.',
                             style: TextStyle(fontWeight: FontWeight.w700),
                           ),
                         ),
@@ -183,12 +209,13 @@ class _MarketplaceCheckoutScreenState extends State<MarketplaceCheckoutScreen> {
                                 '${_delivery!.distanceKm.toStringAsFixed(1)} км · ≈ ${_delivery!.etaMinutes} мин',
                               ),
                         trailing: const Icon(Icons.chevron_right_rounded),
-                        onTap: () => _chooseDelivery(partner),
+                        onTap: _busy ? null : () => _chooseDelivery(partner),
                       ),
                     ),
                     const SizedBox(height: 10),
                     TextField(
                       controller: _comment,
+                      enabled: !_busy,
                       maxLines: 2,
                       maxLength: 200,
                       decoration: const InputDecoration(
@@ -208,10 +235,10 @@ class _MarketplaceCheckoutScreenState extends State<MarketplaceCheckoutScreen> {
                         : () => _submit(cart),
                     child: Text(
                       partner.isPreview
-                          ? 'Пример · публикация через админку'
+                          ? 'Демонстрационный ассортимент'
                           : _busy
                           ? 'Оформляем…'
-                          : 'Оформить · ${cart.total} TJS',
+                          : 'Оформить · ${formatMoney(cart.total)} TJS',
                     ),
                   ),
                 ),
@@ -222,36 +249,70 @@ class _MarketplaceCheckoutScreenState extends State<MarketplaceCheckoutScreen> {
 }
 
 class _CartLineTile extends StatelessWidget {
-  const _CartLineTile({required this.line, required this.cart});
+  const _CartLineTile({
+    required this.line,
+    required this.cart,
+    required this.enabled,
+  });
 
   final MarketplaceCartLine line;
   final MarketplaceCart cart;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) => Card(
-    child: ListTile(
-      leading: IconButton(
-        tooltip: 'Удалить',
-        onPressed: () => cart.remove(line.product.id),
-        icon: const Icon(Icons.delete_outline_rounded),
-      ),
-      title: Text(line.product.name),
-      subtitle: Text(
-        '${line.product.price} TJS × ${_quantity(line.quantity)} ${marketplaceUnitLabel(line.product.unit)}',
-      ),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
+    child: Padding(
+      padding: const EdgeInsets.fromLTRB(14, 8, 8, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          IconButton(
-            tooltip: 'Уменьшить',
-            onPressed: () => cart.decrement(line.product.id),
-            icon: const Icon(Icons.remove_circle_outline_rounded),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  line.product.name,
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Удалить',
+                onPressed: enabled ? () => cart.remove(line.product.id) : null,
+                icon: const Icon(Icons.delete_outline_rounded),
+              ),
+            ],
           ),
-          Text('${line.total}'),
-          IconButton(
-            tooltip: 'Добавить',
-            onPressed: () => cart.increment(line.product.id),
-            icon: const Icon(Icons.add_circle_outline_rounded),
+          Text(
+            '${formatMoney(line.product.price)} TJS / ${marketplaceUnitLabel(line.product.unit)}',
+            style: const TextStyle(color: TajGoColors.muted),
+          ),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '${formatMoney(line.total)} TJS',
+                  style: const TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Уменьшить',
+                onPressed: enabled
+                    ? () => cart.decrement(line.product.id)
+                    : null,
+                icon: const Icon(Icons.remove_circle_outline_rounded),
+              ),
+              Semantics(
+                label: 'Количество',
+                child: Text(_quantity(line.quantity)),
+              ),
+              IconButton(
+                tooltip: 'Добавить',
+                onPressed:
+                    enabled && line.quantity + line.product.quantityStep <= 100
+                    ? () => cart.increment(line.product.id)
+                    : null,
+                icon: const Icon(Icons.add_circle_outline_rounded),
+              ),
+            ],
           ),
         ],
       ),
@@ -286,9 +347,9 @@ class _TotalsCard extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.only(top: 8),
                 child: Text(
-                  'Добавьте товаров ещё на ${quote.missingForMinimum} TJS.',
+                  'Добавьте товаров ещё на ${formatMoney(quote.missingForMinimum)} TJS.',
                   style: const TextStyle(
-                    color: TajGoColors.warning,
+                    color: TajGoColors.ink,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
@@ -303,7 +364,7 @@ class _TotalsCard extends StatelessWidget {
     children: [
       Expanded(child: Text(label)),
       Text(
-        '$value TJS',
+        '${formatMoney(value)} TJS',
         style: TextStyle(
           fontWeight: strong ? FontWeight.w900 : FontWeight.w700,
         ),
@@ -333,6 +394,8 @@ class _MarketplaceDeliveryPointScreenState
   int _requestId = 0;
   LatLng? _currentPosition;
   Timer? _moveDebounce;
+  LatLng? _selectedPoint;
+  bool _overview = false;
 
   LatLng get _pickup => LatLng(
     widget.partner.location.latitude,
@@ -353,10 +416,11 @@ class _MarketplaceDeliveryPointScreenState
   }
 
   Future<void> _prepare() async {
+    final initialRequest = _requestId;
     final position = await TajGoScope.of(
       context,
     ).locationService.currentPositionIfAuthorized();
-    if (!mounted) return;
+    if (!mounted || initialRequest != _requestId) return;
     final point = position == null
         ? LatLng(_pickup.latitude + 0.008, _pickup.longitude + 0.006)
         : LatLng(position.latitude, position.longitude);
@@ -367,6 +431,7 @@ class _MarketplaceDeliveryPointScreenState
 
   Future<void> _locate() async {
     if (_locating) return;
+    final selectionVersion = _requestId;
     setState(() => _locating = true);
     try {
       final position = await TajGoScope.of(
@@ -375,6 +440,7 @@ class _MarketplaceDeliveryPointScreenState
       if (!mounted) return;
       final point = LatLng(position.latitude, position.longitude);
       setState(() => _currentPosition = point);
+      if (selectionVersion != _requestId) return;
       _map.move(point, 16);
       await _refresh();
     } catch (error) {
@@ -390,6 +456,12 @@ class _MarketplaceDeliveryPointScreenState
 
   void _scheduleRefresh() {
     _moveDebounce?.cancel();
+    _requestId++;
+    setState(() {
+      _loading = true;
+      _overview = false;
+      _route = null;
+    });
     _moveDebounce = Timer(const Duration(milliseconds: 450), _refresh);
   }
 
@@ -403,19 +475,24 @@ class _MarketplaceDeliveryPointScreenState
     );
     if (selected == null || !mounted) return;
     _map.move(selected.point, 16);
-    await _refresh();
+    await _refresh(selected: selected);
   }
 
-  Future<void> _refresh({bool fitRoute = false}) async {
+  Future<void> _refresh({
+    bool fitRoute = false,
+    PlaceSuggestion? selected,
+  }) async {
+    _moveDebounce?.cancel();
     final request = ++_requestId;
     final point = _map.camera.center;
     setState(() {
       _loading = true;
+      _overview = false;
       _route = null;
       _address = 'Определяем адрес…';
     });
     final results = await Future.wait([
-      _places.reverse(point),
+      selected == null ? _places.reverse(point) : Future.value(selected),
       TajGoScope.of(context).routeService.buildRoute(
         from: _pickup,
         to: point,
@@ -427,16 +504,18 @@ class _MarketplaceDeliveryPointScreenState
     final route = results[1] as TajGoRoute;
     setState(() {
       _address = place.address;
+      _selectedPoint = point;
       _route = route;
       _loading = false;
     });
     if (fitRoute && route.points.length > 1) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
+        if (!mounted || request != _requestId) return;
+        setState(() => _overview = true);
         _map.fitCamera(
           CameraFit.coordinates(
             coordinates: route.points,
-            padding: const EdgeInsets.fromLTRB(44, 90, 44, 230),
+            padding: const EdgeInsets.fromLTRB(44, 90, 44, 280),
           ),
         );
       });
@@ -446,23 +525,45 @@ class _MarketplaceDeliveryPointScreenState
   void _showEntireRoute() {
     final points = _route?.points;
     if (points == null || points.length < 2) return;
+    setState(() => _overview = true);
     _map.fitCamera(
       CameraFit.coordinates(
         coordinates: points,
-        padding: const EdgeInsets.fromLTRB(44, 90, 44, 230),
+        padding: const EdgeInsets.fromLTRB(44, 90, 44, 280),
       ),
     );
   }
 
-  void _confirm() {
+  Future<bool> _editAddress({bool needsAddress = false}) async {
+    if (_loading || _selectedPoint == null) return false;
+    final request = _requestId;
+    final label = await showAddressDetailsDialog(
+      context: context,
+      initialAddress: _address,
+      needsAddress: needsAddress,
+    );
+    if (!mounted || label == null || request != _requestId) return false;
+    setState(() => _address = label);
+    return true;
+  }
+
+  Future<void> _confirm() async {
     final route = _route;
-    if (route == null) return;
-    final point = _map.camera.center;
+    if (route == null || _loading || _selectedPoint == null) return;
+    if (_address == 'Точка на карте' &&
+        !await _editAddress(needsAddress: true)) {
+      return;
+    }
+    if (!mounted || _loading || _selectedPoint == null) return;
+    final point = _selectedPoint!;
     Navigator.pop(
       context,
       MarketplaceDeliverySelection(
-        location: GeoPoint(point.latitude, point.longitude),
-        address: _address,
+        destination: TajGoMapLocation(
+          latitude: point.latitude,
+          longitude: point.longitude,
+          address: _address,
+        ),
         distanceKm: route.distanceKm,
         etaMinutes: route.etaMinutes,
       ),
@@ -492,7 +593,28 @@ class _MarketplaceDeliveryPointScreenState
               minZoom: 3,
               maxZoom: 19,
               onMapEvent: (event) {
-                if (event is MapEventMoveEnd) _scheduleRefresh();
+                if (event.source == MapEventSource.fitCamera ||
+                    event.source == MapEventSource.mapController ||
+                    event.source == MapEventSource.nonRotatedSizeChange) {
+                  return;
+                }
+                if (event is MapEventMoveStart ||
+                    event is MapEventFlingAnimationStart ||
+                    event is MapEventDoubleTapZoomStart) {
+                  _requestId++;
+                  _moveDebounce?.cancel();
+                  setState(() {
+                    _loading = true;
+                    _overview = false;
+                    _route = null;
+                  });
+                }
+                if (event is MapEventMoveEnd ||
+                    event is MapEventFlingAnimationEnd ||
+                    event is MapEventDoubleTapZoomEnd ||
+                    event is MapEventScrollWheelZoom) {
+                  _scheduleRefresh();
+                }
               },
             ),
             children: [
@@ -518,6 +640,13 @@ class _MarketplaceDeliveryPointScreenState
                 ),
               MarkerLayer(
                 markers: [
+                  if (_overview && _selectedPoint != null)
+                    Marker(
+                      point: _selectedPoint!,
+                      width: 44,
+                      height: 44,
+                      child: const _MapPoint(label: 'B'),
+                    ),
                   Marker(
                     point: _pickup,
                     width: 44,
@@ -541,17 +670,18 @@ class _MarketplaceDeliveryPointScreenState
             ],
           ),
         ),
-        IgnorePointer(
-          child: Center(
-            child: Transform.translate(
-              offset: const Offset(0, -24),
-              child: const _MapPoint(label: 'B'),
+        if (!_overview)
+          IgnorePointer(
+            child: Center(
+              child: Transform.translate(
+                offset: const Offset(0, -24),
+                child: const _MapPoint(label: 'B'),
+              ),
             ),
           ),
-        ),
         Positioned(
           right: 16,
-          bottom: 190,
+          bottom: 240,
           child: TajGoLocateButton(
             heroTag: 'marketplaceDeliveryLocate',
             loading: _locating,
@@ -571,11 +701,22 @@ class _MarketplaceDeliveryPointScreenState
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Text(
-                      _address,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            _address,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Уточнить адрес',
+                          onPressed: _loading ? null : _editAddress,
+                          icon: const Icon(Icons.edit_location_alt_outlined),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 8),
                     TajGoRouteSummaryCard(

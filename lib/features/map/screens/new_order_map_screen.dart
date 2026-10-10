@@ -1,3 +1,4 @@
+import '../../../core/services/user_error_message.dart';
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -20,14 +21,20 @@ import '../services/tajgo_location_service.dart';
 import '../widgets/tajgo_location_widgets.dart';
 import '../widgets/tajgo_place_search_sheet.dart';
 import '../widgets/tajgo_route_summary_card.dart';
+import '../widgets/address_details_dialog.dart';
 import '../utils/map_address_formatter.dart';
 import '../utils/new_order_map_layout.dart';
 
 enum _Stage { pickFrom, pickTo, details }
 
 class NewOrderMapScreen extends StatefulWidget {
-  const NewOrderMapScreen({super.key, this.initialType = 'package'});
+  const NewOrderMapScreen({
+    super.key,
+    this.initialType = 'package',
+    this.initialPlace,
+  });
   final String initialType;
+  final PlaceSuggestion? initialPlace;
   @override
   State<NewOrderMapScreen> createState() => _NewOrderMapScreenState();
 }
@@ -51,7 +58,8 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
   int _reverseRequestId = 0;
   LatLng? _current;
   String _address = 'Определяем адрес...';
-  bool _resolving = false, _locating = false, _busy = false;
+  bool _resolving = true, _locating = false, _busy = false;
+  LatLng? _resolvedPoint;
   bool _cameraMoving = false;
   bool _gestureMoving = false;
   bool _mapLoading = true;
@@ -73,15 +81,30 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
 
   Future<void> _loadLocateHint() async {
     final preferences = SharedPreferencesAsync();
-    final seen = await preferences.getBool('new_order_locate_hint_seen_v1');
-    if (mounted) setState(() => _showLocateHint = seen != true);
+    try {
+      final seen = await preferences.getBool('new_order_locate_hint_seen_v1');
+      if (mounted) setState(() => _showLocateHint = seen != true);
+    } catch (_) {}
   }
 
   Future<void> _prepareMap() async {
+    final saved = widget.initialPlace;
+    if (saved != null) {
+      _reverseRequestId++;
+      _map.move(saved.point, 17);
+      setState(() {
+        _pendingPlace = saved;
+        _resolvedPoint = saved.point;
+        _address = saved.address;
+        _resolving = false;
+      });
+      return;
+    }
+    final selectionVersion = _reverseRequestId;
     final position = await TajGoScope.of(
       context,
     ).locationService.currentPositionIfAuthorized();
-    if (!mounted) {
+    if (!mounted || selectionVersion != _reverseRequestId) {
       return;
     }
     if (position == null) {
@@ -176,8 +199,11 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
       recentType: stage == _Stage.pickFrom ? 'pickup' : 'dropoff',
     );
     if (!mounted || selected == null) return;
+    _reverseRequestId++;
     setState(() {
       _pendingPlace = selected;
+      _resolvedPoint = selected.point;
+      _resolving = false;
       _address = selected.address;
       _cameraMoving = true;
     });
@@ -187,7 +213,7 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
   }
 
   Future<void> _resolveCenter() async {
-    if (_stage == _Stage.details) {
+    if (!mounted || _stage == _Stage.details) {
       return;
     }
     setState(() {
@@ -201,6 +227,7 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
       setState(() {
         _address = result.address;
         _pendingPlace = result;
+        _resolvedPoint = point;
         _resolving = false;
       });
     }
@@ -210,12 +237,15 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
     if (_locating) {
       return;
     }
+    final selectionVersion = _reverseRequestId;
     setState(() {
       _locating = true;
       _showLocateHint = false;
     });
     unawaited(
-      SharedPreferencesAsync().setBool('new_order_locate_hint_seen_v1', true),
+      SharedPreferencesAsync()
+          .setBool('new_order_locate_hint_seen_v1', true)
+          .catchError((Object _) {}),
     );
     try {
       final position = await TajGoScope.of(
@@ -229,6 +259,7 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
         _current = point;
         _gpsWeak = position.accuracy > 50;
       });
+      if (selectionVersion != _reverseRequestId) return;
       await _moveToCurrent(point);
       await _resolveCenter();
       if (mounted) {
@@ -272,6 +303,22 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
       return;
     }
     final point = _map.camera.center;
+    if (_resolvedPoint == null ||
+        const Distance().as(LengthUnit.Meter, point, _resolvedPoint!) > 1) {
+      await _resolveCenter();
+      return;
+    }
+    if (_address == 'Точка на карте' &&
+        !await _editAddress(needsAddress: true)) {
+      return;
+    }
+    if (!mounted ||
+        _resolving ||
+        _selectionMoving ||
+        _resolvedPoint == null ||
+        const Distance().as(LengthUnit.Meter, point, _resolvedPoint!) > 1) {
+      return;
+    }
     final location = TajGoMapLocation(
       latitude: point.latitude,
       longitude: point.longitude,
@@ -312,9 +359,12 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
     }
     _debugConfirmedPoint(location, source);
     if (_stage == _Stage.pickFrom) {
-      try {
-        await _placeSearch.recentPlaces.save(recentPlace, type: 'pickup');
-      } catch (_) {}
+      unawaited(
+        _placeSearch.recentPlaces
+            .save(recentPlace, type: 'pickup')
+            .catchError((Object _) {}),
+      );
+      if (!mounted) return;
       setState(() {
         _from = location;
         _stage = _Stage.pickTo;
@@ -327,9 +377,12 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
       });
       await _resolveCenter();
     } else {
-      try {
-        await _placeSearch.recentPlaces.save(recentPlace, type: 'dropoff');
-      } catch (_) {}
+      unawaited(
+        _placeSearch.recentPlaces
+            .save(recentPlace, type: 'dropoff')
+            .catchError((Object _) {}),
+      );
+      if (!mounted) return;
       setState(() {
         _to = location;
         _stage = _Stage.details;
@@ -356,6 +409,34 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
     }
   }
 
+  Future<bool> _editAddress({bool needsAddress = false}) async {
+    if (_resolving || _selectionMoving || _resolvedPoint == null) return false;
+    final version = _reverseRequestId;
+    final point = _resolvedPoint!;
+    final label = await showAddressDetailsDialog(
+      context: context,
+      initialAddress: _address,
+      needsAddress: needsAddress,
+    );
+    if (!mounted || label == null || version != _reverseRequestId) return false;
+    setState(() {
+      _address = label;
+      _pendingPlace = PlaceSuggestion(
+        id: 'manual_address_${point.latitude}_${point.longitude}',
+        title: label,
+        subtitle: 'Выбранная точка на карте',
+        shortTitle: label,
+        address: label,
+        lat: point.latitude,
+        lng: point.longitude,
+        source: 'manualAddress',
+        confidence: 1,
+        category: 'mapPoint',
+      );
+    });
+    return true;
+  }
+
   Future<void> _buildOrderRoute() async {
     final from = _from?.toLatLng();
     final to = _to?.toLatLng();
@@ -374,6 +455,7 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
       _routeLoading = false;
       _price.text = pricing.suggestedPrice(route.distanceKm).toString();
     });
+    if (!route.isFallback) _showEntireRoute();
   }
 
   void _debugConfirmedPoint(TajGoMapLocation location, String source) {
@@ -392,7 +474,12 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
     _map.fitCamera(
       CameraFit.coordinates(
         coordinates: points,
-        padding: const EdgeInsets.all(50),
+        padding: EdgeInsets.fromLTRB(
+          32,
+          80,
+          32,
+          _panelHeight(MediaQuery.sizeOf(context)) + 24,
+        ),
       ),
     );
   }
@@ -423,12 +510,16 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
       _directDistanceMeters = null;
       _routeRequestId++;
       _address = stage == _Stage.pickFrom ? _from!.address : _to!.address;
+      _resolvedPoint = (stage == _Stage.pickFrom ? _from! : _to!).toLatLng();
+      _reverseRequestId++;
+      _resolving = false;
     });
     final location = stage == _Stage.pickFrom ? _from! : _to!;
     _map.move(location.toLatLng(), 16);
   }
 
   Future<void> _createOrder() async {
+    if (_busy || _routeLoading || _from == null || _to == null) return;
     final km =
         _route?.distanceKm ??
         pricing.distanceKm(_from!.toLatLng(), _to!.toLatLng());
@@ -495,10 +586,10 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
         clientPrice: amount,
         orderType: 'customDelivery',
         priceNegotiable: true,
-        fromLocation: _from!.toGeoPoint(),
-        toLocation: _to!.toGeoPoint(),
+        pickup: _from!,
+        dropoff: _to!,
         distanceKm: km,
-        etaMinutes: pricing.etaMinutes(km),
+        etaMinutes: _route?.etaMinutes ?? pricing.etaMinutes(km),
         comment: _comment.text.trim().isEmpty ? null : _comment.text.trim(),
         isTestOrder: kDebugMode && user.isAnonymous,
       );
@@ -514,7 +605,7 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('$error')));
+        ).showSnackBar(SnackBar(content: Text(userErrorMessage(error))));
       }
     } finally {
       if (mounted) {
@@ -551,10 +642,22 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
                         maxZoom: 19,
                         onMapEvent: (event) {
                           if (!selecting || _cameraMoving) return;
-                          if (event is MapEventMoveStart && !_gestureMoving) {
-                            setState(() => _gestureMoving = true);
+                          if ((event is MapEventMoveStart ||
+                                  event is MapEventFlingAnimationStart ||
+                                  event is MapEventDoubleTapZoomStart) &&
+                              !_gestureMoving) {
+                            _reverseRequestId++;
+                            setState(() {
+                              _gestureMoving = true;
+                              _pendingPlace = null;
+                              _resolvedPoint = null;
+                              _resolving = true;
+                            });
                           }
-                          if (event is MapEventMoveEnd) {
+                          if (event is MapEventMoveEnd ||
+                              event is MapEventFlingAnimationEnd ||
+                              event is MapEventDoubleTapZoomEnd ||
+                              event is MapEventScrollWheelZoom) {
                             if (_gestureMoving) {
                               setState(() => _gestureMoving = false);
                             }
@@ -774,6 +877,7 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
                             resolving: _resolving,
                             moving: _selectionMoving,
                             onConfirm: _confirmPoint,
+                            onEditAddress: () => _editAddress(),
                             onSearchFrom: () =>
                                 _showAddressSearch(_Stage.pickFrom),
                             onSearchTo: () => _showAddressSearch(_Stage.pickTo),
@@ -808,6 +912,7 @@ class _PointPanel extends StatelessWidget {
     required this.resolving,
     required this.moving,
     required this.onConfirm,
+    required this.onEditAddress,
     required this.onSearchFrom,
     required this.onSearchTo,
   });
@@ -821,6 +926,7 @@ class _PointPanel extends StatelessWidget {
   final bool resolving;
   final bool moving;
   final VoidCallback onConfirm;
+  final VoidCallback onEditAddress;
   final VoidCallback onSearchFrom;
   final VoidCallback onSearchTo;
 
@@ -869,6 +975,9 @@ class _PointPanel extends StatelessWidget {
                 selected: from != null,
                 marker: 'A',
                 onTap: onSearchFrom,
+                onEdit: stage == _Stage.pickFrom && enabled
+                    ? onEditAddress
+                    : null,
               ),
               const SizedBox(height: 6),
               _AddressField(
@@ -878,6 +987,9 @@ class _PointPanel extends StatelessWidget {
                 selected: to != null,
                 marker: 'B',
                 onTap: onSearchTo,
+                onEdit: stage == _Stage.pickTo && enabled
+                    ? onEditAddress
+                    : null,
               ),
               const Spacer(),
               Align(
@@ -933,6 +1045,7 @@ class _AddressField extends StatelessWidget {
     required this.selected,
     required this.marker,
     required this.onTap,
+    this.onEdit,
   });
 
   final String label;
@@ -941,6 +1054,7 @@ class _AddressField extends StatelessWidget {
   final bool selected;
   final String marker;
   final VoidCallback onTap;
+  final VoidCallback? onEdit;
 
   @override
   Widget build(BuildContext context) => InkWell(
@@ -993,6 +1107,12 @@ class _AddressField extends StatelessWidget {
             ),
           ),
           const Icon(Icons.search_rounded, color: TajGoColors.muted, size: 19),
+          if (onEdit != null)
+            IconButton(
+              tooltip: 'Уточнить адрес',
+              onPressed: onEdit,
+              icon: const Icon(Icons.edit_location_alt_outlined, size: 20),
+            ),
         ],
       ),
     ),
@@ -1412,6 +1532,7 @@ Widget buildNewOrderPointPanelForTest({bool pickup = true}) => SizedBox(
     resolving: false,
     moving: false,
     onConfirm: () {},
+    onEditAddress: () {},
     onSearchFrom: () {},
     onSearchTo: () {},
   ),

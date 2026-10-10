@@ -8,6 +8,10 @@ import '../../core/models/tajgo_order.dart';
 import '../../shared/widgets/tajgo_scope.dart';
 import '../map/services/tajgo_map_camera.dart';
 import '../map/widgets/tajgo_location_widgets.dart';
+import '../map/widgets/tajgo_map_attribution.dart';
+import '../map/models/tajgo_route.dart';
+import '../map/utils/route_display_formatter.dart';
+import '../../core/services/user_error_message.dart';
 import 'admin_couriers_screen.dart';
 import 'admin_order_details_screen.dart';
 import 'admin_orders_screen.dart';
@@ -32,6 +36,43 @@ class _DispatchMapScreenState extends State<DispatchMapScreen> {
   bool _locating = false;
   bool _focused = false;
   _DispatchFilter _filter = _DispatchFilter.all;
+  TajGoRoute? _selectedRoute;
+  bool _routeLoading = false;
+  int _routeRequest = 0;
+
+  void _select(Object? value) {
+    final request = ++_routeRequest;
+    setState(() {
+      _selected = value;
+      _selectedRoute = null;
+      _routeLoading =
+          value is TajGoOrder &&
+          value.fromLocation != null &&
+          value.toLocation != null;
+    });
+    if (_routeLoading) _loadSelectedRoute(value as TajGoOrder, request);
+  }
+
+  Future<void> _loadSelectedRoute(TajGoOrder order, int request) async {
+    final route = await TajGoScope.of(context).routeService.buildRoute(
+      from: order.pickup!.toLatLng(),
+      to: order.dropoff!.toLatLng(),
+      mode: RouteMode.bicycle,
+    );
+    if (!mounted || request != _routeRequest) return;
+    setState(() {
+      _selectedRoute = route;
+      _routeLoading = false;
+    });
+    if (route.points.length > 1) {
+      _map.fitCamera(
+        CameraFit.coordinates(
+          coordinates: route.points,
+          padding: const EdgeInsets.fromLTRB(40, 140, 40, 210),
+        ),
+      );
+    }
+  }
 
   @override
   void initState() {
@@ -93,7 +134,7 @@ class _DispatchMapScreenState extends State<DispatchMapScreen> {
   }
 
   void _showCity() {
-    setState(() => _selected = null);
+    _select(null);
     _camera.animateTo(controller: _map, target: _khujand, zoom: 12.5);
   }
 
@@ -163,33 +204,23 @@ class _DispatchMapScreenState extends State<DispatchMapScreen> {
                     ),
                     zoom: TajGoMapCamera.cityZoom,
                   );
-                  setState(() => _selected = focused);
+                  if (mounted) _select(focused);
                 });
               }
             }
             final routeLines = <Polyline>[];
-            final selectedOrder = _selected is TajGoOrder
-                ? _selected as TajGoOrder
-                : null;
-            for (final order in <TajGoOrder>[?selectedOrder]) {
-              if (order.fromLocation == null || order.toLocation == null) {
-                continue;
-              }
-              final route = TajGoScope.of(context).routeService.directRoute(
-                from: LatLng(
-                  order.fromLocation!.latitude,
-                  order.fromLocation!.longitude,
-                ),
-                to: LatLng(
-                  order.toLocation!.latitude,
-                  order.toLocation!.longitude,
-                ),
-              );
+            final route = _selectedRoute;
+            if (route != null) {
               routeLines.add(
                 Polyline(
                   points: route.polylinePoints,
-                  color: TajGoColors.green.withValues(alpha: 0.45),
-                  strokeWidth: 3,
+                  color: route.isFallback
+                      ? TajGoColors.warning
+                      : TajGoColors.green,
+                  strokeWidth: 4,
+                  pattern: route.isFallback
+                      ? const StrokePattern.dotted()
+                      : const StrokePattern.solid(),
                 ),
               );
             }
@@ -219,7 +250,7 @@ class _DispatchMapScreenState extends State<DispatchMapScreen> {
                             width: 34,
                             height: 34,
                             child: GestureDetector(
-                              onTap: () => setState(() => _selected = courier),
+                              onTap: () => _select(courier),
                               child: Container(
                                 decoration: BoxDecoration(
                                   color: TajGoColors.green,
@@ -248,7 +279,7 @@ class _DispatchMapScreenState extends State<DispatchMapScreen> {
                               width: 42,
                               height: 42,
                               child: GestureDetector(
-                                onTap: () => setState(() => _selected = order),
+                                onTap: () => _select(order),
                                 child: Icon(
                                   Icons.location_pin,
                                   color: order.status == OrderStatus.waiting
@@ -271,7 +302,7 @@ class _DispatchMapScreenState extends State<DispatchMapScreen> {
                               width: 40,
                               height: 40,
                               child: GestureDetector(
-                                onTap: () => setState(() => _selected = order),
+                                onTap: () => _select(order),
                                 child: const Icon(
                                   Icons.location_pin,
                                   color: Colors.blue,
@@ -290,6 +321,7 @@ class _DispatchMapScreenState extends State<DispatchMapScreen> {
                           ),
                       ],
                     ),
+                    const TajGoMapAttribution(alignment: Alignment.centerLeft),
                   ],
                 ),
                 SafeArea(
@@ -307,20 +339,33 @@ class _DispatchMapScreenState extends State<DispatchMapScreen> {
                             icon: const Icon(Icons.arrow_back_rounded),
                           ),
                         ),
-                        const Spacer(),
-                        Material(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(18),
-                          elevation: 4,
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 14,
-                              vertical: 10,
-                            ),
-                            child: Text(
-                              '🛵 ${online.length} на линии · 📦 $waitingCount ждут · 🚚 $activeCount в пути',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w800,
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Material(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(18),
+                            elevation: 4,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 14,
+                                vertical: 10,
+                              ),
+                              child: Text(
+                                courierSnapshot.hasError ||
+                                        orderSnapshot.hasError
+                                    ? userErrorMessage(
+                                        courierSnapshot.error ??
+                                            orderSnapshot.error,
+                                      )
+                                    : courierSnapshot.connectionState ==
+                                              ConnectionState.waiting ||
+                                          orderSnapshot.connectionState ==
+                                              ConnectionState.waiting
+                                    ? 'Обновляем карту…'
+                                    : '🛵 ${online.length} на линии · 📦 $waitingCount ждут · 🚚 $activeCount в пути',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                ),
                               ),
                             ),
                           ),
@@ -381,7 +426,9 @@ class _DispatchMapScreenState extends State<DispatchMapScreen> {
                     alignment: Alignment.bottomCenter,
                     child: _PeekCard(
                       selected: _selected!,
-                      onClose: () => setState(() => _selected = null),
+                      route: _selectedRoute,
+                      routeLoading: _routeLoading,
+                      onClose: () => _select(null),
                     ),
                   ),
               ],
@@ -397,18 +444,25 @@ class _DispatchMapScreenState extends State<DispatchMapScreen> {
     child: FilterChip(
       label: Text(label),
       selected: _filter == value,
-      onSelected: (_) => setState(() {
-        _filter = value;
-        _selected = null;
-      }),
+      onSelected: (_) {
+        setState(() => _filter = value);
+        _select(null);
+      },
     ),
   );
 }
 
 class _PeekCard extends StatelessWidget {
-  const _PeekCard({required this.selected, required this.onClose});
+  const _PeekCard({
+    required this.selected,
+    required this.onClose,
+    this.route,
+    this.routeLoading = false,
+  });
   final Object selected;
   final VoidCallback onClose;
+  final TajGoRoute? route;
+  final bool routeLoading;
 
   @override
   Widget build(BuildContext context) {
@@ -419,7 +473,7 @@ class _PeekCard extends StatelessWidget {
     final subtitle = isCourier
         ? ((selected as TajGoCourier).online
               ? 'Курьер на линии'
-              : 'Курьер offline')
+              : 'Курьер не на линии')
         : '${orderStatusLabel((selected as TajGoOrder).status)} · ${(selected as TajGoOrder).price} TJS';
     return SafeArea(
       top: false,
@@ -445,10 +499,14 @@ class _PeekCard extends StatelessWidget {
                       style: const TextStyle(color: TajGoColors.muted),
                     ),
                     if (!isCourier)
-                      const Text(
-                        'Маршрут предварительный',
+                      Text(
+                        routeLoading
+                            ? 'Строим маршрут…'
+                            : route == null
+                            ? 'Выберите заказ с точками на карте'
+                            : formatRouteQuality(route),
                         style: TextStyle(
-                          color: TajGoColors.warning,
+                          color: TajGoColors.muted,
                           fontSize: 12,
                         ),
                       ),

@@ -86,8 +86,19 @@ class RouteService {
     if (running != null && !forceRefresh) return running;
     final request = _build(from: from, to: to, mode: mode);
     _inFlight[key] = request;
-    request.whenComplete(() => _inFlight.remove(key));
+    _removeWhenComplete(request, key);
     return request;
+  }
+
+  void _removeWhenComplete(Future<TajGoRoute> request, String key) {
+    void remove() {
+      if (identical(_inFlight[key], request)) _inFlight.remove(key);
+    }
+
+    request.then<void>(
+      (_) => remove(),
+      onError: (Object _, StackTrace _) => remove(),
+    );
   }
 
   Future<TajGoRoute> _build({

@@ -511,8 +511,11 @@ void main() {
     expect(find.text('Продолжить как администратор'), findsNothing);
   });
 
-  test('неизвестный статус заказа считается ожидающим', () {
-    expect(orderStatusFromString('legacy'), OrderStatus.waiting);
+  test('неизвестный статус заказа не становится доступным для принятия', () {
+    expect(orderStatusFromString('legacy'), OrderStatus.unknown);
+    expect(orderStatusFromString(null), OrderStatus.unknown);
+    expect(orderStatusFromString('waiting'), OrderStatus.waiting);
+    expect(orderStatusFromString('waitingOffers'), OrderStatus.waiting);
     expect(orderStatusToString(OrderStatus.pickedUp), 'pickedUp');
   });
 

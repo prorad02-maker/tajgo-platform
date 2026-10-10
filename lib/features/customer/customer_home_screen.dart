@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/constants/tajgo_colors.dart';
 import '../../core/models/tajgo_order.dart';
+import '../../core/services/user_error_message.dart';
 import '../../shared/widgets/tajgo_scope.dart';
 import '../../shared/widgets/tajgo_order_history_tile.dart';
 import '../account/account_profile_screen.dart';
@@ -20,30 +21,44 @@ class CustomerHomeScreen extends StatefulWidget {
 
 class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
   int _tab = 0;
+  bool _openingOrder = false;
 
   Future<void> _openOrder() async {
-    final scope = TajGoScope.of(context);
-    final firebaseUser = scope.authService.currentUser;
-    final profile = firebaseUser == null
-        ? null
-        : await scope.userRepository.getUser(firebaseUser.uid);
-    if (!mounted) return;
-    if (firebaseUser == null ||
-        (!kDebugMode && profile?.phoneVerified != true)) {
+    if (_openingOrder) return;
+    setState(() => _openingOrder = true);
+    try {
+      final scope = TajGoScope.of(context);
+      final firebaseUser = scope.authService.currentUser;
+      final profile = firebaseUser == null
+          ? null
+          : await scope.userRepository.getUser(firebaseUser.uid);
+      if (!mounted) return;
+      if (firebaseUser == null ||
+          (!kDebugMode && profile?.phoneVerified != true)) {
+        await Navigator.push(
+          context,
+          MaterialPageRoute<void>(
+            builder: (_) =>
+                const PhoneAuthScreen(allowAnonymousFallback: false),
+          ),
+        );
+        return;
+      }
       await Navigator.push(
         context,
         MaterialPageRoute<void>(
-          builder: (_) => const PhoneAuthScreen(allowAnonymousFallback: false),
+          builder: (_) => const NewOrderMapScreen(initialType: 'package'),
         ),
       );
-      return;
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(userErrorMessage(error))));
+      }
+    } finally {
+      if (mounted) setState(() => _openingOrder = false);
     }
-    await Navigator.push(
-      context,
-      MaterialPageRoute<void>(
-        builder: (_) => const NewOrderMapScreen(initialType: 'package'),
-      ),
-    );
   }
 
   Future<void> _openMarketplace(String category) => Navigator.push(
@@ -98,9 +113,16 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
     slivers: [
       SliverAppBar(
         pinned: true,
-        expandedHeight: 150,
+        expandedHeight:
+            150 +
+            (MediaQuery.textScalerOf(context).scale(24) - 24).clamp(0, 72),
         backgroundColor: TajGoColors.darkGreen,
         foregroundColor: Colors.white,
+        titleTextStyle: const TextStyle(
+          color: Colors.white,
+          fontSize: 20,
+          fontWeight: FontWeight.w800,
+        ),
         title: const Text('Худжанд'),
         actions: [
           IconButton(
@@ -135,7 +157,7 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
                   ),
                 ),
                 const Text(
-                  '📍 Текущая локация определяется при создании заказа',
+                  'Доставка по Худжанду',
                   style: TextStyle(color: Colors.white70, fontSize: 12),
                 ),
               ],
@@ -149,7 +171,12 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
           children: [
             StreamBuilder<TajGoOrder?>(
               stream: scope.orderRepository.activeOrderStream(uid),
-              builder: (context, snapshot) => snapshot.data == null
+              builder: (context, snapshot) => snapshot.hasError
+                  ? Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Text(userErrorMessage(snapshot.error)),
+                    )
+                  : snapshot.data == null
                   ? const SizedBox.shrink()
                   : Padding(
                       padding: const EdgeInsets.only(bottom: 14),
@@ -160,7 +187,7 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
               color: TajGoColors.darkGreen,
               clipBehavior: Clip.antiAlias,
               child: InkWell(
-                onTap: _openOrder,
+                onTap: _openingOrder ? null : _openOrder,
                 child: const Padding(
                   padding: EdgeInsets.all(20),
                   child: Row(
@@ -243,6 +270,16 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
             StreamBuilder<List<TajGoOrder>>(
               stream: scope.orderRepository.recentOrdersStream(uid),
               builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Text(userErrorMessage(snapshot.error)),
+                  );
+                }
+                if (snapshot.connectionState == ConnectionState.waiting &&
+                    !snapshot.hasData) {
+                  return const LinearProgressIndicator();
+                }
                 final orders = snapshot.data ?? const <TajGoOrder>[];
                 if (orders.isEmpty) {
                   return const Card(
@@ -254,7 +291,12 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
                 }
                 return Column(
                   children: orders
-                      .map((order) => TajGoOrderHistoryTile(order: order))
+                      .map(
+                        (order) => TajGoOrderHistoryTile(
+                          order: order,
+                          onTap: () => _openHistoryOrder(order),
+                        ),
+                      )
                       .toList(growable: false),
                 );
               },
@@ -276,7 +318,15 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
         const SizedBox(height: 14),
         StreamBuilder<TajGoOrder?>(
           stream: scope.orderRepository.activeOrderStream(uid),
-          builder: (context, snapshot) => snapshot.data == null
+          builder: (context, snapshot) => snapshot.hasError
+              ? Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Text(userErrorMessage(snapshot.error)),
+                )
+              : snapshot.connectionState == ConnectionState.waiting &&
+                    !snapshot.hasData
+              ? const LinearProgressIndicator()
+              : snapshot.data == null
               ? const Card(
                   child: Padding(
                     padding: EdgeInsets.all(16),
@@ -288,11 +338,21 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
         const SizedBox(height: 14),
         StreamBuilder<List<TajGoOrder>>(
           stream: scope.orderRepository.recentOrdersStream(uid),
-          builder: (context, snapshot) => Column(
-            children: (snapshot.data ?? const <TajGoOrder>[])
-                .map((order) => TajGoOrderHistoryTile(order: order))
-                .toList(growable: false),
-          ),
+          builder: (context, snapshot) => snapshot.hasError
+              ? Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Text(userErrorMessage(snapshot.error)),
+                )
+              : Column(
+                  children: (snapshot.data ?? const <TajGoOrder>[])
+                      .map(
+                        (order) => TajGoOrderHistoryTile(
+                          order: order,
+                          onTap: () => _openHistoryOrder(order),
+                        ),
+                      )
+                      .toList(growable: false),
+                ),
         ),
       ],
     ),
@@ -304,6 +364,13 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
     if (hour < 18) return 'Добрый день';
     return 'Добрый вечер';
   }
+
+  void _openHistoryOrder(TajGoOrder order) => Navigator.push(
+    context,
+    MaterialPageRoute<void>(
+      builder: (_) => OrderTrackingScreen(orderId: order.id),
+    ),
+  );
 }
 
 class _CategoryCard extends StatelessWidget {
