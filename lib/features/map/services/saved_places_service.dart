@@ -20,11 +20,16 @@ class SavedPlacesService {
       return decoded
           .whereType<Map<String, dynamic>>()
           .map((json) => PlaceSuggestion.fromJson(json, source: 'favorite'))
-          .where((place) => place.lat != 0 || place.lng != 0)
+          .where(
+            (place) =>
+                place.location.isValid && (place.lat != 0 || place.lng != 0),
+          )
           .take(_limit)
           .toList();
     } catch (_) {
-      await _preferences.remove(_key);
+      try {
+        await _preferences.remove(_key);
+      } catch (_) {}
       return const [];
     }
   }
@@ -35,6 +40,7 @@ class SavedPlacesService {
   }
 
   Future<bool> toggleFavorite(PlaceSuggestion place) async {
+    place.location.validate();
     final saved = await load();
     final exists = saved.any((item) => _samePlace(item, place));
     final next = saved.where((item) => !_samePlace(item, place)).toList();

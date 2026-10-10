@@ -52,3 +52,7 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 /android/.kotlin/
+**/node_modules/
+/firebase-debug.log
+/firestore-debug.log
+/.firebase/

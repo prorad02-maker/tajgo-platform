@@ -13,6 +13,7 @@ import 'package:tajgo/features/map/services/place_search_service.dart';
 import 'package:tajgo/features/map/services/recent_places_service.dart';
 import 'package:tajgo/features/map/services/saved_places_service.dart';
 import 'package:tajgo/features/map/widgets/place_search_sheet.dart';
+import 'package:tajgo/features/map/widgets/address_details_dialog.dart';
 
 class _SavedPlaces extends SavedPlacesService {
   _SavedPlaces() : super(preferences: _Preferences());
@@ -57,6 +58,45 @@ const oldPlace = PlaceSuggestion(
 );
 
 void main() {
+  testWidgets(
+    'missing geocoded address requires a label and returns trimmed detail',
+    (tester) async {
+      String? selected;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: TajGoTheme.light,
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () async {
+                  selected = await showAddressDetailsDialog(
+                    context: context,
+                    initialAddress: 'Точка на карте',
+                    needsAddress: true,
+                  );
+                },
+                child: const Text('Указать адрес'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Указать адрес'));
+      await tester.pumpAndSettle();
+      expect(find.text('Точка на карте'), findsNothing);
+      await tester.tap(find.text('Сохранить'));
+      await tester.pumpAndSettle();
+      expect(find.text('Укажите улицу, дом или ориентир.'), findsOneWidget);
+      await tester.enterText(
+        find.byType(TextFormField),
+        '  Сомони, 54, у входа  ',
+      );
+      await tester.tap(find.text('Сохранить'));
+      await tester.pumpAndSettle();
+      expect(selected, 'Сомони, 54, у входа');
+      expect(tester.takeException(), isNull);
+    },
+  );
   test('infrastructure errors do not leak provider detail', () {
     expect(
       userErrorMessage(

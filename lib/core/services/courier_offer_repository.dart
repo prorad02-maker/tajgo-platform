@@ -3,14 +3,34 @@ import 'package:latlong2/latlong.dart';
 
 import '../models/courier_offer.dart';
 import 'courier_order_eligibility.dart';
+import 'order_command_service.dart';
 
 class CourierOfferRepository {
   CourierOfferRepository(
     this._db, {
     CourierOrderEligibilityService? eligibility,
-  }) : _eligibility = eligibility ?? const CourierOrderEligibilityService();
+    OrderCommandService? commands,
+  }) : _eligibility = eligibility ?? const CourierOrderEligibilityService(),
+       // Public injection name deliberately differs from the private field.
+       // ignore: prefer_initializing_formals
+       _commands = commands;
 
   final FirebaseFirestore _db;
+  final OrderCommandService? _commands;
+
+  Future<void> _mutation(
+    String orderId,
+    String action,
+    Map<String, dynamic> payload,
+    Future<void> Function() legacy,
+  ) async {
+    if (_commands != null && await _commands.handlesOrder(_db, orderId)) {
+      await _commands.run(action, {'orderId': orderId, ...payload});
+    } else {
+      await legacy();
+    }
+  }
+
   final CourierOrderEligibilityService _eligibility;
 
   Stream<List<CourierOffer>> offersStream(String orderId) => _db
@@ -30,122 +50,141 @@ class CourierOfferRepository {
     required String orderId,
     required String courierId,
     required num proposedPrice,
-  }) => _db.runTransaction((transaction) async {
-    final orderRef = _db.collection('orders').doc(orderId);
-    final courierRef = _db.collection('couriers').doc(courierId);
-    final offerRef = orderRef.collection('offers').doc(courierId);
-    final snapshots = await Future.wait([
-      transaction.get(orderRef),
-      transaction.get(courierRef),
-      transaction.get(offerRef),
-    ]);
-    final order = snapshots[0].data();
-    final courier = snapshots[1].data();
-    if (order == null || courier == null) {
-      throw StateError('Заказ или профиль курьера не найден.');
-    }
-    if (!isWaitingOrderStatus(order['status'] as String?)) {
-      throw StateError('Заказ уже недоступен для предложений.');
-    }
-    if (order['courierId'] != null || order['selectedCourierId'] != null) {
-      throw StateError('Клиент уже выбрал курьера.');
-    }
+  }) => _mutation(
+    orderId,
+    'offer',
+    {'proposedPrice': proposedPrice},
+    () => _db.runTransaction((transaction) async {
+      final orderRef = _db.collection('orders').doc(orderId);
+      final courierRef = _db.collection('couriers').doc(courierId);
+      final offerRef = orderRef.collection('offers').doc(courierId);
+      final snapshots = await Future.wait([
+        transaction.get(orderRef),
+        transaction.get(courierRef),
+        transaction.get(offerRef),
+      ]);
+      final order = snapshots[0].data();
+      final courier = snapshots[1].data();
+      if (order == null || courier == null) {
+        throw StateError('Заказ или профиль курьера не найден.');
+      }
+      if (!isWaitingOrderStatus(order['status'] as String?)) {
+        throw StateError('Заказ уже недоступен для предложений.');
+      }
+      if (order['courierId'] != null || order['selectedCourierId'] != null) {
+        throw StateError('Клиент уже выбрал курьера.');
+      }
 
-    final clientPrice =
-        order['clientPrice'] as num? ?? order['price'] as num? ?? 0;
-    if (!isCourierOfferPriceValid(
-      proposedPrice: proposedPrice,
-      clientPrice: clientPrice,
-      priceNegotiable: order['priceNegotiable'] as bool? ?? true,
-    )) {
-      throw StateError(
-        order['priceNegotiable'] == false
-            ? 'Для этого заказа действует фиксированная цена.'
-            : 'Предложение не может быть ниже цены клиента.',
+      final clientPrice =
+          order['clientPrice'] as num? ?? order['price'] as num? ?? 0;
+      if (!isCourierOfferPriceValid(
+        proposedPrice: proposedPrice,
+        clientPrice: clientPrice,
+        priceNegotiable: order['priceNegotiable'] as bool? ?? true,
+      )) {
+        throw StateError(
+          order['priceNegotiable'] == false
+              ? 'Для этого заказа действует фиксированная цена.'
+              : 'Предложение не может быть ниже цены клиента.',
+        );
+      }
+      final pickup = order['fromLocation'] as GeoPoint?;
+      final location = courier['location'] as GeoPoint?;
+      if (pickup == null) throw StateError('У заказа не указана точка забора.');
+      final result = _eligibility.evaluate(
+        courierLocation: location == null
+            ? null
+            : LatLng(location.latitude, location.longitude),
+        locationUpdatedAt: _date(courier['locationUpdatedAt']),
+        accuracyMeters: (courier['locationAccuracy'] as num?)?.toDouble(),
+        pickup: LatLng(pickup.latitude, pickup.longitude),
+        hasActiveOrder:
+            courier['activeOrderId'] != null || courier['isBusy'] == true,
       );
-    }
-    final pickup = order['fromLocation'] as GeoPoint?;
-    final location = courier['location'] as GeoPoint?;
-    if (pickup == null) throw StateError('У заказа не указана точка забора.');
-    final result = _eligibility.evaluate(
-      courierLocation: location == null
-          ? null
-          : LatLng(location.latitude, location.longitude),
-      locationUpdatedAt: _date(courier['locationUpdatedAt']),
-      accuracyMeters: (courier['locationAccuracy'] as num?)?.toDouble(),
-      pickup: LatLng(pickup.latitude, pickup.longitude),
-      hasActiveOrder:
-          courier['activeOrderId'] != null || courier['isBusy'] == true,
-    );
-    if (!result.allowed) throw StateError(result.message);
+      if (!result.allowed) throw StateError(result.message);
 
-    final previous = snapshots[2].data();
-    final expiresAt = Timestamp.fromDate(
-      DateTime.now().add(const Duration(minutes: 5)),
-    );
-    transaction.set(offerRef, {
-      'courierId': courierId,
-      'courierName':
-          courier['displayName'] as String? ??
-          courier['name'] as String? ??
-          'Курьер',
-      'courierRating': courier['rating'] as num? ?? 5,
-      'courierTransport': courier['transport'] as String? ?? 'bicycle',
-      'courierDistanceMeters': result.distanceMeters?.round() ?? 0,
-      'proposedPrice': proposedPrice,
-      'originalClientPrice': clientPrice,
-      'status': 'pending',
-      'createdAt': previous?['createdAt'] ?? FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
-      'expiresAt': expiresAt,
-      'isTest': order['isTest'] == true || order['isTestOrder'] == true,
-    }, SetOptions(merge: true));
-    if (shouldIncrementOffersCount(previous?['status'] as String?)) {
-      transaction.update(orderRef, {
-        'offersCount': FieldValue.increment(1),
-        'offerExpiresAt': expiresAt,
+      final previous = snapshots[2].data();
+      final expiresAt = Timestamp.fromDate(
+        DateTime.now().add(const Duration(minutes: 5)),
+      );
+      transaction.set(offerRef, {
+        'courierId': courierId,
+        'courierName':
+            courier['displayName'] as String? ??
+            courier['name'] as String? ??
+            'Курьер',
+        'courierRating': courier['rating'] as num? ?? 5,
+        'courierTransport': courier['transport'] as String? ?? 'bicycle',
+        'courierDistanceMeters': result.distanceMeters?.round() ?? 0,
+        'proposedPrice': proposedPrice,
+        'originalClientPrice': clientPrice,
+        'status': 'pending',
+        'createdAt': previous?['createdAt'] ?? FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
-      });
-    }
-  });
+        'expiresAt': expiresAt,
+        'isTest': order['isTest'] == true || order['isTestOrder'] == true,
+      }, SetOptions(merge: true));
+      if (shouldIncrementOffersCount(previous?['status'] as String?)) {
+        transaction.update(orderRef, {
+          'offersCount': FieldValue.increment(1),
+          'offerExpiresAt': expiresAt,
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      }
+    }),
+  );
 
   Future<void> withdrawCourierOffer({
     required String orderId,
     required String courierId,
-  }) => _db
-      .collection('orders')
-      .doc(orderId)
-      .collection('offers')
-      .doc(courierId)
-      .update({
-        'status': 'withdrawn',
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
+  }) => _mutation(
+    orderId,
+    'withdraw',
+    {},
+    () => _db
+        .collection('orders')
+        .doc(orderId)
+        .collection('offers')
+        .doc(courierId)
+        .update({
+          'status': 'withdrawn',
+          'updatedAt': FieldValue.serverTimestamp(),
+        }),
+  );
 
   Future<void> rejectCourierOffer({
     required String orderId,
     required String offerId,
     required String customerId,
-  }) => _db.runTransaction((transaction) async {
-    final orderRef = _db.collection('orders').doc(orderId);
-    final offerRef = orderRef.collection('offers').doc(offerId);
-    final order = await transaction.get(orderRef);
-    final offer = await transaction.get(offerRef);
-    if (order.data()?['customerId'] != customerId) {
-      throw StateError('Отклонять предложения может только клиент заказа.');
-    }
-    if (offer.data()?['status'] != 'pending') return;
-    transaction.update(offerRef, {
-      'status': 'rejected',
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
-  });
+  }) => _mutation(
+    orderId,
+    'reject',
+    {'offerId': offerId},
+    () => _db.runTransaction((transaction) async {
+      final orderRef = _db.collection('orders').doc(orderId);
+      final offerRef = orderRef.collection('offers').doc(offerId);
+      final order = await transaction.get(orderRef);
+      final offer = await transaction.get(offerRef);
+      if (order.data()?['customerId'] != customerId) {
+        throw StateError('Отклонять предложения может только клиент заказа.');
+      }
+      if (offer.data()?['status'] != 'pending') return;
+      transaction.update(offerRef, {
+        'status': 'rejected',
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    }),
+  );
 
   Future<void> selectCourierOffer({
     required String orderId,
     required String offerId,
     required String customerId,
   }) async {
+    if (_commands != null && await _commands.handlesOrder(_db, orderId)) {
+      await _commands.run('select', {'orderId': orderId, 'offerId': offerId});
+      return;
+    }
     final orderRef = _db.collection('orders').doc(orderId);
     final offerRefs = (await orderRef.collection('offers').get()).docs
         .map((doc) => doc.reference)
@@ -173,7 +212,11 @@ class CourierOfferRepository {
       }
       final courierId = offer['courierId'] as String? ?? offerId;
       final courierRef = _db.collection('couriers').doc(courierId);
-      final courierDoc = await transaction.get(courierRef);
+      // Customer selection must not read the courier's private phone/stats.
+      // The Rules atomically verify that the private assignment is still free.
+      final courierDoc = await transaction.get(
+        _db.collection('courier_public').doc(courierId),
+      );
       final courier = courierDoc.data();
       if (courier == null) throw StateError('Профиль курьера не найден.');
       final otherOffers = <DocumentSnapshot<Map<String, dynamic>>>[];
@@ -192,8 +235,7 @@ class CourierOfferRepository {
         locationUpdatedAt: _date(courier['locationUpdatedAt']),
         accuracyMeters: (courier['locationAccuracy'] as num?)?.toDouble(),
         pickup: LatLng(pickup.latitude, pickup.longitude),
-        hasActiveOrder:
-            courier['activeOrderId'] != null || courier['isBusy'] == true,
+        hasActiveOrder: false,
       );
       if (!result.allowed) throw StateError(result.message);
 
@@ -237,10 +279,7 @@ class CourierOfferRepository {
 }
 
 bool isWaitingOrderStatus(String? status) =>
-    status == null ||
-    status == 'draft' ||
-    status == 'waiting' ||
-    status == 'waitingOffers';
+    status == 'waiting' || status == 'waitingOffers';
 
 bool isCourierOfferPriceValid({
   required num proposedPrice,

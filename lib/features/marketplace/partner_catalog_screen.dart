@@ -5,17 +5,26 @@ import '../../core/constants/tajgo_colors.dart';
 import '../../core/models/marketplace_cart.dart';
 import '../../core/models/marketplace_partner.dart';
 import '../../core/models/marketplace_product.dart';
+import '../../core/services/marketplace_repository.dart';
+import '../../core/utils/money_formatter.dart';
 import '../../shared/widgets/tajgo_scope.dart';
 import 'marketplace_checkout_screen.dart';
 import 'marketplace_partners_screen.dart';
 
 class PartnerCatalogScreen extends StatelessWidget {
-  const PartnerCatalogScreen({super.key, required this.partner});
+  const PartnerCatalogScreen({
+    super.key,
+    required this.partner,
+    this.repository,
+    this.cart,
+  });
 
   final MarketplacePartner partner;
+  final MarketplaceRepository? repository;
+  final MarketplaceCart? cart;
 
   Future<void> _add(BuildContext context, MarketplaceProduct product) async {
-    final cart = TajGoScope.of(context).marketplaceCart;
+    final cart = this.cart ?? TajGoScope.of(context).marketplaceCart;
     try {
       cart.add(partner, product);
     } on MarketplaceCartConflict catch (conflict) {
@@ -50,12 +59,13 @@ class PartnerCatalogScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scope = TajGoScope.of(context);
-    final cart = scope.marketplaceCart;
+    final repository =
+        this.repository ?? TajGoScope.of(context).marketplaceRepository;
+    final cart = this.cart ?? TajGoScope.of(context).marketplaceCart;
     return Scaffold(
       appBar: AppBar(title: Text(partner.name)),
       body: StreamBuilder<List<MarketplaceProduct>>(
-        stream: scope.marketplaceRepository.productsStream(
+        stream: repository.productsStream(
           partner.id,
           previewFallback: partner.isPreview,
         ),
@@ -81,9 +91,8 @@ class PartnerCatalogScreen extends StatelessWidget {
                   child: Padding(
                     padding: EdgeInsets.all(12),
                     child: Text(
-                      'Это временный пример ассортимента. Администратор может '
-                      'загрузить готовые примеры в Firestore или заменить их '
-                      'реальными заведениями.',
+                      'Демонстрационный ассортимент. Заказ у этого заведения '
+                      'пока недоступен.',
                       style: TextStyle(fontWeight: FontWeight.w700),
                     ),
                   ),
@@ -127,7 +136,7 @@ class PartnerCatalogScreen extends StatelessWidget {
               ),
               icon: const Icon(Icons.shopping_cart_rounded),
               label: Text(
-                'Корзина · ${cart.itemKinds} поз. · ${cart.total} TJS',
+                'Корзина · ${cart.itemKinds} поз. · ${formatMoney(cart.total)} TJS',
               ),
             ),
           );
@@ -157,8 +166,8 @@ class _PartnerHeader extends StatelessWidget {
           const SizedBox(height: 6),
           Text(
             '${partner.address} · ~${partner.preparationMinutes} мин · '
-            'минимум ${partner.minimumOrder} TJS · '
-            'доставка ${partner.deliveryFee} TJS',
+            'минимум ${formatMoney(partner.minimumOrder)} TJS · '
+            'доставка ${formatMoney(partner.deliveryFee.clamp(10, 100000))} TJS',
             style: const TextStyle(color: TajGoColors.muted, fontSize: 12),
           ),
           if (!partner.isOpen) ...[
@@ -166,7 +175,7 @@ class _PartnerHeader extends StatelessWidget {
             Text(
               'Сейчас закрыто${partner.workingHours.isEmpty ? '' : ' · ${partner.workingHours}'}',
               style: const TextStyle(
-                color: TajGoColors.warning,
+                color: TajGoColors.muted,
                 fontWeight: FontWeight.w900,
               ),
             ),
@@ -225,16 +234,17 @@ class _ProductCard extends StatelessWidget {
                       style: const TextStyle(color: TajGoColors.muted),
                     ),
                   const SizedBox(height: 5),
-                  Row(
+                  Wrap(
+                    spacing: 7,
+                    runSpacing: 4,
                     children: [
                       Text(
-                        '${product.price} TJS / ${marketplaceUnitLabel(product.unit)}',
+                        '${formatMoney(product.price)} TJS / ${marketplaceUnitLabel(product.unit)}',
                         style: const TextStyle(fontWeight: FontWeight.w900),
                       ),
                       if (product.oldPrice != null) ...[
-                        const SizedBox(width: 7),
                         Text(
-                          '${product.oldPrice}',
+                          formatMoney(product.oldPrice!),
                           style: const TextStyle(
                             color: TajGoColors.muted,
                             decoration: TextDecoration.lineThrough,
@@ -246,7 +256,7 @@ class _ProductCard extends StatelessWidget {
                   if (!product.isAvailable)
                     const Text(
                       'Закончилось',
-                      style: TextStyle(color: TajGoColors.warning),
+                      style: TextStyle(color: TajGoColors.warningText),
                     ),
                 ],
               ),
@@ -272,12 +282,8 @@ class _ProductCard extends StatelessWidget {
                   children: [
                     IconButton(
                       tooltip: 'Добавить',
-                      visualDensity: VisualDensity.compact,
-                      constraints: const BoxConstraints.tightFor(
-                        width: 36,
-                        height: 34,
-                      ),
-                      onPressed: enabled
+                      onPressed:
+                          enabled && line.quantity + product.quantityStep <= 100
                           ? () => cart.increment(product.id)
                           : null,
                       icon: const Icon(Icons.add_circle_rounded),
@@ -288,11 +294,6 @@ class _ProductCard extends StatelessWidget {
                     ),
                     IconButton(
                       tooltip: 'Уменьшить',
-                      visualDensity: VisualDensity.compact,
-                      constraints: const BoxConstraints.tightFor(
-                        width: 36,
-                        height: 34,
-                      ),
                       onPressed: () => cart.decrement(product.id),
                       icon: const Icon(Icons.remove_circle_outline_rounded),
                     ),

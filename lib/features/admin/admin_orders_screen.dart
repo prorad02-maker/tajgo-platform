@@ -179,6 +179,7 @@ String orderStatusLabel(OrderStatus status) => switch (status) {
   OrderStatus.completed => 'Завершён',
   OrderStatus.disputed => 'Спорный',
   OrderStatus.cancelled => 'Отменён',
+  OrderStatus.unknown => 'Статус недоступен',
 };
 
 class _Message extends StatelessWidget {

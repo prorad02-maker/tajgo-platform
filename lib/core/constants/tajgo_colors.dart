@@ -15,6 +15,7 @@ class TajGoColors {
   static const secondaryBtn = Color(0xFFEDF6EC);
   static const navy = Color(0xFF0F172A);
   static const warning = Color(0xFFF4B400);
+  static const warningText = Color(0xFF7A5100);
   static const error = Color(0xFFDC2626);
   static const success = Color(0xFF16A34A);
 }

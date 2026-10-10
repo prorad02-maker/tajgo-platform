@@ -2,39 +2,80 @@ import 'package:flutter/material.dart';
 
 import '../../core/constants/tajgo_colors.dart';
 import '../../core/models/marketplace_partner.dart';
+import '../../core/services/marketplace_repository.dart';
+import '../../core/services/user_error_message.dart';
+import '../../core/utils/money_formatter.dart';
 import '../../shared/widgets/tajgo_scope.dart';
+import '../../shared/widgets/tajgo_state_view.dart';
 import 'partner_catalog_screen.dart';
 
-class MarketplacePartnersScreen extends StatelessWidget {
-  const MarketplacePartnersScreen({super.key, required this.category});
+class MarketplacePartnersScreen extends StatefulWidget {
+  const MarketplacePartnersScreen({
+    super.key,
+    required this.category,
+    this.repository,
+  });
 
   final String category;
+  final MarketplaceRepository? repository;
+
+  @override
+  State<MarketplacePartnersScreen> createState() =>
+      _MarketplacePartnersScreenState();
+}
+
+class _MarketplacePartnersScreenState extends State<MarketplacePartnersScreen> {
+  Stream<List<MarketplacePartner>>? _partners;
+
+  MarketplaceRepository get _repository =>
+      widget.repository ?? TajGoScope.of(context).marketplaceRepository;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _partners ??= _repository.partnersStream(category: widget.category);
+  }
+
+  @override
+  void didUpdateWidget(MarketplacePartnersScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.category != widget.category ||
+        oldWidget.repository != widget.repository) {
+      _partners = _repository.partnersStream(category: widget.category);
+    }
+  }
+
+  void _retry() => setState(() {
+    _partners = _repository.partnersStream(category: widget.category);
+  });
 
   @override
   Widget build(BuildContext context) {
-    final repository = TajGoScope.of(context).marketplaceRepository;
     return Scaffold(
-      appBar: AppBar(title: Text(marketplaceCategoryLabel(category))),
+      appBar: AppBar(title: Text(marketplaceCategoryLabel(widget.category))),
       body: StreamBuilder<List<MarketplacePartner>>(
-        stream: repository.partnersStream(category: category),
+        stream: _partners,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting &&
               !snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
           if (snapshot.hasError) {
-            return const _Message(
+            return TajGoStateView(
               icon: Icons.cloud_off_rounded,
               title: 'Не удалось загрузить партнёров',
-              subtitle: 'Проверьте интернет и Firestore Rules.',
+              message: userErrorMessage(snapshot.error),
+              onRetry: _retry,
             );
           }
           final partners = snapshot.data ?? const <MarketplacePartner>[];
           if (partners.isEmpty) {
-            return const _Message(
+            return TajGoStateView(
               icon: Icons.storefront_rounded,
               title: 'Партнёры скоро появятся',
-              subtitle: 'Мы подключаем проверенные места Худжанда.',
+              message: 'Мы подключаем проверенные места Худжанда.',
+              onRetry: _retry,
+              actionLabel: 'Обновить',
             );
           }
           final preview = partners.any((partner) => partner.isPreview);
@@ -95,7 +136,7 @@ class MarketplacePartnersScreen extends StatelessWidget {
                                   Expanded(
                                     child: Text(
                                       partner.name,
-                                      maxLines: 1,
+                                      maxLines: 2,
                                       overflow: TextOverflow.ellipsis,
                                       style: const TextStyle(
                                         fontSize: 17,
@@ -123,12 +164,12 @@ class MarketplacePartnersScreen extends StatelessWidget {
                               Text(
                                 partner.isOpen
                                     ? 'Открыто · ~${partner.preparationMinutes} мин · '
-                                          'доставка ${partner.deliveryFee} TJS'
+                                          'доставка ${formatMoney(partner.deliveryFee.clamp(10, 100000))} TJS'
                                     : 'Закрыто · ${partner.workingHours}',
                                 style: TextStyle(
                                   color: partner.isOpen
                                       ? TajGoColors.darkGreen
-                                      : TajGoColors.warning,
+                                      : TajGoColors.muted,
                                   fontWeight: FontWeight.w800,
                                 ),
                               ),
@@ -154,43 +195,6 @@ IconData _categoryIcon(String category) => switch (category) {
   'flowers' => Icons.local_florist_rounded,
   _ => Icons.storefront_rounded,
 };
-
-class _Message extends StatelessWidget {
-  const _Message({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-  });
-
-  final IconData icon;
-  final String title;
-  final String subtitle;
-
-  @override
-  Widget build(BuildContext context) => Center(
-    child: Padding(
-      padding: const EdgeInsets.all(32),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 56, color: TajGoColors.green),
-          const SizedBox(height: 14),
-          Text(
-            title,
-            textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            subtitle,
-            textAlign: TextAlign.center,
-            style: const TextStyle(color: TajGoColors.muted),
-          ),
-        ],
-      ),
-    ),
-  );
-}
 
 class MarketplaceImage extends StatelessWidget {
   const MarketplaceImage({

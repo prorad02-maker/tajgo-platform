@@ -905,7 +905,7 @@ class _OrderPanel extends StatelessWidget {
                   style: TextStyle(
                     color: route?.isFallback == false
                         ? TajGoColors.darkGreen
-                        : TajGoColors.warning,
+                        : TajGoColors.warningText,
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
                   ),
@@ -914,7 +914,7 @@ class _OrderPanel extends StatelessWidget {
                 const Text(
                   'Вы отклонились от маршрута. Перестраиваем…',
                   style: TextStyle(
-                    color: TajGoColors.warning,
+                    color: TajGoColors.warningText,
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
                   ),

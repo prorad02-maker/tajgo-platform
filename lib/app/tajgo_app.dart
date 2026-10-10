@@ -11,7 +11,7 @@ class TajGoApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return TajGoScope(
       child: MaterialApp(
-        title: 'TajGo+',
+        title: 'TajGo',
         debugShowCheckedModeBanner: false,
         theme: TajGoTheme.light,
         home: const SplashScreen(),

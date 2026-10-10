@@ -262,7 +262,7 @@ class _ImportPreview extends StatelessWidget {
               Text(
                 '⚠ $warning',
                 style: const TextStyle(
-                  color: TajGoColors.warning,
+                  color: TajGoColors.warningText,
                   fontWeight: FontWeight.w700,
                 ),
               ),

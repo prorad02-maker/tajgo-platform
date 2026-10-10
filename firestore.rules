@@ -6,20 +6,42 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function serverCommandsRequired() {
+      return exists(/databases/$(database)/documents/_config/order_commands)
+        && get(/databases/$(database)/documents/_config/order_commands).data
+          .get('enabled', false) == true;
+    }
+
+    function legacyOrder(data) {
+      return data.get('commandVersion', 'legacy') != 'server-v1';
+    }
+
+    match /order_receipts/{orderId} {
+      allow get: if signedIn() && resource.data.customerId == request.auth.uid;
+      allow list, write: if false;
+    }
+    match /_order_secrets/{orderId} { allow read, write: if false; }
+    match /_order_commands/{commandId} { allow read, write: if false; }
+    match /_customer_orders/{uid} { allow read, write: if false; }
+    match /_config/{configId} { allow read, write: if false; }
+
     function owns(uid) {
       return signedIn() && request.auth.uid == uid;
     }
 
     function isCourier() {
-      return signedIn()
-        && exists(/databases/$(database)/documents/couriers/$(request.auth.uid))
-        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data
+      return signedIn() && approvedCourier(request.auth.uid);
+    }
+
+    function approvedCourier(uid) {
+      return exists(/databases/$(database)/documents/couriers/$(uid))
+        && exists(/databases/$(database)/documents/users/$(uid))
+        && get(/databases/$(database)/documents/users/$(uid)).data
           .get('courierStatus', 'none') == 'approved'
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data
+        && get(/databases/$(database)/documents/users/$(uid)).data
           .get('courierOnboardingCompleted', false) == true
         && 'courier' in get(
-          /databases/$(database)/documents/users/$(request.auth.uid)
+          /databases/$(database)/documents/users/$(uid)
         ).data.get('roles', []);
     }
 
@@ -66,11 +88,16 @@ service cloud.firestore {
           || exists(/databases/$(database)/documents/couriers/$(uid));
       }
 
+      function canMigrateLegacyCourier(uid) {
+        return resource.data.get('courierStatus', 'none') == 'none'
+          && hasLegacyCourierProof(uid);
+      }
+
       function ownerRolesAreValid(uid) {
         let before = resource.data.get('roles', ['customer']);
         let after = request.resource.data.get('roles', ['customer']);
         return after == before
-          || (hasLegacyCourierProof(uid)
+          || (canMigrateLegacyCourier(uid)
             && after.hasOnly(['customer', 'courier'])
             && 'customer' in after
             && 'courier' in after);
@@ -83,7 +110,7 @@ service cloud.firestore {
           || (before == 'none' && after == 'draft')
           || (before == 'draft' && after == 'pending')
           || (before == 'rejected' && after in ['draft', 'pending'])
-          || (hasLegacyCourierProof(uid) && after == 'approved');
+          || (canMigrateLegacyCourier(uid) && after == 'approved');
       }
 
       function ownerModeAndLegacyRoleAreValid() {
@@ -256,6 +283,7 @@ service cloud.firestore {
         return owns(uid)
           && resource.data.get('activeOrderId', null) == null
           && orderId is string
+          && legacyOrder(orderAfter.data)
           && orderAfter.data.courierId == uid
           && orderAfter.data.status == 'accepted'
           && request.resource.data.updatedAt == request.time
@@ -272,6 +300,7 @@ service cloud.firestore {
           /databases/$(database)/documents/orders/$(orderId)
         );
         return orderId is string
+          && legacyOrder(orderAfter.data)
           && orderAfter.data.courierId == uid
           && orderAfter.data.status == 'completed'
           && request.resource.data.get('activeOrderId', null) == null
@@ -309,6 +338,7 @@ service cloud.firestore {
           && resource.data.get('activeOrderId', null) == null
           && resource.data.get('isBusy', false) == false
           && orderId is string
+          && legacyOrder(orderAfter.data)
           && orderAfter.data.customerId == request.auth.uid
           && orderAfter.data.courierId == uid
           && orderAfter.data.status == 'accepted'
@@ -417,53 +447,6 @@ service cloud.firestore {
     }
 
     match /orders/{orderId} {
-      function immutableOrderData() {
-        return request.resource.data.customerId == resource.data.customerId
-          && request.resource.data.customerName == resource.data.customerName
-          && request.resource.data.type == resource.data.type
-          && request.resource.data.city == resource.data.city
-          && request.resource.data.fromText == resource.data.fromText
-          && request.resource.data.toText == resource.data.toText
-          && request.resource.data.currency == resource.data.currency
-          && request.resource.data.get('fromLocation', null)
-            == resource.data.get('fromLocation', null)
-          && request.resource.data.get('toLocation', null)
-            == resource.data.get('toLocation', null)
-          && request.resource.data.get('distanceKm', null)
-            == resource.data.get('distanceKm', null)
-          && request.resource.data.get('etaMinutes', null)
-            == resource.data.get('etaMinutes', null)
-          && request.resource.data.get('confirmationCode', null)
-            == resource.data.get('confirmationCode', null)
-          && request.resource.data.get('comment', null)
-            == resource.data.get('comment', null)
-          && request.resource.data.get('orderType', 'customDelivery')
-            == resource.data.get('orderType', 'customDelivery')
-          && request.resource.data.get('suggestedPrice', null)
-            == resource.data.get('suggestedPrice', null)
-          && request.resource.data.get('clientPrice', null)
-            == resource.data.get('clientPrice', null)
-          && request.resource.data.get('priceNegotiable', true)
-            == resource.data.get('priceNegotiable', true)
-          && request.resource.data.get('pricingVersion', null)
-            == resource.data.get('pricingVersion', null)
-          && request.resource.data.get('partnerId', null)
-            == resource.data.get('partnerId', null)
-          && request.resource.data.get('partnerName', null)
-            == resource.data.get('partnerName', null)
-          && request.resource.data.get('items', [])
-            == resource.data.get('items', [])
-          && request.resource.data.get('subtotal', null)
-            == resource.data.get('subtotal', null)
-          && request.resource.data.get('deliveryFee', null)
-            == resource.data.get('deliveryFee', null)
-          && request.resource.data.get('total', null)
-            == resource.data.get('total', null)
-          && request.resource.data.get('isTestOrder', false)
-            == resource.data.get('isTestOrder', false)
-          && request.resource.data.createdAt == resource.data.createdAt;
-      }
-
       function orderTypeDataIsValid(data) {
         let type = data.get('orderType', 'customDelivery');
         return (type == 'customDelivery'
@@ -479,7 +462,8 @@ service cloud.firestore {
             && data.get('deliveryFee', null) is number
             && data.get('deliveryFee', 0) >= 10
             && data.get('total', null) is number
-            && data.total == data.subtotal + data.deliveryFee
+            && data.total >= data.subtotal + data.deliveryFee - 0.000001
+            && data.total <= data.subtotal + data.deliveryFee + 0.000001
             && data.price == data.deliveryFee
             && catalogPartnerDataMatches(data)
             && exists(
@@ -584,7 +568,8 @@ service cloud.firestore {
           && request.resource.data.status == 'accepted'
           && request.resource.data.courierId == request.auth.uid
           && courierAfter.data.get('activeOrderId', null) == orderId
-          && courierAfter.data.get('isBusy', false) == true
+          && (resource.data.get('pricingVersion', 'legacy') != 'v2'
+            || courierAfter.data.get('isBusy', false) == true)
           && request.resource.data.acceptedAt == request.time
           && request.resource.data.updatedAt == request.time
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
@@ -614,6 +599,7 @@ service cloud.firestore {
           && resource.data.status in ['waiting', 'waitingOffers']
           && request.resource.data.status == 'accepted'
           && courierId is string
+          && approvedCourier(courierId)
           && offerId is string
           && request.resource.data.courierId == courierId
           && offerAfter.data.courierId == courierId
@@ -713,9 +699,41 @@ service cloud.firestore {
           ]);
       }
 
+      // Each transition restricts affectedKeys, so unrelated order fields
+      // cannot change. Dispatch first rather than evaluating every transition;
+      // the latter can exhaust the Rules expression limit on legacy orders.
+      function customerUpdateIsValid() {
+        let before = resource.data.status;
+        let after = request.resource.data.status;
+        return before in ['waiting', 'waitingOffers']
+          ? (after == 'cancelled' ? customerCancels()
+            : (after == 'accepted' && customerSelectsOffer()))
+          : (before == 'delivered'
+            && (after == 'completed' ? customerCompletes()
+              : (after == 'disputed' && customerDisputes())));
+      }
+
+      function courierUpdateIsValid() {
+        let before = resource.data.status;
+        let after = request.resource.data.status;
+        return before in ['waiting', 'waitingOffers']
+          ? (after == 'accepted' ? courierAccepts()
+            : (after == before
+              && (request.resource.data.diff(resource.data).affectedKeys()
+                  .hasAny(['offersCount'])
+                ? courierUpdatesOfferCounter() : courierDeclines())))
+          : (before == 'accepted'
+            ? (after == 'pickedUp' ? courierPicksUp()
+              : (after == before && courierArrives()))
+            : (before == 'pickedUp'
+              && (after == 'completed' ? courierCompletesWithCode()
+                : (after == 'delivered' && courierDelivers()))));
+      }
+
       allow create: if signedIn()
+        && !serverCommandsRequired()
         && request.resource.data.customerId == request.auth.uid
-        && request.resource.data.status == 'waitingOffers'
+        && request.resource.data.status in ['waiting', 'waitingOffers']
         && request.resource.data.price is number
         && request.resource.data.price >= 10
         && request.resource.data.currency == 'TJS'
@@ -769,20 +787,12 @@ service cloud.firestore {
           || (isCourier() && resource.data.status in ['waiting', 'waitingOffers'])
           || resource.data.get('courierId', null) == request.auth.uid);
 
-      allow update: if isAdmin()
-        || (signedIn()
-          && immutableOrderData()
-          && (customerCancels()
-            || customerCompletes()
-            || customerDisputes()
-            || customerSelectsOffer()
-            || courierUpdatesOfferCounter()
-            || courierDeclines()
-            || courierAccepts()
-            || courierArrives()
-            || courierPicksUp()
-            || courierDelivers()
-            || courierCompletesWithCode()));
+      allow update: if signedIn() && (legacyOrder(resource.data) ? (isAdmin()
+        || (resource.data.customerId == request.auth.uid
+          ? customerUpdateIsValid() : courierUpdateIsValid()))
+        : (isAdmin() && request.resource.data.updatedAt == request.time
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['adminNote', 'updatedAt'])));
 
       match /offers/{offerId} {
         function parentOrder() {
@@ -828,12 +838,12 @@ service cloud.firestore {
           || customerOwnsParent()
           || (isCourier() && resource.data.courierId == request.auth.uid);
 
-        allow create: if isAdmin() || (courierOfferDataIsValid()
+        allow create: if legacyOrder(parentOrder().data) && (isAdmin() || (courierOfferDataIsValid()
           && request.resource.data.status == 'pending'
           && request.resource.data.createdAt == request.time
-          && parentOrder().data.status in ['waiting', 'waitingOffers']);
+          && parentOrder().data.status in ['waiting', 'waitingOffers']));
 
-        allow update: if isAdmin()
+        allow update: if legacyOrder(parentOrder().data) && (isAdmin()
           || (courierOfferDataIsValid()
             && request.resource.data.createdAt == resource.data.createdAt
             && parentOrder().data.status in ['waiting', 'waitingOffers'])
@@ -845,7 +855,7 @@ service cloud.firestore {
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
               'status',
               'updatedAt'
-            ]));
+            ])));
 
         allow delete: if false;
       }

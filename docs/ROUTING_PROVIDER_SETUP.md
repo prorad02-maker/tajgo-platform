@@ -1,14 +1,16 @@
-# Routing provider: настройка для пилота
+# Routing provider: текущая настройка
 
-Внешний routing по умолчанию выключен. Приложение всегда собирается и создаёт
-заказы без него: `DirectRouteProvider` строит честно помеченный предварительный
-маршрут. Firebase, Phone Auth и applicationId от routing не зависят.
+Дорожный routing включён в обычной сборке: OSRM на
+`https://routing.openstreetmap.de`, велосипедный режим. Для этого публичного
+сервиса TajGo автоматически выбирает `routed-bike` / `routed-car` и URL-профиль
+`driving`. При ошибке `DirectRouteProvider` показывает явно отмеченный
+предварительный маршрут. Firebase и Phone Auth от routing не зависят.
 
 ## Переменные запуска
 
 | Параметр | Значение |
 |---|---|
-| `ROUTING_ENABLED` | `true` включает road provider |
+| `ROUTING_ENABLED` | `true` по умолчанию; `false` выключает road provider |
 | `ROUTING_PROVIDER` | `osrm` или `graphhopper` |
 | `ROUTING_BASE_URL` | абсолютный URL без ключа в строке |
 | `ROUTING_API_KEY` | необязательный локальный секрет |
@@ -46,9 +48,8 @@ flutter build apk --debug --dart-define-from-file=tool/routing.pilot.json
 договорного endpoint. Ключи нельзя помещать в исходники,
 скриншоты, issue или документацию.
 
-Если приложение запустить обычной командой `flutter run`, внешний provider
-останется выключенным и линия будет предварительной. Для road-route команда
-обязательно должна содержать `--dart-define-from-file` или все `ROUTING_*`.
+Обычная команда `flutter run` уже использует дорожный provider. Define-файл
+нужен только для выбора собственного сервиса или изменения настроек.
 
 ## OSRM-совместимость
 

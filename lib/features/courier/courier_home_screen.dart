@@ -17,6 +17,7 @@ import '../map/services/tajgo_location_service.dart';
 import '../../shared/widgets/tajgo_order_card.dart';
 import '../../shared/widgets/tajgo_order_progress.dart';
 import '../../shared/widgets/tajgo_scope.dart';
+import '../../shared/widgets/tajgo_state_view.dart';
 import '../../shared/widgets/tajgo_status_pill.dart';
 import 'courier_order_screen.dart';
 import 'courier_application_status_screen.dart';
@@ -35,6 +36,7 @@ class _CourierHomeScreenState extends State<CourierHomeScreen>
   bool _busy = false;
   bool _profileEnsured = false;
   bool _profileReady = false;
+  Object? _profileError;
   bool _broadcasting = false;
   bool _locationErrorShown = false;
   bool _locationBlocked = false;
@@ -72,38 +74,46 @@ class _CourierHomeScreenState extends State<CourierHomeScreen>
   }
 
   Future<void> _ensureCourierProfile() async {
+    if (!mounted) return;
+    setState(() => _profileError = null);
     final scope = TajGoScope.of(context);
-    final user = await scope.userRepository.getUser(_uid);
-    if (user?.courierApproved != true) {
-      if (mounted) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute<void>(
-            builder: (_) => CourierApplicationStatusScreen(
-              status: user?.courierStatus ?? CourierStatus.none,
+    final uid = _uid;
+    try {
+      final user = await scope.userRepository.getUser(uid);
+      if (!mounted) return;
+      if (user?.courierApproved != true) {
+        if (mounted) {
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute<void>(
+              builder: (_) => CourierApplicationStatusScreen(
+                status: user?.courierStatus ?? CourierStatus.none,
+              ),
             ),
-          ),
-        );
+          );
+        }
+        return;
       }
-      return;
-    }
-    if (!user!.courierOnboardingCompleted) {
+      if (!user!.courierOnboardingCompleted) {
+        if (mounted) {
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute<void>(
+              builder: (_) => const CourierOnboardingScreen(),
+            ),
+          );
+        }
+        return;
+      }
+      await scope.courierRepository.ensureCourierProfile(
+        uid: uid,
+        phoneNumber: user.phoneNumber,
+        displayName: user.displayName,
+        city: user.city,
+      );
       if (mounted) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute<void>(
-            builder: (_) => const CourierOnboardingScreen(),
-          ),
-        );
+        setState(() => _profileReady = true);
       }
-      return;
-    }
-    await scope.courierRepository.ensureCourierProfile(
-      uid: _uid,
-      phoneNumber: user.phoneNumber,
-      displayName: user.displayName,
-      city: user.city,
-    );
-    if (mounted) {
-      setState(() => _profileReady = true);
+    } catch (error) {
+      if (mounted) setState(() => _profileError = error);
     }
   }
 
@@ -418,6 +428,19 @@ class _CourierHomeScreenState extends State<CourierHomeScreen>
 
   @override
   Widget build(BuildContext context) {
+    if (!_profileReady) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Курьер TajGo')),
+        body: _profileError == null
+            ? const Center(child: CircularProgressIndicator())
+            : TajGoStateView(
+                icon: Icons.cloud_off_rounded,
+                title: 'Не удалось открыть профиль курьера',
+                message: userErrorMessage(_profileError),
+                onRetry: _ensureCourierProfile,
+              ),
+      );
+    }
     final repository = TajGoScope.of(context).courierRepository;
     return DefaultTabController(
       length: 3,

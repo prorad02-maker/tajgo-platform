@@ -291,6 +291,7 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
         OrderStatus.completed => '✅ Доставлено. Спасибо!',
         OrderStatus.disputed => '⚠️ Мы разбираемся',
         OrderStatus.cancelled => 'Заказ отменён',
+        OrderStatus.unknown => 'Статус заказа недоступен',
       };
 
   String? _subtitle(TajGoOrder order, {required bool courierNearby}) =>
@@ -305,6 +306,7 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
         OrderStatus.delivered => 'Подтвердите получение',
         OrderStatus.disputed =>
           'Заказ помечен как неполученный. Мы свяжемся с вами.',
+        OrderStatus.unknown => 'Обновите экран или обратитесь в поддержку.',
         _ => null,
       };
 
@@ -612,10 +614,11 @@ class _StatusPanel extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              TajGoOrderProgress(
-                currentStep: step,
-                labels: const ['Поиск', 'Принят', 'Забрал', 'Доставлено'],
-              ),
+              if (order.status != OrderStatus.unknown)
+                TajGoOrderProgress(
+                  currentStep: step,
+                  labels: const ['Поиск', 'Принят', 'Забрал', 'Доставлено'],
+                ),
               const SizedBox(height: 14),
               TajGoStatusHeader(title: title, subtitle: subtitle),
               if (courierNearby) ...[
@@ -727,9 +730,31 @@ class _StatusPanel extends StatelessWidget {
                 ),
               ],
               if (order.status == OrderStatus.pickedUp &&
-                  order.confirmationCode != null) ...[
+                  (order.confirmationCode != null ||
+                      order.isServerManaged)) ...[
                 const SizedBox(height: 14),
-                TajGoConfirmationCode(code: order.confirmationCode!),
+                if (order.isServerManaged)
+                  StreamBuilder<String?>(
+                    stream: TajGoScope.of(
+                      context,
+                    ).orderRepository.receiptCodeStream(order.id),
+                    builder: (context, snapshot) {
+                      if (snapshot.hasError) {
+                        return Text(userErrorMessage(snapshot.error));
+                      }
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const LinearProgressIndicator();
+                      }
+                      if (snapshot.data == null) {
+                        return const Text(
+                          'Код недоступен. Обратитесь в поддержку.',
+                        );
+                      }
+                      return TajGoConfirmationCode(code: snapshot.data!);
+                    },
+                  )
+                else
+                  TajGoConfirmationCode(code: order.confirmationCode!),
               ],
               if (order.status == OrderStatus.delivered) ...[
                 const SizedBox(height: 14),

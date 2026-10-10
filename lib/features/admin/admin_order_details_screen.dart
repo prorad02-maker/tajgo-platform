@@ -13,6 +13,9 @@ import 'admin_orders_screen.dart';
 import 'widgets/admin_access_gate.dart';
 import 'widgets/tajgo_admin_action_button.dart';
 import 'widgets/tajgo_status_timeline.dart';
+import '../map/models/tajgo_route.dart';
+import '../map/widgets/tajgo_map_attribution.dart';
+import '../map/utils/route_display_formatter.dart';
 
 class AdminOrderDetailsScreen extends StatelessWidget {
   const AdminOrderDetailsScreen({super.key, required this.orderId});
@@ -196,13 +199,6 @@ class _AdminOrderDetailsBodyState extends State<_AdminOrderDetailsBody> {
                         ),
                       ),
                     ],
-                    const Text(
-                      'Маршрут предварительный — показана прямая линия.',
-                      style: TextStyle(
-                        color: TajGoColors.warning,
-                        fontSize: 12,
-                      ),
-                    ),
                     if ((order.comment ?? '').isNotEmpty) ...[
                       const SizedBox(height: 8),
                       Text('💬 ${order.comment}'),
@@ -298,10 +294,12 @@ class _AdminOrderDetailsBodyState extends State<_AdminOrderDetailsBody> {
 
   List<Widget> _actions(TajGoOrder order, TajGoScope scope) {
     final result = <Widget>[];
-    if (!const {
-      OrderStatus.completed,
-      OrderStatus.cancelled,
-    }.contains(order.status)) {
+    if (order.completedAt == null &&
+        !const {
+          OrderStatus.completed,
+          OrderStatus.cancelled,
+          OrderStatus.unknown,
+        }.contains(order.status)) {
       result.add(
         OutlinedButton(
           onPressed: () => _reasonAction(
@@ -318,16 +316,17 @@ class _AdminOrderDetailsBodyState extends State<_AdminOrderDetailsBody> {
         ),
       );
     }
-    if (const {
-      OrderStatus.accepted,
-      OrderStatus.pickedUp,
-      OrderStatus.delivered,
-      OrderStatus.disputed,
-    }.contains(order.status)) {
+    if (order.completedAt == null &&
+        const {
+          OrderStatus.accepted,
+          OrderStatus.pickedUp,
+          OrderStatus.delivered,
+          OrderStatus.disputed,
+        }.contains(order.status)) {
       result.add(
         TajGoAdminActionButton(
-          label: 'Вернуть в waiting',
-          title: 'Вернуть в waiting?',
+          label: 'Возобновить поиск курьера',
+          title: 'Возобновить поиск курьера?',
           message:
               'Заказ снова увидят все курьеры. Текущий курьер будет снят с заказа. Продолжить?',
           onConfirm: () => scope.adminRepository.returnToWaiting(
@@ -344,10 +343,15 @@ class _AdminOrderDetailsBodyState extends State<_AdminOrderDetailsBody> {
     }.contains(order.status)) {
       result.add(
         TajGoAdminActionButton(
-          label: 'Завершить вручную',
-          title: 'Завершить вручную?',
-          message:
-              'Заказ будет завершён, курьер получит оплату за заказ. Обычно это делается после разбора спора.',
+          label: order.completedAt == null
+              ? 'Завершить вручную'
+              : 'Закрыть спор',
+          title: order.completedAt == null
+              ? 'Завершить вручную?'
+              : 'Закрыть спор?',
+          message: order.completedAt == null
+              ? 'Заказ будет завершён, курьер получит оплату за заказ. Обычно это делается после разбора спора.'
+              : 'Спор будет закрыт. Оплата этого заказа уже учтена.',
           onConfirm: () => scope.adminRepository.completeManually(
             orderId: order.id,
             adminId: _adminId,
@@ -365,8 +369,9 @@ class _AdminOrderDetailsBodyState extends State<_AdminOrderDetailsBody> {
         OutlinedButton(
           onPressed: () => _reasonAction(
             title: 'Пометить спорным',
-            message:
-                'Заказ будет передан на разбор. Курьер не сможет брать новые заказы до решения.',
+            message: order.completedAt == null
+                ? 'Заказ будет передан на разбор. Курьер не сможет брать новые заказы до решения.'
+                : 'Завершённый заказ будет передан на разбор.',
             action: (reason) => scope.adminRepository.markDisputed(
               orderId: order.id,
               adminId: _adminId,
@@ -402,12 +407,45 @@ class _AdminOrderDetailsBodyState extends State<_AdminOrderDetailsBody> {
   ];
 }
 
-class _OrderMap extends StatelessWidget {
+class _OrderMap extends StatefulWidget {
   const _OrderMap({required this.order});
   final TajGoOrder order;
+  @override
+  State<_OrderMap> createState() => _OrderMapState();
+}
+
+class _OrderMapState extends State<_OrderMap> {
+  Future<TajGoRoute>? _route;
+  String? _key;
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _refreshRoute();
+  }
+
+  @override
+  void didUpdateWidget(covariant _OrderMap oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _refreshRoute();
+  }
+
+  void _refreshRoute() {
+    final order = widget.order;
+    final key = '${order.fromLocation}:${order.toLocation}';
+    if (_key == key) return;
+    _key = key;
+    _route = order.pickup == null || order.dropoff == null
+        ? null
+        : TajGoScope.of(context).routeService.buildRoute(
+            from: order.pickup!.toLatLng(),
+            to: order.dropoff!.toLatLng(),
+            mode: RouteMode.bicycle,
+          );
+  }
 
   @override
   Widget build(BuildContext context) {
+    final order = widget.order;
     const center = LatLng(40.2833, 69.6222);
     final from = order.fromLocation == null
         ? null
@@ -415,60 +453,99 @@ class _OrderMap extends StatelessWidget {
     final to = order.toLocation == null
         ? null
         : LatLng(order.toLocation!.latitude, order.toLocation!.longitude);
-    final route = from != null && to != null
-        ? TajGoScope.of(context).routeService.directRoute(from: from, to: to)
-        : null;
-    Widget map(TajGoCourier? courier) => FlutterMap(
-      options: MapOptions(initialCenter: from ?? to ?? center, initialZoom: 13),
-      children: [
-        TileLayer(
-          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-          userAgentPackageName: 'tj.tajgo.app',
-        ),
-        if (route != null)
-          PolylineLayer(
-            polylines: [
-              Polyline(
-                points: route.polylinePoints,
-                color: TajGoColors.green,
-                strokeWidth: 4,
+    Widget map(TajGoCourier? courier) => FutureBuilder<TajGoRoute>(
+      future: _route,
+      builder: (context, snapshot) => Stack(
+        children: [
+          FlutterMap(
+            options: MapOptions(
+              initialCenter: from ?? to ?? center,
+              initialZoom: 13,
+              initialCameraFit: from != null && to != null
+                  ? CameraFit.coordinates(
+                      coordinates: [from, to],
+                      padding: const EdgeInsets.fromLTRB(30, 30, 30, 65),
+                    )
+                  : null,
+            ),
+            children: [
+              TileLayer(
+                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                userAgentPackageName: 'tj.tajgo.app',
               ),
+              if (snapshot.data != null)
+                PolylineLayer(
+                  polylines: [
+                    Polyline(
+                      points: snapshot.data!.polylinePoints,
+                      color: snapshot.data!.isFallback
+                          ? TajGoColors.warning
+                          : TajGoColors.green,
+                      strokeWidth: 4,
+                      pattern: snapshot.data!.isFallback
+                          ? const StrokePattern.dotted()
+                          : const StrokePattern.solid(),
+                    ),
+                  ],
+                ),
+              MarkerLayer(
+                markers: [
+                  if (from != null)
+                    Marker(
+                      point: from,
+                      width: 44,
+                      height: 44,
+                      child: const _Pin('A', TajGoColors.darkGreen),
+                    ),
+                  if (to != null)
+                    Marker(
+                      point: to,
+                      width: 44,
+                      height: 44,
+                      child: const _Pin('B', TajGoColors.lime),
+                    ),
+                  if (courier?.location != null)
+                    Marker(
+                      point: LatLng(
+                        courier!.location!.latitude,
+                        courier.location!.longitude,
+                      ),
+                      width: 24,
+                      height: 24,
+                      child: const DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: Colors.blue,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              const TajGoMapAttribution(alignment: Alignment.topRight),
             ],
           ),
-        MarkerLayer(
-          markers: [
-            if (from != null)
-              Marker(
-                point: from,
-                width: 44,
-                height: 44,
-                child: const _Pin('A', TajGoColors.darkGreen),
-              ),
-            if (to != null)
-              Marker(
-                point: to,
-                width: 44,
-                height: 44,
-                child: const _Pin('B', TajGoColors.lime),
-              ),
-            if (courier?.location != null)
-              Marker(
-                point: LatLng(
-                  courier!.location!.latitude,
-                  courier.location!.longitude,
-                ),
-                width: 24,
-                height: 24,
-                child: const DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: Colors.blue,
-                    shape: BoxShape.circle,
-                  ),
+          Positioned(
+            left: 8,
+            right: 8,
+            bottom: 8,
+            child: Material(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              child: Padding(
+                padding: const EdgeInsets.all(8),
+                child: Text(
+                  snapshot.connectionState == ConnectionState.waiting
+                      ? 'Строим маршрут…'
+                      : snapshot.data == null
+                      ? 'Маршрут недоступен'
+                      : formatRouteQuality(snapshot.data),
+                  style: const TextStyle(fontSize: 12),
                 ),
               ),
-          ],
-        ),
-      ],
+            ),
+          ),
+        ],
+      ),
     );
     if (order.courierId == null) return map(null);
     return StreamBuilder<TajGoCourier?>(

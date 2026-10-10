@@ -88,12 +88,14 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
             ),
             const SizedBox(height: 8),
             const Text(
-              'Фото можно добавить позже в профиле.',
+              'Ваше имя поможет узнать вас при передаче заказа.',
               style: TextStyle(color: TajGoColors.muted),
             ),
             const SizedBox(height: 24),
             TextField(
               controller: _name,
+              enabled: !_loading,
+              maxLength: 100,
               autofocus: true,
               textCapitalization: TextCapitalization.words,
               decoration: const InputDecoration(
@@ -111,12 +113,6 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
               ),
             ),
             const SizedBox(height: 12),
-            const ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(Icons.add_a_photo_outlined),
-              title: Text('Фото профиля · необязательно'),
-              subtitle: Text('Его можно добавить позже в профиле'),
-            ),
             if (_error != null) ...[
               const SizedBox(height: 10),
               Text(_error!, style: const TextStyle(color: TajGoColors.error)),
@@ -125,7 +121,10 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
             FilledButton(
               onPressed: _loading ? null : _save,
               child: _loading
-                  ? const CircularProgressIndicator(strokeWidth: 2)
+                  ? const SizedBox.square(
+                      dimension: 22,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
                   : const Text('Продолжить'),
             ),
           ],
