@@ -1,6 +1,6 @@
 (function () {
   "use strict";
-  var supportEmail = "support@tajgo.tj";
+  var supportEmail = "support@tajgo.ru";
   var form = document.getElementById("deletion-form");
   var status = document.getElementById("form-status");
 

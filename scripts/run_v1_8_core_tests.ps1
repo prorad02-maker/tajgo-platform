@@ -4,6 +4,7 @@ param()
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $root
+. (Join-Path $PSScriptRoot 'native_command.ps1')
 
 $androidJbr = 'C:\Program Files\Android\Android Studio\jbr'
 if (Test-Path -LiteralPath $androidJbr) {
@@ -11,18 +12,18 @@ if (Test-Path -LiteralPath $androidJbr) {
     $env:Path = "$env:JAVA_HOME\bin;$env:Path"
 }
 
-flutter pub get
-flutter analyze
-flutter test
+Invoke-TajGoCommand flutter pub get --enforce-lockfile
+Invoke-TajGoCommand flutter analyze --no-pub
+Invoke-TajGoCommand flutter test --no-pub
 
 Push-Location -LiteralPath (Join-Path $root 'functions')
 try {
-    npm.cmd ci
-    npm.cmd run lint
-    npm.cmd run build
-    npm.cmd test
-    npm.cmd run test:rules
-    npm.cmd run test:functions
+    Invoke-TajGoCommand npm.cmd ci
+    Invoke-TajGoCommand npm.cmd run lint
+    Invoke-TajGoCommand npm.cmd run build
+    Invoke-TajGoCommand npm.cmd test
+    Invoke-TajGoCommand npm.cmd run test:rules
+    Invoke-TajGoCommand npm.cmd run test:functions
 }
 finally {
     Pop-Location

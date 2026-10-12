@@ -7,6 +7,7 @@
 
 $ErrorActionPreference = 'Stop'
 Set-Location (Join-Path $PSScriptRoot '..')
+. (Join-Path $PSScriptRoot 'native_command.ps1')
 
 if (-not $env:JAVA_HOME) {
     $jbr = 'C:\Program Files\Android\Android Studio\jbr'
@@ -15,16 +16,16 @@ if (-not $env:JAVA_HOME) {
 $env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
 
 Write-Host '== Flutter analyze ==' -ForegroundColor Cyan
-flutter analyze
+Invoke-TajGoCommand flutter analyze
 
 Write-Host '== Flutter test ==' -ForegroundColor Cyan
-flutter test
+Invoke-TajGoCommand flutter test --no-pub
 
 Write-Host '== Functions unit + rules + integration (emulator) ==' -ForegroundColor Cyan
 Push-Location functions
 try {
-    npm ci
-    npm run test:core
+    Invoke-TajGoCommand npm.cmd ci
+    Invoke-TajGoCommand npm.cmd run test:core
 } finally {
     Pop-Location
 }

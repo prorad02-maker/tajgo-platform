@@ -1,28 +1,33 @@
 # TajGo — Android release build (PowerShell).
 # Builds release APK + AAB and prints SHA-256 checksums.
-# If android/key.properties is absent, artifacts are DEBUG-SIGNED (not for store).
+# Requires a configured upload key. Debug signing fallback is forbidden.
 #
 # Usage:  ./scripts/build_android_release.ps1
 # Requires: Flutter on PATH, JAVA_HOME set to a JDK 17+.
 
 $ErrorActionPreference = 'Stop'
 Set-Location (Join-Path $PSScriptRoot '..')
+. (Join-Path $PSScriptRoot 'native_command.ps1')
+
+if (-not (Test-Path -LiteralPath 'android/key.properties')) {
+    throw 'Release signing is missing. Follow RELEASE_SIGNING_SETUP.md before building.'
+}
 
 Write-Host '== flutter clean / pub get ==' -ForegroundColor Cyan
-flutter clean
-flutter pub get
+Invoke-TajGoCommand flutter clean
+Invoke-TajGoCommand flutter pub get --enforce-lockfile
 
 Write-Host '== flutter analyze ==' -ForegroundColor Cyan
-flutter analyze
+Invoke-TajGoCommand flutter analyze --no-pub
 
 Write-Host '== flutter test ==' -ForegroundColor Cyan
-flutter test
+Invoke-TajGoCommand flutter test --no-pub
 
 Write-Host '== build release APK ==' -ForegroundColor Cyan
-flutter build apk --release
+Invoke-TajGoCommand flutter build apk --release --no-pub
 
 Write-Host '== build release AAB ==' -ForegroundColor Cyan
-flutter build appbundle --release
+Invoke-TajGoCommand flutter build appbundle --release --no-pub
 
 $apk = 'build/app/outputs/flutter-apk/app-release.apk'
 $aab = 'build/app/outputs/bundle/release/app-release.aab'
@@ -35,10 +40,6 @@ foreach ($artifact in @($apk, $aab)) {
         Write-Host "  size:   $size bytes"
         Write-Host "  sha256: $hash"
     } else {
-        Write-Warning "$artifact not found"
+        throw "$artifact not found"
     }
-}
-
-if (-not (Test-Path 'android/key.properties')) {
-    Write-Warning 'android/key.properties missing -> artifacts are DEBUG-SIGNED (not production).'
 }

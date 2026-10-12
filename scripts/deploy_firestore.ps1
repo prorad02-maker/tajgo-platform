@@ -20,7 +20,8 @@ if ($Confirmation -cne $expectedConfirmation) {
 
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $root
+. (Join-Path $PSScriptRoot 'native_command.ps1')
 $firebaseTarget = "firestore:$Target"
 Write-Host "Will deploy ONLY $firebaseTarget to $ProjectId."
 Write-Host 'No Firestore documents will be deleted by this script.'
-firebase.cmd deploy --only $firebaseTarget --project $ProjectId
+Invoke-TajGoCommand firebase.cmd deploy --only $firebaseTarget --project $ProjectId

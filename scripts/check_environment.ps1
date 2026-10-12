@@ -4,6 +4,7 @@ param()
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $root
+. (Join-Path $PSScriptRoot 'native_command.ps1')
 
 function Show-ToolVersion {
     param(
@@ -15,6 +16,9 @@ function Show-ToolVersion {
         throw "Required tool '$Name' was not found in PATH."
     }
     & $Command
+    if ($LASTEXITCODE -ne 0) {
+        throw "Tool '$Name' version check failed with exit code $LASTEXITCODE."
+    }
 }
 
 Write-Host "TajGo environment check: $root"
@@ -27,8 +31,13 @@ Show-ToolVersion -Name 'firebase' -Command { firebase.cmd --version }
 Show-ToolVersion -Name 'java' -Command { java -version }
 
 $pubspec = Get-Content -LiteralPath 'pubspec.yaml' -Raw
-if ($pubspec -notmatch '(?m)^version:\s+1\.8\.0\+31\s*$') {
-    throw 'pubspec.yaml must contain version 1.8.0+31.'
+if ($pubspec -notmatch '(?m)^version:\s+(\d+\.\d+\.\d+\+\d+)\s*$') {
+    throw 'pubspec.yaml must contain a semantic version and build number.'
+}
+$appVersion = $Matches[1]
+$backendVersion = (Get-Content -LiteralPath 'functions/package.json' -Raw | ConvertFrom-Json).version
+if ($appVersion.Split('+')[0] -ne $backendVersion) {
+    throw 'Flutter and Functions release versions do not match.'
 }
 
 $gradle = Get-Content -LiteralPath 'android/app/build.gradle.kts' -Raw
@@ -49,6 +58,6 @@ if ($trackedSecrets) {
     throw "Potential release secret is tracked:`n$($trackedSecrets -join "`n")"
 }
 
-Write-Host 'Identity OK: project=tajgo-4fcd0, package=tj.tajgo.app, version=1.8.0+31'
+Write-Host "Identity OK: project=tajgo-4fcd0, package=tj.tajgo.app, version=$appVersion"
 Write-Host 'No tracked key.properties, keystore, or service-account file was found.'
-flutter devices
+Invoke-TajGoCommand flutter devices

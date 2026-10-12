@@ -17,11 +17,12 @@ if ($Confirmation -cne $expectedConfirmation) {
 
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $root
+. (Join-Path $PSScriptRoot 'native_command.ps1')
 Push-Location -LiteralPath (Join-Path $root 'functions')
 try {
-    npm.cmd ci
-    npm.cmd run lint
-    npm.cmd test
+    Invoke-TajGoCommand npm.cmd ci
+    Invoke-TajGoCommand npm.cmd run lint
+    Invoke-TajGoCommand npm.cmd test
 }
 finally {
     Pop-Location
@@ -29,4 +30,4 @@ finally {
 
 Write-Host "Will deploy ONLY Cloud Functions to $ProjectId."
 Write-Host 'No Firestore documents will be deleted by this script.'
-firebase.cmd deploy --only functions --project $ProjectId
+Invoke-TajGoCommand firebase.cmd deploy --only functions --project $ProjectId

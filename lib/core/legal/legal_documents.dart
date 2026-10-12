@@ -31,7 +31,7 @@ class LegalDocuments {
   static const String locale = 'ru';
   static const String privacyVersion = '1.0';
   static const String termsVersion = '1.0';
-  static const String supportEmail = 'support@tajgo.tj';
+  static const String supportEmail = 'support@tajgo.ru';
   static const String privacyUrl = 'https://tajgo.ru/privacy';
   static const String termsUrl = 'https://tajgo.ru/terms';
   static const String supportUrl = 'https://tajgo.ru/support';

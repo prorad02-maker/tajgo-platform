@@ -13,7 +13,20 @@
           "package_name": "com.example.tajgo"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "784873463457-1gf59a3n7n47c2b35i3b0scqdjl4mb4i.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.tajgo",
+            "certificate_hash": "e1d48b6b4b1a9155c949e5efa2d7bc1784194735"
+          }
+        },
+        {
+          "client_id": "784873463457-u26i7vei43od1p27nab3kt91k90e818f.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyD5Qi01lHFXKit8X9tVz7ghxs_N4um4UxE"
@@ -21,7 +34,19 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "784873463457-u26i7vei43od1p27nab3kt91k90e818f.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "784873463457-6ir3uc7al1h8rk1gmv69n567of9fnfj7.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.tajgo"
+              }
+            }
+          ]
         }
       }
     },
@@ -32,7 +57,20 @@
           "package_name": "tj.tajgo.app"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "784873463457-a89otjapps4mbfs2jtldmi8nnsc4vtau.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "tj.tajgo.app",
+            "certificate_hash": "e1d48b6b4b1a9155c949e5efa2d7bc1784194735"
+          }
+        },
+        {
+          "client_id": "784873463457-u26i7vei43od1p27nab3kt91k90e818f.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyD5Qi01lHFXKit8X9tVz7ghxs_N4um4UxE"
@@ -40,7 +78,19 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "784873463457-u26i7vei43od1p27nab3kt91k90e818f.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "784873463457-6ir3uc7al1h8rk1gmv69n567of9fnfj7.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.tajgo"
+              }
+            }
+          ]
         }
       }
     }

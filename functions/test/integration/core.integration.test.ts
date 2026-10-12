@@ -170,6 +170,83 @@ after(async () => {
   await deleteApp(app);
 });
 
+test("first sign-in creates a profile that survives completion and another login", async () => {
+  const actor = principal("first-login-1", "customer");
+  const context = {principal: actor, data: {initialIntent: "customer"}};
+  await Promise.all([
+    core.ensureUserProfile(context),
+    core.ensureUserProfile(context),
+  ]);
+  const userRef = db.collection("users").doc(actor.uid);
+  const first = (await userRef.get()).data();
+  assert.equal(first?.uid, actor.uid);
+  assert.equal(first?.phoneNumber, actor.token.phone_number);
+  assert.equal(first?.profileComplete, false);
+  assert.equal((await db.collection("users").get()).size, 1);
+
+  await core.completeUserProfile({
+    principal: actor,
+    data: {
+      displayName: "Тестовый клиент",
+      initialIntent: "customer",
+      idempotencyKey: "complete-first-login-1",
+    },
+  });
+  await core.acceptLegalDocuments({
+    principal: actor,
+    data: {privacyVersion: "1.0", termsVersion: "1.0", locale: "ru"},
+  });
+  await core.switchAccountMode({
+    principal: actor,
+    data: {targetMode: "customer", idempotencyKey: "switch-first-login-1"},
+  });
+  await core.ensureUserProfile(context);
+  const returning = (await userRef.get()).data();
+  assert.equal(returning?.displayName, "Тестовый клиент");
+  assert.equal(returning?.profileComplete, true);
+  assert.equal(returning?.onboardingCompleted, true);
+  assert.equal(returning?.role, "customer");
+  assert.equal(returning?.lastMode, "customer");
+  assert.equal(returning?.legalAcceptance?.privacyVersion, "1.0");
+  assert.ok(returning?.createdAt.isEqual(first?.createdAt));
+});
+
+test("profile setup preserves an existing administrator role", async () => {
+  await seedUser(adminActor, "admin");
+  await core.ensureUserProfile({principal: adminActor, data: {}});
+  await core.completeUserProfile({
+    principal: adminActor,
+    data: {
+      displayName: "Администратор",
+      initialIntent: "customer",
+      idempotencyKey: "complete-admin-profile-1",
+    },
+  });
+  await core.ensureUserProfile({principal: adminActor, data: {}});
+  const profile = (await db.collection("users").doc(adminActor.uid).get()).data();
+  assert.equal(profile?.role, "admin");
+  assert.equal(profile?.profileComplete, true);
+});
+
+test("profile callables require authentication", async () => {
+  for (const command of [
+    "ensureUserProfile", "completeUserProfile",
+    "acceptLegalDocuments", "switchAccountMode",
+  ]) {
+    const response = await fetch(
+      `http://127.0.0.1:5001/demo-tajgo/europe-west1/${command}`,
+      {
+        method: "POST",
+        headers: {"content-type": "application/json"},
+        body: JSON.stringify({data: {}}),
+      },
+    );
+    const payload = (await response.json()) as {error?: {status?: string}};
+    assert.equal(response.status, 401, command);
+    assert.equal(payload.error?.status, "UNAUTHENTICATED", command);
+  }
+});
+
 test("duplicate custom-order request creates exactly one order", async () => {
   await seedUser(customer, "customer");
   const quote = await core.getDeliveryQuote({

@@ -29,6 +29,6 @@ TajGo — хидмати расонидани шаҳрӣ дар Хуҷанд.
 расонидан, Хуҷанд, посылка, курьер, хӯрок, маҳсулот, гулҳо, TajGo
 
 ## Тамос (иваз кунед)
-- Email: support@tajgo.tj
+- Email: support@tajgo.ru
 - Сиёсати махфият: https://tajgo.ru/privacy
 - Нест кардани ҳисоб: https://tajgo.ru/account-deletion

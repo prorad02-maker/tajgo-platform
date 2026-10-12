@@ -45,7 +45,7 @@
 
 - Firebase project: `tajgo-4fcd0` (обработчик: Google Firebase).
 - Регион Functions: `europe-west1`.
-- Контакт по данным: `support@tajgo.tj` (заменить на действующий).
+- Контакт по данным: `support@tajgo.ru` (заменить на действующий).
 
 ## Открытые задачи перед публикацией (владелец)
 

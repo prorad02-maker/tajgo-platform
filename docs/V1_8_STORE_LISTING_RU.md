@@ -31,7 +31,7 @@ TajGo — сервис городской доставки в Худжанде.
 доставка, Худжанд, посылка, курьер, еда, продукты, цветы, TajGo
 
 ## Контакты (заменить)
-- Email поддержки: support@tajgo.tj
+- Email поддержки: support@tajgo.ru
 - Политика конфиденциальности: https://tajgo.ru/privacy
 - Удаление аккаунта: https://tajgo.ru/account-deletion
 

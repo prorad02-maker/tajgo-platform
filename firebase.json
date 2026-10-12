@@ -28,7 +28,7 @@
   },
   "functions": {
     "source": "functions",
-    "runtime": "nodejs20",
+    "runtime": "nodejs22",
     "predeploy": [
       "npm --prefix \"$RESOURCE_DIR\" run lint",
       "npm --prefix \"$RESOURCE_DIR\" run build",
@@ -39,6 +39,17 @@
     "public": "public",
     "cleanUrls": true,
     "trailingSlash": false,
+    "predeploy": [
+      "node scripts/version_website_assets.mjs",
+      "node scripts/check_website.mjs"
+    ],
+    "headers": [{
+      "regex": "^/([^.]*|.*\\.(html|css|js))$",
+      "headers": [{
+        "key": "Cache-Control",
+        "value": "no-cache, max-age=0, must-revalidate"
+      }]
+    }],
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"]
   },
   "emulators": {
