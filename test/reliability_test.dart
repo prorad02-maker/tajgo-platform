@@ -246,6 +246,27 @@ void main() {
     },
   );
   test(
+    'disabling notifications stops collection even if saving fails',
+    () async {
+      await service.initialize();
+      await service.setEnabled(true);
+      preferences.writeFails = true;
+      await service.setEnabled(false);
+      expect(service.enabled, isFalse);
+      expect(messaging.auto.last, isFalse);
+      expect(requests.last['enabled'], isFalse);
+    },
+  );
+  test('logout removes the device even if saving consent fails', () async {
+    await service.initialize();
+    await service.setEnabled(true);
+    preferences.writeFails = true;
+    await service.beforeSignOut();
+    expect(service.enabled, isFalse);
+    expect(messaging.auto.last, isFalse);
+    expect(requests.last['enabled'], isFalse);
+  });
+  test(
     'native token deletion failure still unregisters the server device',
     () async {
       await service.initialize();

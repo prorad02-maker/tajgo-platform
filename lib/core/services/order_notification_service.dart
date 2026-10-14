@@ -331,6 +331,19 @@ class OrderNotificationService extends ChangeNotifier {
     _changed();
     final revision = ++_revision;
     try {
+      error = null;
+      if (!value) {
+        _consent = false;
+        _permitted = false;
+        _changed();
+        await Future.wait([
+          _preferences.setBool(preferenceKey(uid), false),
+          _enqueue(() async {
+            if (_current(revision, uid)) await _detach(uid);
+          }),
+        ]);
+        return;
+      }
       await _preferences.setBool(preferenceKey(uid), value);
       if (!_current(revision, uid)) return;
       await _enqueue(() => _sync(revision, uid, request: value));
@@ -374,14 +387,18 @@ class OrderNotificationService extends ChangeNotifier {
   Future<void> beforeSignOut() async {
     final uid = _currentUid();
     if (!supported || uid == null) return;
-    _revision++;
+    final revision = ++_revision;
     _consent = false;
     _ready = false;
     _pending = null;
     _changed();
     try {
-      await _preferences.setBool(preferenceKey(uid), false);
-      await _detach(uid).timeout(const Duration(seconds: 6));
+      await Future.wait([
+        _preferences.setBool(preferenceKey(uid), false),
+        _enqueue(() async {
+          if (_current(revision, uid)) await _detach(uid);
+        }),
+      ]).timeout(const Duration(seconds: 6));
     } catch (_) {
       /* Token deletion/re-registration also prevents stale ownership. */
     }
