@@ -34,22 +34,73 @@ class _MarketplaceSearchTabState extends State<MarketplaceSearchTab> {
   List<MarketplaceProduct> _products = const [];
   StreamSubscription<List<MarketplacePartner>>? _partnersSub;
   StreamSubscription<List<MarketplaceProduct>>? _productsSub;
+  bool _partnersFailed = false, _productsFailed = false;
+  bool _partnersLoading = true, _productsLoading = true;
+  int _revision = 0;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (_partnersSub != null) return;
+    _subscribe();
+  }
+
+  void _subscribe() {
+    final revision = ++_revision;
+    unawaited(_partnersSub?.cancel());
+    unawaited(_productsSub?.cancel());
+    _partnersFailed = _productsFailed = false;
+    _partnersLoading = _productsLoading = true;
+    _partners = [];
+    _products = [];
     final repo = TajGoScope.of(context).marketplaceRepository;
-    _partnersSub = repo.partnersStream().listen((partners) {
-      if (mounted) setState(() => _partners = partners);
-    });
-    _productsSub = repo.publishedProductsStream().listen((products) {
-      if (mounted) setState(() => _products = products);
-    });
+    _partnersSub = repo
+        .partnersStream(
+          allowPreview: TajGoScope.of(context).featureFlags.previewData,
+        )
+        .listen(
+          (partners) {
+            if (mounted && _revision == revision) {
+              setState(() {
+                _partners = partners;
+                _partnersLoading = false;
+                _partnersFailed = false;
+              });
+            }
+          },
+          onError: (Object _) {
+            if (mounted && _revision == revision) {
+              setState(() {
+                _partnersFailed = true;
+                _partnersLoading = false;
+              });
+            }
+          },
+        );
+    _productsSub = repo.publishedProductsStream().listen(
+      (products) {
+        if (mounted && _revision == revision) {
+          setState(() {
+            _products = products;
+            _productsLoading = false;
+            _productsFailed = false;
+          });
+        }
+      },
+      onError: (Object _) {
+        if (mounted && _revision == revision) {
+          setState(() {
+            _productsFailed = true;
+            _productsLoading = false;
+          });
+        }
+      },
+    );
   }
 
   @override
   void dispose() {
+    _revision++;
     _debounce?.cancel();
     _partnersSub?.cancel();
     _productsSub?.cancel();
@@ -112,7 +163,18 @@ class _MarketplaceSearchTabState extends State<MarketplaceSearchTab> {
             ),
           ),
           Expanded(
-            child: _query.isEmpty ? _idleView() : _resultsView(),
+            child: _partnersFailed || _productsFailed
+                ? TajGoErrorState(
+                    title: 'Не удалось загрузить каталог',
+                    onRetry: () => setState(_subscribe),
+                  )
+                : _partnersLoading || _productsLoading
+                ? ListView(
+                    children: const [TajGoCardSkeleton(), TajGoCardSkeleton()],
+                  )
+                : _query.isEmpty
+                ? _idleView()
+                : _resultsView(),
           ),
         ],
       ),
@@ -155,8 +217,10 @@ class _MarketplaceSearchTabState extends State<MarketplaceSearchTab> {
           ),
           ..._recent.map(
             (term) => ListTile(
-              leading: const Icon(Icons.history_rounded,
-                  color: TajGoColors.muted),
+              leading: const Icon(
+                Icons.history_rounded,
+                color: TajGoColors.muted,
+              ),
               title: Text(term, style: TajGoTypography.body),
               onTap: () => _applyTerm(term),
             ),
@@ -172,7 +236,9 @@ class _MarketplaceSearchTabState extends State<MarketplaceSearchTab> {
         .where(
           (p) =>
               _normalize(p.name).contains(_query) ||
-              marketplaceCategoryLabel(p.category).toLowerCase().contains(_query),
+              marketplaceCategoryLabel(
+                p.category,
+              ).toLowerCase().contains(_query),
         )
         .toList(growable: false);
 
@@ -184,7 +250,9 @@ class _MarketplaceSearchTabState extends State<MarketplaceSearchTab> {
         .toList(growable: false);
 
     final categories = marketplaceCategories
-        .where((c) => marketplaceCategoryLabel(c).toLowerCase().contains(_query))
+        .where(
+          (c) => marketplaceCategoryLabel(c).toLowerCase().contains(_query),
+        )
         .toList(growable: false);
 
     if (partners.isEmpty && products.isEmpty && categories.isEmpty) {
@@ -202,8 +270,9 @@ class _MarketplaceSearchTabState extends State<MarketplaceSearchTab> {
         if (categories.isNotEmpty) ...[
           const TajGoSectionHeader(title: 'Категории'),
           Padding(
-            padding:
-                const EdgeInsets.symmetric(horizontal: TajGoSpacing.screenH),
+            padding: const EdgeInsets.symmetric(
+              horizontal: TajGoSpacing.screenH,
+            ),
             child: Wrap(
               spacing: TajGoSpacing.sm,
               children: categories

@@ -13,8 +13,9 @@ class TajGoTheme {
       scaffoldBackgroundColor: TajGoColors.background,
       colorScheme: ColorScheme.fromSeed(
         seedColor: TajGoColors.green,
-        primary: TajGoColors.green,
+        primary: TajGoColors.darkGreen,
         secondary: TajGoColors.lime,
+        onSecondary: TajGoColors.ink,
         surface: TajGoColors.card,
         error: TajGoColors.error,
       ),
@@ -34,6 +35,7 @@ class TajGoTheme {
         scrolledUnderElevation: 0,
         centerTitle: true,
         titleTextStyle: TextStyle(
+          fontFamily: 'Roboto',
           color: TajGoColors.text,
           fontSize: 20,
           fontWeight: FontWeight.w900,
@@ -43,16 +45,70 @@ class TajGoTheme {
         style: FilledButton.styleFrom(
           backgroundColor: TajGoColors.lime,
           foregroundColor: TajGoColors.ink,
-          minimumSize: const Size.fromHeight(TajGoSpacing.touchTarget),
+          minimumSize: const Size(0, TajGoSpacing.touchTarget),
           shape: RoundedRectangleBorder(borderRadius: TajGoRadius.mdAll),
-          textStyle: TajGoTypography.button,
+          textStyle: TajGoTypography.button.copyWith(fontFamily: 'Roboto'),
+        ),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(
+          foregroundColor: TajGoColors.darkGreen,
+          textStyle: TajGoTypography.button.copyWith(fontFamily: 'Roboto'),
+        ),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: TajGoColors.darkGreen,
+          minimumSize: const Size(0, TajGoSpacing.touchTarget),
+          shape: RoundedRectangleBorder(borderRadius: TajGoRadius.mdAll),
+          textStyle: TajGoTypography.button.copyWith(fontFamily: 'Roboto'),
+        ),
+      ),
+      tabBarTheme: TabBarThemeData(
+        labelStyle: TajGoTypography.bodyStrong.copyWith(fontFamily: 'Roboto'),
+        unselectedLabelStyle: TajGoTypography.body.copyWith(
+          fontFamily: 'Roboto',
+        ),
+        labelColor: TajGoColors.darkGreen,
+        unselectedLabelColor: TajGoColors.muted,
+      ),
+      navigationBarTheme: NavigationBarThemeData(
+        backgroundColor: TajGoColors.card,
+        indicatorColor: TajGoColors.mint,
+        labelTextStyle: WidgetStateProperty.all(
+          const TextStyle(
+            fontFamily: 'Roboto',
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: TajGoColors.card,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 16,
+        ),
+        hintStyle: const TextStyle(color: TajGoColors.muted),
+        border: OutlineInputBorder(borderRadius: TajGoRadius.mdAll),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: TajGoRadius.mdAll,
+          borderSide: const BorderSide(color: Color(0xFFCCDCCF)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: TajGoRadius.mdAll,
+          borderSide: const BorderSide(color: TajGoColors.darkGreen, width: 2),
         ),
       ),
       cardTheme: CardThemeData(
         color: TajGoColors.card,
-        elevation: 6,
+        elevation: 0,
         shadowColor: TajGoColors.ink.withValues(alpha: 0.1),
-        shape: RoundedRectangleBorder(borderRadius: TajGoRadius.lgAll),
+        shape: RoundedRectangleBorder(
+          borderRadius: TajGoRadius.lgAll,
+          side: const BorderSide(color: Color(0xFFDFEADF)),
+        ),
       ),
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,

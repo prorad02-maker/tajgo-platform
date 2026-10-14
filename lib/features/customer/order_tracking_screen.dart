@@ -1,3 +1,4 @@
+import '../../core/design/tajgo_money.dart';
 import '../../shared/widgets/tajgo_map_attribution.dart';
 import 'dart:async';
 
@@ -807,7 +808,7 @@ class _CatalogOrderSummary extends StatelessWidget {
         for (final item in order.items.take(3))
           Text(
             '${item.name} × ${_catalogQuantity(item.quantity)} · '
-            '${item.lineTotal} TJS',
+            '${TajGoMoney.format(item.lineTotal)}',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(fontSize: 13),
@@ -820,7 +821,7 @@ class _CatalogOrderSummary extends StatelessWidget {
         const SizedBox(height: 5),
         Text(
           'Товары ${order.subtotal ?? 0} + доставка '
-          '${order.deliveryFee ?? order.price} = ${order.total ?? 0} TJS',
+          '${order.deliveryFee ?? order.price} = ${TajGoMoney.format(order.total ?? 0)}',
           style: const TextStyle(fontWeight: FontWeight.w800),
         ),
       ],
@@ -863,7 +864,7 @@ class _OffersSection extends StatelessWidget {
       builder: (dialogContext) => AlertDialog(
         title: const Text('Выбрать курьера?'),
         content: Text(
-          '${offer.courierName} доставит заказ за ${offer.proposedPrice} TJS. После выбора заказ будет закреплён за этим курьером.',
+          '${offer.courierName} доставит заказ за ${TajGoMoney.format(offer.proposedPrice)}. После выбора заказ будет закреплён за этим курьером.',
         ),
         actions: [
           TextButton(
@@ -955,7 +956,7 @@ class _OffersSection extends StatelessWidget {
                           ),
                         ),
                         Text(
-                          '${offer.proposedPrice} TJS',
+                          TajGoMoney.format(offer.proposedPrice),
                           style: const TextStyle(
                             color: TajGoColors.darkGreen,
                             fontSize: 17,

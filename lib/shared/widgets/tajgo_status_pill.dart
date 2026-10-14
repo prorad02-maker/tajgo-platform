@@ -26,12 +26,14 @@ class TajGoStatusPill extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 6),
-        Text(
-          online ? 'На линии' : 'Не на линии',
-          style: TextStyle(
-            color: online ? TajGoColors.darkGreen : TajGoColors.soonText,
-            fontSize: 12,
-            fontWeight: FontWeight.w800,
+        Flexible(
+          child: Text(
+            online ? 'На линии' : 'Не на линии',
+            style: TextStyle(
+              color: online ? TajGoColors.darkGreen : TajGoColors.soonText,
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+            ),
           ),
         ),
       ],

@@ -1,3 +1,4 @@
+import '../../core/design/tajgo_money.dart';
 import '../../shared/widgets/tajgo_map_attribution.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -413,7 +414,7 @@ class _PeekCard extends StatelessWidget {
         ? ((selected as TajGoCourier).online
               ? 'Курьер на линии'
               : 'Курьер offline')
-        : '${orderStatusLabel((selected as TajGoOrder).status)} · ${(selected as TajGoOrder).price} TJS';
+        : '${orderStatusLabel((selected as TajGoOrder).status)} · ${TajGoMoney.format((selected as TajGoOrder).price)}';
     return SafeArea(
       top: false,
       child: Card(

@@ -1,3 +1,4 @@
+import '../../core/design/tajgo_money.dart';
 import '../../shared/widgets/tajgo_map_attribution.dart';
 import 'dart:async';
 
@@ -849,7 +850,7 @@ class _OrderPanel extends StatelessWidget {
     OrderStatus.accepted => 'Вы на месте',
     OrderStatus.pickedUp => 'Везём клиенту',
     OrderStatus.delivered => '⏳ Ждём подтверждения клиента',
-    OrderStatus.completed => '✅ Доставлено! +${order.price} TJS',
+    OrderStatus.completed => '✅ Доставлено! +${TajGoMoney.format(order.price)}',
     OrderStatus.disputed => '⚠️ Клиент сообщил, что не получил заказ',
     _ => 'Заказ',
   };
@@ -898,7 +899,7 @@ class _OrderPanel extends StatelessWidget {
               Text(address, style: const TextStyle(color: TajGoColors.muted)),
               const SizedBox(height: 3),
               Text(
-                'Ваш доход за заказ: ${order.price} TJS.',
+                'Ваш доход за заказ: ${TajGoMoney.format(order.price)}.',
                 style: const TextStyle(
                   color: TajGoColors.darkGreen,
                   fontWeight: FontWeight.w800,

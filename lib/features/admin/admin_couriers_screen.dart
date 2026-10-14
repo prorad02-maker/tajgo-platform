@@ -1,3 +1,4 @@
+import '../../core/design/tajgo_money.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/constants/tajgo_colors.dart';
@@ -140,7 +141,7 @@ class _CourierCard extends StatelessWidget {
               children: [
                 Text('⭐ ${courier.rating.toStringAsFixed(1)}'),
                 Text('🏆 ${courier.score}'),
-                Text('💰 ${courier.earningsToday} TJS'),
+                Text('💰 ${TajGoMoney.format(courier.earningsToday)}'),
                 Text('📦 ${courier.ordersToday}'),
               ],
             ),

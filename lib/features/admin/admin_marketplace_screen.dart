@@ -1,3 +1,4 @@
+import '../../core/design/tajgo_money.dart';
 import '../../shared/widgets/tajgo_map_attribution.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
@@ -88,7 +89,7 @@ class _PartnersTab extends StatelessWidget {
                 subtitle: Text(
                   '${marketplaceCategoryLabel(partner.category)} · '
                   '${partner.isOpen ? 'открыт' : 'закрыт'} · '
-                  '${partner.deliveryFee} TJS доставка',
+                  '${TajGoMoney.format(partner.deliveryFee)} доставка',
                 ),
                 trailing: IconButton(
                   tooltip: 'Изменить',
@@ -200,7 +201,7 @@ class AdminPartnerAssortmentScreen extends StatelessWidget {
                         style: const TextStyle(fontWeight: FontWeight.w900),
                       ),
                       subtitle: Text(
-                        '${product.price} TJS / '
+                        '${TajGoMoney.format(product.price)} / '
                         '${marketplaceUnitLabel(product.unit)}'
                         '${product.hidden ? ' · скрыт' : ''}'
                         '${!product.isAvailable ? ' · нет в наличии' : ''}',
@@ -258,7 +259,7 @@ class _ProductsTab extends StatelessWidget {
                   style: const TextStyle(fontWeight: FontWeight.w900),
                 ),
                 subtitle: Text(
-                  '${product.price} TJS / ${marketplaceUnitLabel(product.unit)}'
+                  '${TajGoMoney.format(product.price)} / ${marketplaceUnitLabel(product.unit)}'
                   '${product.hidden ? ' · скрыт' : ''}'
                   '${!product.isAvailable ? ' · нет в наличии' : ''}',
                 ),
@@ -792,7 +793,7 @@ class _ProductEditorDialogState extends State<_ProductEditorDialog> {
                   Expanded(
                     child: _numberField(
                       _price,
-                      'Цена, TJS',
+                      'Цена, сомони',
                       min: 0.01,
                       max: 100000,
                     ),

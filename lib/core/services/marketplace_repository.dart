@@ -16,7 +16,10 @@ class MarketplaceRepository {
   final FirebaseFirestore _db;
   final AuthoritativeCommandService _commands;
 
-  Stream<List<MarketplacePartner>> partnersStream({String? category}) async* {
+  Stream<List<MarketplacePartner>> partnersStream({
+    String? category,
+    bool allowPreview = false,
+  }) async* {
     Query<Map<String, dynamic>> query = _db
         .collection('partners')
         .where('isActive', isEqualTo: true)
@@ -26,26 +29,22 @@ class MarketplaceRepository {
     if (category != null) {
       query = query.where('category', isEqualTo: category);
     }
-    try {
-      await for (final snapshot in query.snapshots()) {
-        final partners = snapshot.docs
-            .map(MarketplacePartner.fromDoc)
-            .toList(growable: false);
-        if (partners.isEmpty) {
-          yield samplePartnersForCategory(category);
-          continue;
-        }
-        partners.sort((a, b) {
-          final active = b.isOpen.toString().compareTo(a.isOpen.toString());
-          if (active != 0) return active;
-          final order = a.sortOrder.compareTo(b.sortOrder);
-          if (order != 0) return order;
-          return a.name.compareTo(b.name);
-        });
-        yield partners;
+    await for (final snapshot in query.snapshots()) {
+      final partners = snapshot.docs
+          .map(MarketplacePartner.fromDoc)
+          .toList(growable: false);
+      if (partners.isEmpty && allowPreview) {
+        yield samplePartnersForCategory(category);
+        continue;
       }
-    } catch (_) {
-      yield samplePartnersForCategory(category);
+      partners.sort((a, b) {
+        final active = b.isOpen.toString().compareTo(a.isOpen.toString());
+        if (active != 0) return active;
+        final order = a.sortOrder.compareTo(b.sortOrder);
+        if (order != 0) return order;
+        return a.name.compareTo(b.name);
+      });
+      yield partners;
     }
   }
 
@@ -101,7 +100,7 @@ class MarketplaceRepository {
   ///
   /// Запрос по одному индексируемому полю `isPublished`; остальные условия
   /// (не test, доступен, не скрыт) фильтруются на клиенте, чтобы не требовать
-  /// составного индекса. При ошибке возвращается пустой список.
+  /// составного индекса. Ошибки передаются экрану для повторной загрузки.
   Stream<List<MarketplaceProduct>> publishedProductsStream() => _db
       .collection('products')
       .where('isPublished', isEqualTo: true)
@@ -114,8 +113,7 @@ class MarketplaceRepository {
                   !product.isTest && product.isAvailable && !product.hidden,
             )
             .toList(growable: false),
-      )
-      .handleError((_) {});
+      );
 
   String newPartnerId() => _db.collection('partners').doc().id;
   String newProductId() => _db.collection('products').doc().id;
@@ -126,7 +124,9 @@ class MarketplaceRepository {
         .collection('products')
         .where('partnerId', isEqualTo: partnerId)
         .get();
-    return snapshot.docs.map(MarketplaceProduct.fromDoc).toList(growable: false);
+    return snapshot.docs
+        .map(MarketplaceProduct.fromDoc)
+        .toList(growable: false);
   }
 
   static Map<String, dynamic> _partnerFields(MarketplacePartner p) => {
@@ -204,7 +204,9 @@ class MarketplaceRepository {
   }) async {
     final partner = catalog.partner.copyWith(isPreview: false);
     await _commands.call('adminImportCatalog', {
-      'idempotencyKey': TajGoIdempotencyKey.create('catalog-import-${partner.id}'),
+      'idempotencyKey': TajGoIdempotencyKey.create(
+        'catalog-import-${partner.id}',
+      ),
       'partner': {'id': partner.id, ..._partnerFields(partner)},
       'products': catalog.products
           .map((p) => {'id': p.id, ..._productFields(p)})

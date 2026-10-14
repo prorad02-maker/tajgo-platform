@@ -21,6 +21,20 @@ class CustomerOrdersTab extends StatefulWidget {
 
 class _CustomerOrdersTabState extends State<CustomerOrdersTab> {
   _OrdersFilter _filter = _OrdersFilter.all;
+  Stream<List<TajGoOrder>>? _orders;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _orders ??= _load();
+  }
+
+  Stream<List<TajGoOrder>> _load() {
+    final scope = TajGoScope.of(context);
+    return scope.orderRepository.customerOrdersStream(
+      scope.authService.currentUser!.uid,
+    );
+  }
 
   bool _matches(TajGoOrder order) => switch (_filter) {
     _OrdersFilter.all => true,
@@ -31,9 +45,6 @@ class _CustomerOrdersTabState extends State<CustomerOrdersTab> {
 
   @override
   Widget build(BuildContext context) {
-    final scope = TajGoScope.of(context);
-    final uid = scope.authService.currentUser!.uid;
-
     return TajGoScaffold(
       appBar: const TajGoAppBar(title: 'Мои заказы'),
       body: Column(
@@ -41,10 +52,12 @@ class _CustomerOrdersTabState extends State<CustomerOrdersTab> {
           _filters(),
           Expanded(
             child: StreamBuilder<List<TajGoOrder>>(
-              stream: scope.orderRepository.customerOrdersStream(uid),
+              stream: _orders,
               builder: (context, snapshot) {
                 if (snapshot.hasError) {
-                  return const TajGoErrorState();
+                  return TajGoErrorState(
+                    onRetry: () => setState(() => _orders = _load()),
+                  );
                 }
                 if (!snapshot.hasData) {
                   return ListView(

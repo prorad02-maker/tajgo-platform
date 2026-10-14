@@ -76,7 +76,8 @@ class AppUser {
         data['name'] as String? ??
         'Пользователь';
     return AppUser(
-      uid: data['uid'] as String? ?? uid,
+      // The document path is authoritative, including older mismatched fields.
+      uid: uid,
       phoneNumber: phone,
       displayName: displayName,
       photoUrl: data['photoUrl'] as String?,

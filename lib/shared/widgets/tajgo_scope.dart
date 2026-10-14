@@ -52,7 +52,7 @@ class TajGoScope extends InheritedWidget {
     final rolePreferences = RolePreferenceService();
     final cart = MarketplaceCart();
     unawaited(cart.hydrate());
-    return TajGoScope._(
+    return TajGoScope.withServices(
       key: key,
       authService: auth,
       userRepository: users,
@@ -83,7 +83,8 @@ class TajGoScope extends InheritedWidget {
     );
   }
 
-  const TajGoScope._({
+  /// Explicit dependencies allow isolated previews and integration checks.
+  const TajGoScope.withServices({
     super.key,
     required super.child,
     required this.authService,

@@ -1,3 +1,4 @@
+import '../../core/design/tajgo_money.dart';
 import '../../shared/widgets/tajgo_map_attribution.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -158,7 +159,7 @@ class _AdminOrderDetailsBodyState extends State<_AdminOrderDetailsBody> {
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      'Цена: ${order.price} TJS · Расстояние: ${order.distanceKm?.toStringAsFixed(1) ?? '—'} км',
+                      'Цена: ${TajGoMoney.format(order.price)} · Расстояние: ${order.distanceKm?.toStringAsFixed(1) ?? '—'} км',
                       style: const TextStyle(color: TajGoColors.muted),
                     ),
                     if (order.orderType == 'catalogOrder' &&
@@ -183,13 +184,13 @@ class _AdminOrderDetailsBodyState extends State<_AdminOrderDetailsBody> {
                             for (final item in order.items)
                               Text(
                                 '${item.name} × ${item.quantity} · '
-                                '${item.lineTotal} TJS',
+                                '${TajGoMoney.format(item.lineTotal)}',
                               ),
                             const Divider(),
                             Text(
                               'Товары ${order.subtotal ?? 0} + доставка '
                               '${order.deliveryFee ?? order.price} = '
-                              '${order.total ?? 0} TJS',
+                              '${TajGoMoney.format(order.total ?? 0)}',
                               style: const TextStyle(
                                 fontWeight: FontWeight.w800,
                               ),

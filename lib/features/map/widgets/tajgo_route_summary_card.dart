@@ -35,56 +35,71 @@ class TajGoRouteSummaryCard extends StatelessWidget {
         color: fallback ? const Color(0xFFFFF8E7) : const Color(0xFFF2F7F0),
         borderRadius: BorderRadius.circular(14),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (loading)
-            const SizedBox.square(
-              dimension: 22,
-              child: CircularProgressIndicator(strokeWidth: 2.5),
-            )
-          else
-            Icon(
-              fallback ? Icons.timeline_rounded : Icons.route_rounded,
-              color: fallback ? TajGoColors.warning : TajGoColors.green,
-            ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  pointsTooClose
-                      ? 'Выберите другую точку доставки'
-                      : loading
-                      ? 'Строим маршрут…'
-                      : value == null
-                      ? 'Маршрут недоступен'
-                      : '${formatRouteDistance(value.distanceKm, directBaselineMeters: directBaselineMeters)} · '
-                            '${formatRouteEta(value.etaMinutes)}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.w800),
+          Row(
+            children: [
+              if (loading)
+                const SizedBox.square(
+                  dimension: 22,
+                  child: CircularProgressIndicator(strokeWidth: 2.5),
+                )
+              else
+                Icon(
+                  fallback ? Icons.timeline_rounded : Icons.route_rounded,
+                  color: fallback ? TajGoColors.warning : TajGoColors.green,
                 ),
-                if (!loading && !pointsTooClose && value != null)
-                  Text(
-                    formatRouteQuality(value),
-                    style: TextStyle(
-                      color: fallback
-                          ? TajGoColors.warning
-                          : TajGoColors.darkGreen,
-                      fontSize: 12,
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      pointsTooClose
+                          ? 'Выберите другую точку доставки'
+                          : loading
+                          ? 'Строим маршрут…'
+                          : value == null
+                          ? 'Маршрут недоступен'
+                          : '${formatRouteDistance(value.distanceKm, directBaselineMeters: directBaselineMeters)} · '
+                                '${formatRouteEta(value.etaMinutes)}',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w800),
                     ),
+                    if (!loading && !pointsTooClose && value != null)
+                      Text(
+                        formatRouteQuality(value),
+                        style: TextStyle(
+                          color: fallback
+                              ? TajGoColors.warning
+                              : TajGoColors.darkGreen,
+                          fontSize: 12,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: Wrap(
+              children: [
+                if (onShowEntireRoute != null && value != null)
+                  TextButton(
+                    onPressed: onShowEntireRoute,
+                    child: const Text('Показать весь'),
+                  ),
+                if (value == null && !loading && onRetry != null)
+                  TextButton(
+                    onPressed: onRetry,
+                    child: const Text('Повторить'),
                   ),
               ],
             ),
           ),
-          if (onShowEntireRoute != null && value != null)
-            TextButton(
-              onPressed: onShowEntireRoute,
-              child: const Text('Показать весь'),
-            ),
-          if (value == null && !loading && onRetry != null)
-            TextButton(onPressed: onRetry, child: const Text('Повторить')),
         ],
       ),
     );

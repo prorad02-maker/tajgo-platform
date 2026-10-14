@@ -21,6 +21,20 @@ class MarketplacePartnersScreen extends StatefulWidget {
 class _MarketplacePartnersScreenState extends State<MarketplacePartnersScreen> {
   bool _openOnly = false;
   _PartnerSort _sort = _PartnerSort.smart;
+  Stream<List<MarketplacePartner>>? _partners;
+  Stream<List<MarketplacePartner>> _load() {
+    final scope = TajGoScope.of(context);
+    return scope.marketplaceRepository.partnersStream(
+      category: widget.category,
+      allowPreview: scope.featureFlags.previewData,
+    );
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _partners ??= _load();
+  }
 
   List<MarketplacePartner> _apply(List<MarketplacePartner> input) {
     var list = input.where((p) => !_openOnly || p.isOpen).toList();
@@ -43,16 +57,16 @@ class _MarketplacePartnersScreenState extends State<MarketplacePartnersScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final repository = TajGoScope.of(context).marketplaceRepository;
     final flags = TajGoScope.of(context).featureFlags;
     return TajGoScaffold(
       appBar: TajGoAppBar(title: marketplaceCategoryLabel(widget.category)),
       body: StreamBuilder<List<MarketplacePartner>>(
-        stream: repository.partnersStream(category: widget.category),
+        stream: _partners,
         builder: (context, snapshot) {
           if (snapshot.hasError) {
-            return const TajGoErrorState(
+            return TajGoErrorState(
               title: 'Не удалось загрузить партнёров',
+              onRetry: () => setState(() => _partners = _load()),
               message: 'Проверьте интернет и повторите.',
             );
           }
@@ -72,8 +86,8 @@ class _MarketplacePartnersScreenState extends State<MarketplacePartnersScreen> {
           if (raw.isEmpty) {
             return const TajGoEmptyState(
               icon: Icons.storefront_outlined,
-              title: 'Партнёры скоро появятся',
-              message: 'Мы подключаем проверенные места Худжанда.',
+              title: 'Заведений пока нет',
+              message: 'Выберите другую категорию или зайдите позже.',
             );
           }
           final preview = raw.any((p) => p.isPreview);
@@ -164,8 +178,11 @@ class _MarketplacePartnersScreenState extends State<MarketplacePartnersScreen> {
       ),
       child: Row(
         children: [
-          const Icon(Icons.auto_awesome_rounded,
-              size: TajGoIconSizes.md, color: Color(0xFF92600A)),
+          const Icon(
+            Icons.auto_awesome_rounded,
+            size: TajGoIconSizes.md,
+            color: Color(0xFF92600A),
+          ),
           const SizedBox(width: TajGoSpacing.sm),
           const Expanded(
             child: Text(

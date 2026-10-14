@@ -45,7 +45,7 @@ class TajGoPrimaryButton extends StatelessWidget {
               Flexible(
                 child: Text(
                   label,
-                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
                   style: TajGoTypography.button,
                 ),
               ),
@@ -60,13 +60,20 @@ class TajGoPrimaryButton extends StatelessWidget {
         disabledBackgroundColor: (backgroundColor ?? TajGoColors.lime)
             .withValues(alpha: 0.45),
         disabledForegroundColor: fg.withValues(alpha: 0.7),
-        minimumSize: const Size.fromHeight(TajGoSpacing.touchTarget),
+        minimumSize: const Size(0, TajGoSpacing.touchTarget),
         shape: RoundedRectangleBorder(borderRadius: TajGoRadius.mdAll),
       ),
       child: child,
     );
 
-    return expand ? SizedBox(width: double.infinity, child: button) : button;
+    final accessible = Semantics(
+      label: loading ? '$label. Выполняется' : null,
+      liveRegion: loading,
+      child: button,
+    );
+    return expand
+        ? SizedBox(width: double.infinity, child: accessible)
+        : accessible;
   }
 }
 
@@ -92,10 +99,14 @@ class TajGoSecondaryButton extends StatelessWidget {
       style: OutlinedButton.styleFrom(
         foregroundColor: TajGoColors.darkGreen,
         backgroundColor: TajGoColors.secondaryBtn,
-        minimumSize: const Size.fromHeight(TajGoSpacing.touchTarget),
+        minimumSize: const Size(0, TajGoSpacing.touchTarget),
         side: BorderSide.none,
         shape: RoundedRectangleBorder(borderRadius: TajGoRadius.mdAll),
-        textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+        textStyle: const TextStyle(
+          fontFamily: 'Roboto',
+          fontSize: 15,
+          fontWeight: FontWeight.w700,
+        ),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -105,9 +116,7 @@ class TajGoSecondaryButton extends StatelessWidget {
             Icon(icon, size: TajGoIconSizes.md),
             const SizedBox(width: TajGoSpacing.sm),
           ],
-          Flexible(
-            child: Text(label, overflow: TextOverflow.ellipsis),
-          ),
+          Flexible(child: Text(label, textAlign: TextAlign.center)),
         ],
       ),
     );

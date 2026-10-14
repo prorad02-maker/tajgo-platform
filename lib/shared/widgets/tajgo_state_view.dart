@@ -46,12 +46,14 @@ class TajGoStateView extends StatelessWidget {
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  message,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: TajGoColors.muted),
-                ),
+                if (message.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    message,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: TajGoColors.muted),
+                  ),
+                ],
                 if (onRetry != null) ...[
                   const SizedBox(height: 20),
                   FilledButton(onPressed: onRetry, child: Text(actionLabel)),

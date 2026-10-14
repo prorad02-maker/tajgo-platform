@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../core/constants/tajgo_colors.dart';
 import '../../core/models/app_user.dart';
 import '../../shared/widgets/tajgo_scope.dart';
+import '../../shared/widgets/tajgo_state_view.dart';
 import '../courier/courier_application_status_screen.dart';
 import '../courier/courier_home_screen.dart';
 import '../courier/courier_onboarding_screen.dart';
@@ -33,22 +34,67 @@ class CourierProfileScreen extends StatelessWidget {
       const AccountProfileScreen(currentMode: AppUserRole.courier);
 }
 
-class AccountProfileScreen extends StatelessWidget {
+class AccountProfileScreen extends StatefulWidget {
   const AccountProfileScreen({super.key, required this.currentMode});
   final String currentMode;
 
   @override
-  Widget build(BuildContext context) {
+  State<AccountProfileScreen> createState() => _AccountProfileScreenState();
+}
+
+class _AccountProfileScreenState extends State<AccountProfileScreen> {
+  Stream<AppUser?>? _profile;
+  String? _uid;
+  String get currentMode => widget.currentMode;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
     final scope = TajGoScope.of(context);
-    final firebaseUser = scope.authService.currentUser!;
+    final uid = scope.authService.currentUser?.uid;
+    if (uid != _uid || _profile == null) {
+      _uid = uid;
+      _profile = uid == null
+          ? Stream.value(null)
+          : scope.userRepository.userStream(uid);
+    }
+  }
+
+  void _reload() => setState(() {
+    final scope = TajGoScope.of(context);
+    _profile = _uid == null
+        ? Stream.value(null)
+        : scope.userRepository.userStream(_uid!);
+  });
+
+  @override
+  Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Профиль')),
-      body: FutureBuilder<AppUser?>(
-        future: scope.userRepository.getUser(firebaseUser.uid),
+      body: StreamBuilder<AppUser?>(
+        stream: _profile,
         builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return TajGoStateView(
+              icon: Icons.cloud_off_rounded,
+              title: 'Не удалось загрузить профиль',
+              message: 'Проверьте интернет и попробуйте ещё раз.',
+              onRetry: _reload,
+              actionLabel: 'Повторить',
+            );
+          }
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
           final user = snapshot.data;
           if (user == null) {
-            return const Center(child: CircularProgressIndicator());
+            return TajGoStateView(
+              icon: Icons.person_outline_rounded,
+              title: 'Профиль пока недоступен',
+              message: 'Попробуйте загрузить его ещё раз.',
+              onRetry: _reload,
+              actionLabel: 'Повторить',
+            );
           }
           return ListView(
             padding: const EdgeInsets.all(16),
@@ -77,7 +123,7 @@ class AccountProfileScreen extends StatelessWidget {
                 ),
               ),
               Text(
-                user.phoneNumber ?? 'Тестовый вход · номер не подтверждён',
+                user.phoneNumber ?? 'Номер не указан',
                 textAlign: TextAlign.center,
                 style: const TextStyle(color: TajGoColors.muted),
               ),

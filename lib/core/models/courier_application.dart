@@ -102,7 +102,7 @@ class CourierApplication {
     Map<String, dynamic> data, {
     required String uid,
   }) => CourierApplication(
-    uid: data['uid'] as String? ?? uid,
+    uid: uid,
     displayName:
         data['displayName'] as String? ?? data['name'] as String? ?? 'Курьер',
     phoneNumber: data['phoneNumber'] as String?,

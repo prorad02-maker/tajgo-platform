@@ -6,6 +6,7 @@ import '../../../core/models/tajgo_order.dart';
 import '../../../shared/design/tajgo_components.dart';
 import '../../../shared/widgets/tajgo_order_history_tile.dart';
 import '../../../shared/widgets/tajgo_scope.dart';
+import '../../../core/services/user_error_message.dart';
 import '../../auth/phone_auth_screen.dart';
 import '../../map/screens/new_order_map_screen.dart';
 import '../../marketplace/marketplace_partners_screen.dart';
@@ -15,7 +16,7 @@ import '../widgets/active_order_card.dart';
 
 /// Вкладка «Главная»: адрес города, поиск, отправка посылки, категории,
 /// активный заказ, заведения рядом и последние заказы.
-class CustomerHomeTab extends StatelessWidget {
+class CustomerHomeTab extends StatefulWidget {
   const CustomerHomeTab({
     super.key,
     required this.scrollController,
@@ -27,30 +28,80 @@ class CustomerHomeTab extends StatelessWidget {
   final VoidCallback onOpenSearch;
   final VoidCallback onOpenCart;
 
-  Future<void> _openParcel(BuildContext context) async {
+  @override
+  State<CustomerHomeTab> createState() => _CustomerHomeTabState();
+}
+
+class _CustomerHomeTabState extends State<CustomerHomeTab> {
+  ScrollController get scrollController => widget.scrollController;
+  VoidCallback get onOpenSearch => widget.onOpenSearch;
+  Stream<TajGoOrder?>? _active;
+  Stream<List<TajGoOrder>>? _recent;
+  Stream<List<MarketplacePartner>>? _partners;
+  String? _uid;
+  bool _opening = false;
+  Stream<TajGoOrder?> _loadActive() => _uid == null
+      ? Stream.value(null)
+      : TajGoScope.of(context).orderRepository.activeOrderStream(_uid!);
+  Stream<List<TajGoOrder>> _loadRecent() => _uid == null
+      ? Stream.value([])
+      : TajGoScope.of(context).orderRepository.recentOrdersStream(_uid!);
+  Stream<List<MarketplacePartner>> _loadPartners() {
     final scope = TajGoScope.of(context);
-    final firebaseUser = scope.authService.currentUser;
-    final profile = firebaseUser == null
-        ? null
-        : await scope.userRepository.getUser(firebaseUser.uid);
-    if (!context.mounted) return;
-    if (firebaseUser == null ||
-        (!kDebugMode && profile?.phoneVerified != true)) {
+    return scope.marketplaceRepository.partnersStream(
+      allowPreview: scope.featureFlags.previewData,
+    );
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final uid = TajGoScope.of(context).authService.currentUser?.uid;
+    if (_active == null || _uid != uid) {
+      _uid = uid;
+      _active = _loadActive();
+      _recent = _loadRecent();
+      _partners = _loadPartners();
+    }
+  }
+
+  Future<void> _openParcel(BuildContext context) async {
+    if (_opening) return;
+    setState(() => _opening = true);
+    try {
+      final scope = TajGoScope.of(context);
+      final firebaseUser = scope.authService.currentUser;
+      final profile = firebaseUser == null
+          ? null
+          : await scope.userRepository.getUser(firebaseUser.uid);
+      if (!context.mounted) return;
+      if (firebaseUser == null ||
+          (!kDebugMode && profile?.phoneVerified != true)) {
+        await Navigator.push(
+          context,
+          MaterialPageRoute<void>(
+            builder: (_) =>
+                const PhoneAuthScreen(allowAnonymousFallback: false),
+          ),
+        );
+        return;
+      }
+      if (!context.mounted) return;
       await Navigator.push(
         context,
         MaterialPageRoute<void>(
-          builder: (_) => const PhoneAuthScreen(allowAnonymousFallback: false),
+          builder: (_) => const NewOrderMapScreen(initialType: 'package'),
         ),
       );
-      return;
+    } catch (error) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(userErrorMessage(error))));
+      }
+    } finally {
+      if (mounted) setState(() => _opening = false);
     }
-    if (!context.mounted) return;
-    await Navigator.push(
-      context,
-      MaterialPageRoute<void>(
-        builder: (_) => const NewOrderMapScreen(initialType: 'package'),
-      ),
-    );
   }
 
   void _openCategory(BuildContext context, String category) => Navigator.push(
@@ -64,7 +115,7 @@ class CustomerHomeTab extends StatelessWidget {
   Widget build(BuildContext context) {
     final scope = TajGoScope.of(context);
     final flags = scope.featureFlags;
-    final uid = scope.authService.currentUser!.uid;
+    final uid = _uid ?? '';
 
     return SafeArea(
       bottom: false,
@@ -88,8 +139,14 @@ class CustomerHomeTab extends StatelessWidget {
             SliverToBoxAdapter(child: _categories(context)),
           SliverToBoxAdapter(
             child: StreamBuilder<TajGoOrder?>(
-              stream: scope.orderRepository.activeOrderStream(uid),
+              stream: _active,
               builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return TajGoErrorState(
+                    title: 'Не удалось загрузить текущую доставку',
+                    onRetry: () => setState(() => _active = _loadActive()),
+                  );
+                }
                 if (snapshot.data == null) return const SizedBox.shrink();
                 return Padding(
                   padding: const EdgeInsets.fromLTRB(
@@ -128,10 +185,7 @@ class CustomerHomeTab extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('Худжанд', style: TajGoTypography.title),
-                Text(
-                  'Доставка по городу',
-                  style: TajGoTypography.caption,
-                ),
+                Text('Доставка по городу', style: TajGoTypography.caption),
               ],
             ),
           ),
@@ -185,7 +239,16 @@ class CustomerHomeTab extends StatelessWidget {
                 ],
               ),
             ),
-            const Icon(Icons.arrow_forward_rounded, color: Colors.white),
+            if (_opening)
+              const SizedBox.square(
+                dimension: 24,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
+              )
+            else
+              const Icon(Icons.arrow_forward_rounded, color: Colors.white),
           ],
         ),
       ),
@@ -233,8 +296,14 @@ class CustomerHomeTab extends StatelessWidget {
   Widget _nearbySection(BuildContext context, TajGoScope scope) {
     return SliverToBoxAdapter(
       child: StreamBuilder<List<MarketplacePartner>>(
-        stream: scope.marketplaceRepository.partnersStream(),
+        stream: _partners,
         builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return TajGoErrorState(
+              title: 'Не удалось загрузить заведения',
+              onRetry: () => setState(() => _partners = _loadPartners()),
+            );
+          }
           final partners = (snapshot.data ?? const <MarketplacePartner>[])
               .where((p) => !p.isPreview || scope.featureFlags.previewData)
               .take(5)
@@ -265,8 +334,14 @@ class CustomerHomeTab extends StatelessWidget {
   Widget _recentSection(BuildContext context, TajGoScope scope, String uid) {
     return SliverToBoxAdapter(
       child: StreamBuilder<List<TajGoOrder>>(
-        stream: scope.orderRepository.recentOrdersStream(uid),
+        stream: _recent,
         builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return TajGoErrorState(
+              title: 'Не удалось загрузить последние заказы',
+              onRetry: () => setState(() => _recent = _loadRecent()),
+            );
+          }
           final orders = snapshot.data ?? const <TajGoOrder>[];
           if (orders.isEmpty) return const SizedBox.shrink();
           return Column(

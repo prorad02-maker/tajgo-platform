@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../core/design/tajgo_design.dart';
-import 'tajgo_buttons.dart';
+
+import '../../shared/widgets/tajgo_state_view.dart';
 
 /// Пустое состояние — иконка, заголовок, пояснение и опциональное действие.
 class TajGoEmptyState extends StatelessWidget {
@@ -21,41 +22,13 @@ class TajGoEmptyState extends StatelessWidget {
   final VoidCallback? onAction;
 
   @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(TajGoSpacing.xxl),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: TajGoIconSizes.hero, color: TajGoColors.muted),
-            const SizedBox(height: TajGoSpacing.lg),
-            Text(
-              title,
-              textAlign: TextAlign.center,
-              style: TajGoTypography.subtitle,
-            ),
-            if (message != null) ...[
-              const SizedBox(height: TajGoSpacing.sm),
-              Text(
-                message!,
-                textAlign: TextAlign.center,
-                style: TajGoTypography.caption,
-              ),
-            ],
-            if (actionLabel != null && onAction != null) ...[
-              const SizedBox(height: TajGoSpacing.xl),
-              TajGoPrimaryButton(
-                label: actionLabel!,
-                onPressed: onAction,
-                expand: false,
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => TajGoStateView(
+    icon: icon,
+    title: title,
+    message: message ?? '',
+    onRetry: onAction,
+    actionLabel: actionLabel ?? 'Продолжить',
+  );
 }
 
 /// Состояние ошибки — дружелюбный текст без технических деталей и «Повторить».
@@ -72,44 +45,13 @@ class TajGoErrorState extends StatelessWidget {
   final VoidCallback? onRetry;
 
   @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(TajGoSpacing.xxl),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(
-              Icons.cloud_off_rounded,
-              size: TajGoIconSizes.hero,
-              color: TajGoColors.muted,
-            ),
-            const SizedBox(height: TajGoSpacing.lg),
-            Text(
-              title,
-              textAlign: TextAlign.center,
-              style: TajGoTypography.subtitle,
-            ),
-            const SizedBox(height: TajGoSpacing.sm),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: TajGoTypography.caption,
-            ),
-            if (onRetry != null) ...[
-              const SizedBox(height: TajGoSpacing.xl),
-              TajGoSecondaryButton(
-                label: 'Повторить',
-                icon: Icons.refresh,
-                onPressed: onRetry,
-                expand: false,
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => TajGoStateView(
+    icon: Icons.cloud_off_rounded,
+    title: title,
+    message: message,
+    onRetry: onRetry,
+    actionLabel: 'Повторить',
+  );
 }
 
 /// Плейсхолдер-скелетон одной строки/блока с мягкой пульсацией.
@@ -195,8 +137,7 @@ class TajGoCardSkeleton extends StatelessWidget {
               children: [
                 for (var i = 0; i < lines; i++) ...[
                   TajGoLoadingSkeleton(width: i == 0 ? 160 : double.infinity),
-                  if (i != lines - 1)
-                    const SizedBox(height: TajGoSpacing.sm),
+                  if (i != lines - 1) const SizedBox(height: TajGoSpacing.sm),
                 ],
               ],
             ),
@@ -234,12 +175,14 @@ class TajGoOfflineBanner extends StatelessWidget {
             color: Color(0xFF92600A),
           ),
           const SizedBox(width: TajGoSpacing.sm),
-          Text(
-            message,
-            style: const TextStyle(
-              color: Color(0xFF92600A),
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
+          Flexible(
+            child: Text(
+              message,
+              style: const TextStyle(
+                color: Color(0xFF92600A),
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
         ],

@@ -1,3 +1,4 @@
+import '../../core/design/tajgo_money.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
@@ -55,7 +56,7 @@ class AdminOffersScreen extends StatelessWidget {
                     ),
                   ),
                   title: Text(
-                    '${data['courierName'] ?? 'Курьер'} · $price TJS',
+                    '${data['courierName'] ?? 'Курьер'} · ${price is num ? TajGoMoney.format(price) : 'Цена не указана'}',
                     style: const TextStyle(fontWeight: FontWeight.w900),
                   ),
                   subtitle: Text('Заказ $orderId\nСтатус: $status'),

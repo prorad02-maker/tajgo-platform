@@ -8,6 +8,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/constants/tajgo_colors.dart';
+import '../../../core/design/tajgo_money.dart';
 import '../../../core/config/map_provider_config.dart';
 import '../../../core/config/service_area_config.dart';
 import '../../../core/models/tajgo_courier.dart';
@@ -683,6 +684,7 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen>
     return NewOrderMapLayout.panelHeight(
       size,
       details: _stage == _Stage.details,
+      textScaler: MediaQuery.textScalerOf(context),
     );
   }
 
@@ -744,7 +746,7 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen>
         builder: (context) => AlertDialog(
           title: const Text('Подтвердить цену?'),
           content: Text(
-            'Вы указали ${validation.value} TJS при рекомендации $recommended TJS.',
+            'Вы указали ${TajGoMoney.format(validation.value ?? 0)} при рекомендации ${TajGoMoney.format(recommended)}.',
           ),
           actions: [
             TextButton(
@@ -1230,50 +1232,59 @@ class _PointPanel extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
           child: Column(
             children: [
-              _AddressField(
-                label: 'Откуда',
-                presentation: fromPresentation,
-                active: stage == _Stage.pickFrom,
-                selected: from != null,
-                marker: 'A',
-                onTap: onSearchFrom,
-              ),
-              const SizedBox(height: 6),
-              _AddressField(
-                label: 'Куда',
-                presentation: toPresentation,
-                active: stage == _Stage.pickTo,
-                selected: to != null,
-                marker: 'B',
-                onTap: onSearchTo,
-              ),
-              const Spacer(),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  hint,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: TajGoColors.muted,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
+              Expanded(
+                child: SingleChildScrollView(
+                  child: Column(
+                    children: [
+                      _AddressField(
+                        label: 'Откуда',
+                        presentation: fromPresentation,
+                        active: stage == _Stage.pickFrom,
+                        selected: from != null,
+                        marker: 'A',
+                        onTap: onSearchFrom,
+                      ),
+                      const SizedBox(height: 6),
+                      _AddressField(
+                        label: 'Куда',
+                        presentation: toPresentation,
+                        active: stage == _Stage.pickTo,
+                        selected: to != null,
+                        marker: 'B',
+                        onTap: onSearchTo,
+                      ),
+                      const SizedBox(height: 8),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          hint,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: TajGoColors.muted,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
               const SizedBox(height: 7),
               SizedBox(
                 width: double.infinity,
-                height: 48,
                 child: FilledButton(
                   key: const ValueKey('new-order-map-confirm'),
                   onPressed: enabled ? onConfirm : null,
                   style: FilledButton.styleFrom(
+                    minimumSize: const Size(0, 48),
                     backgroundColor: TajGoColors.lime,
                     foregroundColor: TajGoColors.ink,
                     disabledBackgroundColor: const Color(0xFFE1EEE5),
                     disabledForegroundColor: TajGoColors.muted,
                     textStyle: const TextStyle(
+                      fontFamily: 'Roboto',
                       fontSize: 15,
                       fontWeight: FontWeight.w900,
                     ),
@@ -1342,7 +1353,7 @@ class _AddressField extends StatelessWidget {
                 ),
                 Text(
                   presentation.primary,
-                  maxLines: 1,
+                  maxLines: 2,
                   style: const TextStyle(
                     fontWeight: FontWeight.w700,
                     fontSize: 13,
@@ -1693,8 +1704,8 @@ class _DetailsPanel extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
             child: SizedBox(
               width: double.infinity,
-              height: 48,
               child: FilledButton(
+                style: FilledButton.styleFrom(minimumSize: const Size(0, 48)),
                 onPressed: busy || route == null || !quoteReady
                     ? null
                     : onSubmit,
@@ -1855,9 +1866,15 @@ Widget buildNewOrderPointPanelForTest({bool pickup = true}) => SizedBox(
 );
 
 @visibleForTesting
-Widget buildNewOrderEmergencyMapLayoutForTest() {
-  const size = Size(360, 800);
-  final panelHeight = NewOrderMapLayout.panelHeight(size, details: false);
+Widget buildNewOrderEmergencyMapLayoutForTest({
+  Size size = const Size(360, 800),
+  TextScaler textScaler = TextScaler.noScaling,
+}) {
+  final panelHeight = NewOrderMapLayout.panelHeight(
+    size,
+    details: false,
+    textScaler: textScaler,
+  );
   return SizedBox.fromSize(
     size: size,
     child: NewOrderMapStack(
@@ -1943,9 +1960,15 @@ Widget buildNewOrderDetailsPanelForTest() => SizedBox(
 );
 
 @visibleForTesting
-Widget buildNewOrderDetailsMapLayoutForTest() {
-  const size = Size(360, 800);
-  final panelHeight = NewOrderMapLayout.panelHeight(size, details: true);
+Widget buildNewOrderDetailsMapLayoutForTest({
+  Size size = const Size(360, 800),
+  TextScaler textScaler = TextScaler.noScaling,
+}) {
+  final panelHeight = NewOrderMapLayout.panelHeight(
+    size,
+    details: true,
+    textScaler: textScaler,
+  );
   return SizedBox.fromSize(
     size: size,
     child: NewOrderMapStack(
