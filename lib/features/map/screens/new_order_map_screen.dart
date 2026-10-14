@@ -1,3 +1,4 @@
+import '../../../shared/widgets/tajgo_map_attribution.dart';
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -26,6 +27,7 @@ import '../services/place_search_service.dart';
 import '../services/tajgo_map_camera.dart';
 import '../services/tajgo_location_service.dart';
 import '../widgets/tajgo_location_widgets.dart';
+import '../widgets/address_details_dialog.dart';
 import '../widgets/tajgo_place_search_sheet.dart';
 import '../widgets/tajgo_route_summary_card.dart';
 import '../utils/map_address_formatter.dart';
@@ -71,6 +73,7 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen>
   LatLng? _current;
   String _address = 'Определяем адрес...';
   bool _resolving = false, _locating = false, _busy = false;
+  bool _confirming = false;
   bool _cameraMoving = false;
   bool _gestureMoving = false;
   bool _userMovedCamera = false;
@@ -334,6 +337,8 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen>
     if (_locating) {
       return;
     }
+    final selectionGeneration = _inputGeneration;
+    final selectionCenter = _map.camera.center;
     setState(() {
       _locating = true;
       _showLocateHint = false;
@@ -347,6 +352,15 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen>
       ).locationService.determineCurrentPosition();
       final point = LatLng(position.latitude, position.longitude);
       if (!mounted) {
+        return;
+      }
+      if (selectionGeneration != _inputGeneration ||
+          const Distance().as(
+                LengthUnit.Meter,
+                selectionCenter,
+                _map.camera.center,
+              ) >
+              1) {
         return;
       }
       setState(() {
@@ -392,10 +406,21 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen>
   }
 
   Future<void> _confirmPoint() async {
+    if (_confirming || _resolving || _selectionMoving) return;
+    setState(() => _confirming = true);
+    try {
+      await _confirmPointImpl();
+    } finally {
+      if (mounted) setState(() => _confirming = false);
+    }
+  }
+
+  Future<void> _confirmPointImpl() async {
     if (_resolving || _selectionMoving) {
       return;
     }
     final point = _map.camera.center;
+    final generation = _inputGeneration;
     if (!_city.contains(point)) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -405,6 +430,21 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen>
         ),
       );
       return;
+    }
+    if (_address.trim().length < 3 || _address == 'Точка на карте') {
+      final details = await showAddressDetailsDialog(
+        context: context,
+        initialAddress: _address,
+        needsAddress: true,
+      );
+      if (!mounted ||
+          details == null ||
+          generation != _inputGeneration ||
+          const Distance().as(LengthUnit.Meter, point, _map.camera.center) >
+              1) {
+        return;
+      }
+      setState(() => _address = details);
     }
     final location = TajGoMapLocation(
       latitude: point.latitude,
@@ -590,6 +630,8 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen>
         _quoteLoading = false;
         if (result.ready) {
           _serverQuote = result;
+          _route =
+              result.roadRoute(from.toGeoPoint(), to.toGeoPoint()) ?? _route;
           _price.text = result.priceTjs.toString();
         } else {
           _quoteError =
@@ -685,7 +727,7 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen>
       return;
     }
     final km = _route!.distanceKm;
-    final recommended = pricing.suggestedPrice(km);
+    final recommended = _serverQuote!.priceTjs!;
     final validation = pricing.validateClientPrice(
       rawValue: _price.text,
       recommendedPrice: recommended,
@@ -751,6 +793,8 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen>
         priceNegotiable: true,
         fromLocation: _from!.toGeoPoint(),
         toLocation: _to!.toGeoPoint(),
+        pickup: _from,
+        dropoff: _to,
         distanceKm: km,
         etaMinutes: pricing.etaMinutes(km),
         comment: _comment.text.trim().isEmpty ? null : _comment.text.trim(),
@@ -958,13 +1002,7 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen>
                               ),
                           ],
                         ),
-                        RichAttributionWidget(
-                          attributions: const [
-                            TextSourceAttribution(
-                              MapProviderConfig.attributionText,
-                            ),
-                          ],
-                        ),
+                        const TajGoMapAttribution(),
                       ],
                     ),
                   ),
@@ -1101,7 +1139,7 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen>
                             address: _address,
                             pendingPlace: _pendingPlace,
                             currentMatchesPickup: _pickupMatchesCurrent,
-                            resolving: _resolving,
+                            resolving: _resolving || _confirming,
                             moving: _selectionMoving,
                             onConfirm: _confirmPoint,
                             onSearchFrom: () =>

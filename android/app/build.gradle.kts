@@ -1,10 +1,12 @@
 import java.io.FileInputStream
 import java.util.Properties
+import com.google.firebase.crashlytics.buildtools.gradle.CrashlyticsExtension
 
 plugins {
     id("com.android.application")
     // START: FlutterFire Configuration
     id("com.google.gms.google-services")
+    id("com.google.firebase.crashlytics")
     // END: FlutterFire Configuration
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
@@ -83,6 +85,12 @@ android {
 
     buildTypes {
         release {
+            // Local builds remain possible without the symbol-upload endpoint.
+            // Online release CI opts in with -PtajgoCrashlyticsUpload=true.
+            configure<CrashlyticsExtension> {
+                mappingFileUploadEnabled = providers.gradleProperty("tajgoCrashlyticsUpload")
+                    .map { it.toBoolean() }.getOrElse(false)
+            }
             // R8 code shrinking + resource shrinking for release artifacts.
             isMinifyEnabled = true
             isShrinkResources = true

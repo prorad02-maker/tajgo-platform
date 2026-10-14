@@ -1,3 +1,4 @@
+import '../../shared/widgets/tajgo_map_attribution.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -9,6 +10,7 @@ import '../../core/models/tajgo_courier.dart';
 import '../../core/models/tajgo_order.dart';
 import '../../shared/widgets/tajgo_badge.dart';
 import '../../shared/widgets/tajgo_scope.dart';
+import '../map/widgets/tajgo_road_route_layer.dart';
 import 'admin_orders_screen.dart';
 import 'widgets/admin_access_gate.dart';
 import 'widgets/tajgo_admin_action_button.dart';
@@ -429,9 +431,6 @@ class _OrderMap extends StatelessWidget {
     final to = order.toLocation == null
         ? null
         : LatLng(order.toLocation!.latitude, order.toLocation!.longitude);
-    final route = from != null && to != null
-        ? TajGoScope.of(context).routeService.directRoute(from: from, to: to)
-        : null;
     Widget map(TajGoCourier? courier) => FlutterMap(
       options: MapOptions(initialCenter: from ?? to ?? center, initialZoom: 13),
       children: [
@@ -439,17 +438,7 @@ class _OrderMap extends StatelessWidget {
           urlTemplate: MapProviderConfig.current.tileUrlTemplate,
           userAgentPackageName: MapProviderConfig.current.userAgentPackageName,
         ),
-        if (route != null)
-          PolylineLayer(
-            polylines: [
-              Polyline(
-                points: route.polylinePoints,
-                color: TajGoColors.warning,
-                strokeWidth: 3,
-                pattern: StrokePattern.dashed(segments: const [8, 8]),
-              ),
-            ],
-          ),
+        if (from != null && to != null) TajGoRoadRouteLayer(from: from, to: to),
         MarkerLayer(
           markers: [
             if (from != null)
@@ -483,11 +472,7 @@ class _OrderMap extends StatelessWidget {
               ),
           ],
         ),
-        RichAttributionWidget(
-          attributions: const [
-            TextSourceAttribution(MapProviderConfig.attributionText),
-          ],
-        ),
+        const TajGoMapAttribution(),
       ],
     );
     if (order.courierId == null) return map(null);

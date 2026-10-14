@@ -47,21 +47,37 @@ class CourierRepository {
       .limit(50)
       .snapshots()
       .map((snapshot) => snapshot.docs.map(TajGoOrder.fromDoc).toList());
+  Stream<List<TajGoOrder>> historyStream(String courierId) => _db
+      .collection('orders')
+      .where('courierId', isEqualTo: courierId)
+      .orderBy('createdAt', descending: true)
+      .limit(100)
+      .snapshots()
+      .map(
+        (snapshot) =>
+            snapshot.docs.map(TajGoOrder.fromDoc).toList(growable: false),
+      );
 
   Stream<List<TajGoOrder>> activeCourierOrdersStream(String courierId) => _db
       .collection('orders')
       .where('courierId', isEqualTo: courierId)
-      .limit(5)
+      .where(
+        'status',
+        whereIn: const [
+          'courierSelected',
+          'accepted',
+          'arrivedPickup',
+          'pickedUp',
+          'arrivedDropoff',
+          'delivered',
+          'disputed',
+        ],
+      )
       .snapshots()
       .map(
         (snapshot) => snapshot.docs
             .map(TajGoOrder.fromDoc)
-            .where(
-              (order) =>
-                  order.status == OrderStatus.accepted ||
-                  order.status == OrderStatus.pickedUp ||
-                  order.status == OrderStatus.delivered,
-            )
+            .where((order) => order.isActive)
             .toList(),
       );
 
@@ -147,6 +163,18 @@ class CourierRepository {
     bool force = false,
   }) async {
     final pendingWrite = _locationWrites[uid];
+    // Do not hide weak GPS by retrying without accuracy metadata: that would
+    // leave a previously good accuracy attached to an inaccurate new position.
+    if (!latitude.isFinite ||
+        !longitude.isFinite ||
+        latitude.abs() > 90 ||
+        longitude.abs() > 180 ||
+        (accuracy != null &&
+            (!accuracy.isFinite || accuracy < 0 || accuracy > 200))) {
+      throw StateError(
+        'GPS сейчас неточный. Дождитесь более точного положения.',
+      );
+    }
     if (pendingWrite != null) {
       return pendingWrite;
     }
@@ -206,8 +234,9 @@ class CourierRepository {
     final telemetryData = <String, dynamic>{
       ...coreData,
       if (heading != null && heading.isFinite && heading >= 0)
-        'heading': heading,
-      if (speed != null && speed.isFinite && speed >= 0) 'speed': speed,
+        'heading': heading % 360,
+      if (speed != null && speed.isFinite && speed >= 0 && speed <= 80)
+        'speed': speed,
       if (accuracy != null && accuracy.isFinite && accuracy >= 0)
         'locationAccuracy': accuracy,
     };

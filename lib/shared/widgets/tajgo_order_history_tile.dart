@@ -39,6 +39,11 @@ class TajGoOrderHistoryTile extends StatelessWidget {
   }
 
   (String, Color, Color) get _badge => switch (order.status) {
+    OrderStatus.waiting => ('Поиск курьера', TajGoColors.mint, TajGoColors.darkGreen),
+    OrderStatus.accepted => ('Курьер выбран', TajGoColors.mint, TajGoColors.darkGreen),
+    OrderStatus.pickedUp => ('В пути', TajGoColors.mint, TajGoColors.darkGreen),
+    OrderStatus.delivered => ('Ожидает подтверждения', TajGoColors.mint, TajGoColors.darkGreen),
+    OrderStatus.unknown => ('Статус недоступен', TajGoColors.soonBg, TajGoColors.soonText),
     OrderStatus.completed => (
       '✅ Доставлен',
       TajGoColors.mint,

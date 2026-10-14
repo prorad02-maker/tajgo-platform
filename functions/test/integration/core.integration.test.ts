@@ -282,6 +282,22 @@ test("duplicate custom-order request creates exactly one order", async () => {
   assert.equal(commands.size, 1);
 });
 
+test("order contact belongs only to the two assigned participants", async () => {
+  await seedUser(customer, "customer"); await seedCourier(courier);
+  await db.collection("orders").doc("contact-order").set({customerId: customer.uid, courierId: courier.uid, status: "accepted"});
+  assert.equal((await core.getOrderContact({principal: courier, data: {orderId: "contact-order"}})).phoneNumber, customer.token.phone_number);
+  assert.equal((await core.getOrderContact({principal: customer, data: {orderId: "contact-order"}})).phoneNumber, courier.token.phone_number);
+  await assert.rejects(core.getOrderContact({principal: customer2, data: {orderId: "contact-order"}}), (e: unknown) => e instanceof CoreError && e.code === "permission-denied");
+});
+test("closed deliveries and malformed phone numbers do not expose contacts", async () => {
+  await seedUser(customer, "customer"); await seedCourier(courier);
+  const ref = db.collection("orders").doc("contact-order");
+  await ref.set({customerId: customer.uid, courierId: courier.uid, status: "completed", completedAt: Timestamp.now()});
+  await assert.rejects(core.getOrderContact({principal: courier, data: {orderId: "contact-order"}}), (e: unknown) => e instanceof CoreError && e.code === "failed-precondition");
+  await ref.set({customerId: customer.uid, courierId: courier.uid, status: "accepted"});
+  await db.collection("users").doc(customer.uid).update({phoneNumber: "tel:injection"});
+  await assert.rejects(core.getOrderContact({principal: courier, data: {orderId: "contact-order"}}), (e: unknown) => e instanceof CoreError && e.code === "not-found");
+});
 test("callable wrapper rejects an unauthenticated request", async () => {
   const response = await fetch(
     "http://127.0.0.1:5001/demo-tajgo/europe-west1/createCustomDeliveryOrder",
@@ -1087,6 +1103,44 @@ test("one order cannot select two couriers concurrently", async () => {
   assert.equal(couriers.size, 1);
 });
 
+test("legacy mobile order completes with private attempt counters while old clients retain its code", async () => {
+  await seedCourier(courier, {activeOrderId: "old-delivery", isBusy: true, location: new GeoPoint(40.2900, 69.6300)});
+  await seedWaitingOrder("old-delivery", customer, {status: "pickedUp", courierId: courier.uid, confirmationCode: "4321"});
+  await assert.rejects(core.completeDeliveryWithCode({principal: courier, data: {orderId: "old-delivery", code: "1111", idempotencyKey: "legacy-wrong-code"}}));
+  assert.equal((await db.collection("order_secrets").doc("old-delivery").get()).data()?.failedAttempts, 1);
+  assert.equal((await db.collection("orders").doc("old-delivery").get()).data()?.confirmationCode, "4321");
+  await core.completeDeliveryWithCode({principal: courier, data: {orderId: "old-delivery", code: "4321", idempotencyKey: "legacy-right-code"}});
+  assert.equal((await db.collection("orders").doc("old-delivery").get()).data()?.status, "completed");
+  assert.equal((await db.collection("order_secrets").doc("old-delivery").get()).exists, false);
+  assert.equal((await db.collection("couriers").doc(courier.uid).get()).data()?.ordersToday, 1);
+});
+test("completion cannot clear a courier's different active delivery", async () => {
+  await seedCourier(courier, {activeOrderId: "new-order", isBusy: true, location: new GeoPoint(40.2900, 69.6300)});
+  await seedWaitingOrder("old-order", customer, {status: "pickedUp", courierId: courier.uid, confirmationCode: "4321"});
+  await assert.rejects(core.completeDeliveryWithCode({principal: courier, data: {orderId: "old-order", code: "4321", idempotencyKey: "stale-order-code"}}), (e: unknown) => e instanceof CoreError && e.code === "failed-precondition");
+  const current = (await db.collection("couriers").doc(courier.uid).get()).data();
+  assert.equal(current?.activeOrderId, "new-order"); assert.equal(current?.ordersToday, 0);
+});
+test("resolving an already-paid dispute cannot pay twice or clear a newer order", async () => {
+  await seedUser(adminActor, "admin");
+  await seedCourier(courier, {activeOrderId: "new-order", isBusy: true, earningsToday: 35, ordersToday: 1});
+  await seedWaitingOrder("paid-order", customer, {status: "disputed", courierId: courier.uid, completedAt: Timestamp.fromDate(now), price: 35});
+  await core.adminResolveDispute({principal: adminActor, data: {orderId: "paid-order", resolution: "complete", reason: "Проверено администратором", idempotencyKey: "settled-dispute-resolve"}});
+  const current = (await db.collection("couriers").doc(courier.uid).get()).data();
+  assert.equal(current?.activeOrderId, "new-order"); assert.equal(current?.earningsToday, 35); assert.equal(current?.ordersToday, 1);
+});
+test("admin cancellation or return of an old order preserves a newer courier assignment", async () => {
+  await seedUser(adminActor, "admin");
+  await seedCourier(courier, {activeOrderId: "new-order", isBusy: true});
+  for (const resolution of ["adminCancel", "cancel", "returnToWaiting"]) {
+    await seedWaitingOrder("old-order", customer, {status: "disputed", courierId: courier.uid});
+    const data = {orderId: "old-order", reason: "Проверено администратором", idempotencyKey: `old-order-${resolution}-safe`};
+    if (resolution === "adminCancel") await core.adminCancelOrder({principal: adminActor, data});
+    else await core.adminResolveDispute({principal: adminActor, data: {...data, resolution}});
+    const current = (await db.collection("couriers").doc(courier.uid).get()).data();
+    assert.equal(current?.activeOrderId, "new-order"); assert.equal(current?.isBusy, true);
+  }
+});
 test("delivery code rejects a wrong value and completes only once", async () => {
   await seedCourier(courier, {
     activeOrderId: "delivery-order",

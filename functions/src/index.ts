@@ -8,17 +8,20 @@ import {
 } from "firebase-functions/v2/https";
 import {setGlobalOptions} from "firebase-functions/v2/options";
 import {TajGoAuthoritativeCore} from "./core";
-import {CoreError, Principal, asRecord} from "./domain";
+import {CoreError, Principal, asRecord, parseCoordinate, assertOnlyKeys} from "./domain";
+import {createSharedRoadRoutes} from "./shared_road_routes";
+import {detectServiceCity} from "./pricing";
 
 initializeApp();
 setGlobalOptions({
   region: "europe-west1",
-  maxInstances: 20,
+  maxInstances: 5,
   memory: "256MiB",
   timeoutSeconds: 30,
 });
 
-const core = new TajGoAuthoritativeCore(getFirestore());
+const roadRoutes = process.env.FUNCTIONS_EMULATOR === "true" ? async () => null : createSharedRoadRoutes(getFirestore());
+const core = new TajGoAuthoritativeCore(getFirestore(), undefined, undefined, undefined, roadRoutes);
 
 type Handler = (context: {
   principal: Principal;
@@ -31,6 +34,7 @@ function command(name: string, handler: Handler) {
       enforceAppCheck: false,
       consumeAppCheckToken: false,
       cors: true,
+      concurrency: 8,
     },
     async (request: CallableRequest<unknown>) => {
       if (request.auth == null) {
@@ -151,6 +155,21 @@ export const getDeliveryQuote = command(
   "getDeliveryQuote",
   (context) => core.getDeliveryQuote(context),
 );
+export const getRoadRoute = command("getRoadRoute", async ({data}) => {
+// Route geometry and participant contacts are returned only to authenticated clients.
+  assertOnlyKeys(data, new Set(["pickup", "dropoff", "transportMode"]));
+  const pickup = parseCoordinate(data.pickup, "pickup");
+  const dropoff = parseCoordinate(data.dropoff, "dropoff");
+  const cityId = detectServiceCity(pickup);
+  if (!cityId || detectServiceCity(dropoff) !== cityId) throw new CoreError("failed-precondition", "Выберите точки в одной зоне доставки.");
+  const mode = data.transportMode;
+  if (mode !== "bicycle" && mode !== "scooter" && mode !== "driving") throw new CoreError("invalid-argument", "Проверьте тип транспорта.");
+  const route = await roadRoutes({pickup, dropoff, cityId, transportMode: mode});
+  if (!route) throw new CoreError("aborted", "Дорожный маршрут временно недоступен. Повторите попытку.");
+  return {...route};
+});
+
+export const getOrderContact = command("getOrderContact", context => core.getOrderContact(context));
 
 export const adminApproveCourier = command(
   "adminApproveCourier",
@@ -257,5 +276,5 @@ export const adminMigrateLegacyDeliveryCode = command(
   (context) => core.adminMigrateLegacyDeliveryCode(context),
 );
 
-// FCM Firestore triggers (privacy-safe payloads). Inactive until owner deploy.
-export {onOrderStatusChanged, onOfferCreated} from "./notifications";
+// Notification triggers live in the separate notifications codebase. Keeping
+// one sender prevents duplicate delivery and avoids the old per-user token path.

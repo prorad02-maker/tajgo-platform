@@ -13,6 +13,7 @@ class TajGoRouteSummaryCard extends StatelessWidget {
     this.compact = false,
     this.directBaselineMeters,
     this.pointsTooClose = false,
+    this.onRetry,
   });
 
   final TajGoRoute? route;
@@ -21,6 +22,7 @@ class TajGoRouteSummaryCard extends StatelessWidget {
   final bool compact;
   final double? directBaselineMeters;
   final bool pointsTooClose;
+  final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -81,6 +83,8 @@ class TajGoRouteSummaryCard extends StatelessWidget {
               onPressed: onShowEntireRoute,
               child: const Text('Показать весь'),
             ),
+          if (value == null && !loading && onRetry != null)
+            TextButton(onPressed: onRetry, child: const Text('Повторить')),
         ],
       ),
     );

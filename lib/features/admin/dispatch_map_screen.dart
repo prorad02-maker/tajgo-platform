@@ -1,3 +1,4 @@
+import '../../shared/widgets/tajgo_map_attribution.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -9,6 +10,7 @@ import '../../core/models/tajgo_order.dart';
 import '../../shared/widgets/tajgo_scope.dart';
 import '../map/services/tajgo_map_camera.dart';
 import '../map/widgets/tajgo_location_widgets.dart';
+import '../map/widgets/tajgo_road_route_layer.dart';
 import 'admin_couriers_screen.dart';
 import 'admin_order_details_screen.dart';
 import 'admin_orders_screen.dart';
@@ -168,33 +170,9 @@ class _DispatchMapScreenState extends State<DispatchMapScreen> {
                 });
               }
             }
-            final routeLines = <Polyline>[];
             final selectedOrder = _selected is TajGoOrder
                 ? _selected as TajGoOrder
                 : null;
-            for (final order in <TajGoOrder>[?selectedOrder]) {
-              if (order.fromLocation == null || order.toLocation == null) {
-                continue;
-              }
-              final route = TajGoScope.of(context).routeService.directRoute(
-                from: LatLng(
-                  order.fromLocation!.latitude,
-                  order.fromLocation!.longitude,
-                ),
-                to: LatLng(
-                  order.toLocation!.latitude,
-                  order.toLocation!.longitude,
-                ),
-              );
-              routeLines.add(
-                Polyline(
-                  points: route.polylinePoints,
-                  color: TajGoColors.warning.withValues(alpha: 0.7),
-                  strokeWidth: 3,
-                  pattern: StrokePattern.dashed(segments: const [8, 8]),
-                ),
-              );
-            }
             return Stack(
               children: [
                 FlutterMap(
@@ -209,7 +187,19 @@ class _DispatchMapScreenState extends State<DispatchMapScreen> {
                       userAgentPackageName:
                           MapProviderConfig.current.userAgentPackageName,
                     ),
-                    PolylineLayer(polylines: routeLines),
+                    if (selectedOrder?.fromLocation != null &&
+                        selectedOrder?.toLocation != null)
+                      TajGoRoadRouteLayer(
+                        statusBottomPadding: 180,
+                        from: LatLng(
+                          selectedOrder!.fromLocation!.latitude,
+                          selectedOrder.fromLocation!.longitude,
+                        ),
+                        to: LatLng(
+                          selectedOrder.toLocation!.latitude,
+                          selectedOrder.toLocation!.longitude,
+                        ),
+                      ),
                     MarkerLayer(
                       markers: [
                         ...visibleCouriers.map(
@@ -292,13 +282,7 @@ class _DispatchMapScreenState extends State<DispatchMapScreen> {
                           ),
                       ],
                     ),
-                    RichAttributionWidget(
-                      attributions: const [
-                        TextSourceAttribution(
-                          MapProviderConfig.attributionText,
-                        ),
-                      ],
-                    ),
+                    const TajGoMapAttribution(),
                   ],
                 ),
                 SafeArea(

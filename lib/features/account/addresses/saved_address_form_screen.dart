@@ -74,7 +74,9 @@ class _SavedAddressFormScreenState extends State<SavedAddressFormScreen> {
       MaterialPageRoute<LatLng>(
         builder: (_) => MapPointPickerScreen(
           title: 'Точка адреса',
-          initial: _geo == null ? null : LatLng(_geo!.latitude, _geo!.longitude),
+          initial: _geo == null
+              ? null
+              : LatLng(_geo!.latitude, _geo!.longitude),
         ),
       ),
     );

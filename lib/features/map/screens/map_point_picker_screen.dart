@@ -1,3 +1,4 @@
+import '../../../shared/widgets/tajgo_map_attribution.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -75,11 +76,7 @@ class _MapPointPickerScreenState extends State<MapPointPickerScreen> {
                     MapProviderConfig.current.userAgentPackageName,
                 maxZoom: 19,
               ),
-              RichAttributionWidget(
-                attributions: const [
-                  TextSourceAttribution(MapProviderConfig.attributionText),
-                ],
-              ),
+              const TajGoMapAttribution(),
             ],
           ),
           // Центр-маркер: точка = центр карты.

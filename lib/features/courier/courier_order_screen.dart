@@ -1,9 +1,11 @@
+import '../../shared/widgets/tajgo_map_attribution.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/constants/tajgo_colors.dart';
 import '../../core/config/map_provider_config.dart';
@@ -267,12 +269,27 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
   }) async {
     if (_routeLoading || !mounted) return;
     setState(() => _routeLoading = true);
-    final route = await TajGoScope.of(context).routeService.buildRoute(
-      from: from,
-      to: target,
-      mode: RouteMode.bicycle,
-      forceRefresh: force,
-    );
+    late TajGoRoute route;
+    try {
+      route = await TajGoScope.of(context).routeService.buildRoute(
+        from: from,
+        to: target,
+        mode: RouteMode.bicycle,
+        forceRefresh: force,
+      );
+    } catch (_) {
+      if (mounted && _activeTarget == target) {
+        setState(() {
+          _navigationRoute = null;
+          _routeProgress = null;
+          _routeLoading = false;
+          _lastRouteAt = DateTime.now();
+        });
+      } else if (mounted) {
+        setState(() => _routeLoading = false);
+      }
+      return;
+    }
     if (!mounted) return;
     if (_activeTarget != target) {
       setState(() => _routeLoading = false);
@@ -365,10 +382,6 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
     }
     return pricing.haversineDistanceKm(_position!, target);
   }
-
-  int? _etaMinutes(double? distanceKm) => distanceKm == null
-      ? null
-      : pricing.courierNavigationEtaMinutes(distanceKm);
 
   Future<void> _openNavigator(LatLng target) async {
     final service = TajGoScope.of(context).externalNavigatorService;
@@ -546,8 +559,7 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
           final progress = _routeProgress;
           final navigationDistance =
               progress?.remainingDistanceKm ?? targetDistance;
-          final etaMinutes =
-              progress?.remainingEtaMinutes ?? _etaMinutes(targetDistance);
+          final etaMinutes = progress?.remainingEtaMinutes;
           final isNearTarget = targetDistance != null && targetDistance <= 0.12;
           final navigationTarget = order.status == OrderStatus.pickedUp
               ? NavigationTarget.dropoff
@@ -615,17 +627,6 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
                                         segments: const [8, 8],
                                       ),
                               ),
-                            if (_navigationRoute == null &&
-                                _position != null &&
-                                target != null)
-                              Polyline(
-                                points: [_position!, target],
-                                color: TajGoColors.muted,
-                                strokeWidth: 3,
-                                pattern: StrokePattern.dashed(
-                                  segments: const [8, 8],
-                                ),
-                              ),
                           ],
                         ),
                         MarkerLayer(
@@ -678,13 +679,7 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
                               ),
                           ],
                         ),
-                        RichAttributionWidget(
-                          attributions: const [
-                            TextSourceAttribution(
-                              MapProviderConfig.attributionText,
-                            ),
-                          ],
-                        ),
+                        const TajGoMapAttribution(),
                       ],
                     ),
                     SafeArea(
@@ -752,11 +747,17 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
                 onNavigate: target == null
                     ? null
                     : () => _openNavigator(target),
-                onClient: () => ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Звонки появятся с телефонной авторизацией'),
-                  ),
-                ),
+                onClient: () => _run(() async {
+                  final phone = await TajGoScope.of(
+                    context,
+                  ).orderRepository.orderContact(order.id);
+                  if (!mounted) return;
+                  if (!await launchUrl(Uri(scheme: 'tel', path: phone))) {
+                    throw StateError(
+                      'Не удалось открыть приложение для звонков.',
+                    );
+                  }
+                }),
                 onPrimary: () {
                   if (order.status == OrderStatus.accepted &&
                       order.arrivedAtPickupAt == null) {

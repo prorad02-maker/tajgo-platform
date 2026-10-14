@@ -39,19 +39,21 @@ class _SavedAddressesScreenState extends State<SavedAddressesScreen> {
         });
       }
     });
-    _sub = scope.savedAddressRepository.addressesStream(uid).listen(
-      (list) {
-        if (mounted) {
-          setState(() {
-            _addresses = list;
-            _loaded = true;
-          });
-        }
-      },
-      onError: (_) {
-        if (mounted) setState(() => _loaded = true);
-      },
-    );
+    _sub = scope.savedAddressRepository
+        .addressesStream(uid)
+        .listen(
+          (list) {
+            if (mounted) {
+              setState(() {
+                _addresses = list;
+                _loaded = true;
+              });
+            }
+          },
+          onError: (_) {
+            if (mounted) setState(() => _loaded = true);
+          },
+        );
   }
 
   @override
@@ -102,14 +104,12 @@ class _SavedAddressesScreenState extends State<SavedAddressesScreen> {
           ? const TajGoEmptyState(
               icon: Icons.location_off_outlined,
               title: 'Нет сохранённых адресов',
-              message: 'Добавьте Дом, Работу или другой адрес для быстрой '
+              message:
+                  'Добавьте Дом, Работу или другой адрес для быстрой '
                   'доставки.',
             )
           : ListView(
-              padding: const EdgeInsets.only(
-                top: TajGoSpacing.sm,
-                bottom: 96,
-              ),
+              padding: const EdgeInsets.only(top: TajGoSpacing.sm, bottom: 96),
               children: _addresses
                   .map(
                     (a) => TajGoCard(

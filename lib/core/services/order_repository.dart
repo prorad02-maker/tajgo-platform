@@ -1,7 +1,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:latlong2/latlong.dart';
+import '../../features/map/models/tajgo_route.dart';
 
 import '../models/tajgo_order.dart';
 import 'authoritative_command_service.dart';
+import '../../features/map/models/tajgo_map_location.dart';
 
 class ServerDeliveryQuote {
   const ServerDeliveryQuote({
@@ -13,6 +16,10 @@ class ServerDeliveryQuote {
     this.confidence,
     this.source,
     this.reason,
+    this.distanceMeters,
+    this.durationSeconds,
+    this.routeSource,
+    this.geometry = const [],
   });
 
   final String status;
@@ -23,6 +30,69 @@ class ServerDeliveryQuote {
   final String? confidence;
   final String? source;
   final String? reason;
+  final double? distanceMeters, durationSeconds;
+  final String? routeSource;
+  final List<GeoPoint> geometry;
+  TajGoRoute? roadRoute(GeoPoint pickup, GeoPoint dropoff) {
+    final distance = distanceMeters, duration = durationSeconds;
+    if (geometry.length < 2 ||
+        distance == null ||
+        duration == null ||
+        !distance.isFinite ||
+        !duration.isFinite ||
+        distance <= 0 ||
+        duration <= 0) {
+      return null;
+    }
+    final points = geometry
+        .map((point) => LatLng(point.latitude, point.longitude))
+        .toList(growable: false);
+    const measure = Distance();
+    if (measure.as(
+              LengthUnit.Meter,
+              points.first,
+              LatLng(pickup.latitude, pickup.longitude),
+            ) >
+            500 ||
+        measure.as(
+              LengthUnit.Meter,
+              points.last,
+              LatLng(dropoff.latitude, dropoff.longitude),
+            ) >
+            500) {
+      return null;
+    }
+    return TajGoRoute(
+      points: points,
+      distanceKm: distance / 1000,
+      etaMinutes: (duration / 60).ceil(),
+      isRoadRouteApproximation: false,
+      providerName: routeSource ?? 'server-road',
+      routeQuality: RouteQuality.road,
+      createdAt: DateTime.now(),
+    );
+  }
+
+  static List<GeoPoint> parseGeometry(Object? value) {
+    if (value is! List || value.length < 2 || value.length > 4096) {
+      return const [];
+    }
+    final points = <GeoPoint>[];
+    for (final point in value) {
+      if (point is! Map ||
+          point['latitude'] is! num ||
+          point['longitude'] is! num) {
+        return const [];
+      }
+      final lat = (point['latitude'] as num).toDouble(),
+          lon = (point['longitude'] as num).toDouble();
+      if (!lat.isFinite || !lon.isFinite || lat.abs() > 90 || lon.abs() > 180) {
+        return const [];
+      }
+      points.add(GeoPoint(lat, lon));
+    }
+    return points;
+  }
 
   bool get ready =>
       status == 'ready' &&
@@ -36,6 +106,16 @@ class OrderRepository {
   OrderRepository(this._db, this._commands);
   final FirebaseFirestore _db;
   final AuthoritativeCommandService _commands;
+  Future<String> orderContact(String orderId) async {
+    final result = await _commands.call('getOrderContact', {
+      'orderId': orderId,
+    });
+    final phone = result['phoneNumber'];
+    if (phone is! String || !RegExp(r'^\+[1-9]\d{7,14}$').hasMatch(phone)) {
+      throw StateError('Номер получателя недоступен. Обратитесь в поддержку.');
+    }
+    return phone;
+  }
 
   Future<ServerDeliveryQuote> requestDeliveryQuote({
     required GeoPoint pickup,
@@ -60,6 +140,10 @@ class OrderRepository {
       confidence: result['confidence'] as String?,
       source: result['source'] as String?,
       reason: result['reason'] as String?,
+      distanceMeters: (result['distanceMeters'] as num?)?.toDouble(),
+      durationSeconds: (result['durationSeconds'] as num?)?.toDouble(),
+      routeSource: result['routeSource'] as String?,
+      geometry: ServerDeliveryQuote.parseGeometry(result['geometry']),
     );
   }
 
@@ -76,6 +160,8 @@ class OrderRepository {
     bool priceNegotiable = true,
     GeoPoint? fromLocation,
     GeoPoint? toLocation,
+    TajGoMapLocation? pickup,
+    TajGoMapLocation? dropoff,
     num? distanceKm,
     int? etaMinutes,
     String? comment,
@@ -89,6 +175,12 @@ class OrderRepository {
     if (orderType != 'customDelivery') {
       throw ArgumentError.value(orderType, 'orderType');
     }
+    pickup?.validate();
+    dropoff?.validate();
+    fromLocation = pickup?.toGeoPoint() ?? fromLocation;
+    toLocation = dropoff?.toGeoPoint() ?? toLocation;
+    fromText = pickup?.address.trim() ?? fromText.trim();
+    toText = dropoff?.address.trim() ?? toText.trim();
     if (fromLocation == null || toLocation == null) {
       throw StateError('Укажите точки A и B на карте.');
     }
@@ -129,19 +221,26 @@ class OrderRepository {
   Stream<TajGoOrder?> activeOrderStream(String customerId) => _db
       .collection('orders')
       .where('customerId', isEqualTo: customerId)
-      .orderBy('createdAt', descending: true)
-      .limit(5)
+      .where(
+        'status',
+        whereIn: const [
+          'draft',
+          'waiting',
+          'waitingOffers',
+          'courierSelected',
+          'accepted',
+          'arrivedPickup',
+          'pickedUp',
+          'arrivedDropoff',
+          'delivered',
+          'disputed',
+        ],
+      )
       .snapshots()
       .map((snapshot) {
         final orders = snapshot.docs.map(TajGoOrder.fromDoc).toList();
         for (final order in orders) {
-          if ({
-            OrderStatus.waiting,
-            OrderStatus.accepted,
-            OrderStatus.pickedUp,
-            OrderStatus.delivered,
-            OrderStatus.disputed,
-          }.contains(order.status)) {
+          if (order.isActive) {
             return order;
           }
         }
@@ -152,20 +251,23 @@ class OrderRepository {
     final snapshot = await _db
         .collection('orders')
         .where('customerId', isEqualTo: customerId)
-        .orderBy('createdAt', descending: true)
-        .limit(5)
+        .where(
+          'status',
+          whereIn: const [
+            'draft',
+            'waiting',
+            'waitingOffers',
+            'courierSelected',
+            'accepted',
+            'arrivedPickup',
+            'pickedUp',
+            'arrivedDropoff',
+            'delivered',
+            'disputed',
+          ],
+        )
         .get();
-    return snapshot.docs
-        .map(TajGoOrder.fromDoc)
-        .any(
-          (order) => const {
-            OrderStatus.waiting,
-            OrderStatus.accepted,
-            OrderStatus.pickedUp,
-            OrderStatus.delivered,
-            OrderStatus.disputed,
-          }.contains(order.status),
-        );
+    return snapshot.docs.map(TajGoOrder.fromDoc).any((order) => order.isActive);
   }
 
   /// Один заказ по id — для экрана отслеживания.
@@ -175,11 +277,18 @@ class OrderRepository {
       .snapshots()
       .map((doc) => doc.exists ? TajGoOrder.fromDoc(doc) : null);
 
-  Stream<String?> customerDeliveryCodeStream(String orderId) => _db
-      .collection('order_customer_codes')
+  Stream<String?> customerDeliveryCodeStream(
+    String orderId, {
+    bool serverV1 = false,
+  }) => _db
+      .collection(serverV1 ? 'order_receipts' : 'order_customer_codes')
       .doc(orderId)
       .snapshots()
-      .map((doc) => doc.data()?['code'] as String?);
+      .map(
+        (doc) => doc.data()?[serverV1 ? 'confirmationCode' : 'code'] as String?,
+      );
+  Stream<List<TajGoOrder>> historyStream(String customerId) =>
+      customerOrdersStream(customerId, limit: 100);
 
   /// Последние завершённые заказы клиента для секции «Мои заказы».
   /// Тот же запрос, что у activeOrderStream, — составной индекс не нужен.

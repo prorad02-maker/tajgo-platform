@@ -23,18 +23,38 @@
     }
   },
   "firestore": {
-    "rules": "firestore.rules",
+    "rules": "firestore.compat.rules",
     "indexes": "firestore.indexes.json"
   },
-  "functions": {
-    "source": "functions",
-    "runtime": "nodejs22",
-    "predeploy": [
-      "npm --prefix \"$RESOURCE_DIR\" run lint",
-      "npm --prefix \"$RESOURCE_DIR\" run build",
-      "npm --prefix \"$RESOURCE_DIR\" test"
-    ]
-  },
+  "functions": [
+    {
+      "source": "functions",
+      "runtime": "nodejs22",
+      "predeploy": [
+        "npm --prefix \"$RESOURCE_DIR\" run lint",
+        "npm --prefix \"$RESOURCE_DIR\" run build",
+        "npm --prefix \"$RESOURCE_DIR\" test"
+      ]
+    },
+    {
+      "source": "notification-functions",
+      "codebase": "notifications",
+      "runtime": "nodejs22",
+      "predeploy": [
+        "node --check \"$RESOURCE_DIR/index.js\"",
+        "node --check \"$RESOURCE_DIR/notifications.js\""
+      ]
+    },
+    {
+      "source": "legacy-order-functions",
+      "codebase": "order-commands",
+      "runtime": "nodejs22",
+      "predeploy": [
+        "node --check \"$RESOURCE_DIR/index.js\"",
+        "node --check \"$RESOURCE_DIR/order_commands.js\""
+      ]
+    }
+  ],
   "hosting": {
     "public": "public",
     "cleanUrls": true,
@@ -43,14 +63,22 @@
       "node scripts/version_website_assets.mjs",
       "node scripts/check_website.mjs"
     ],
-    "headers": [{
-      "regex": "^/([^.]*|.*\\.(html|css|js))$",
-      "headers": [{
-        "key": "Cache-Control",
-        "value": "no-cache, max-age=0, must-revalidate"
-      }]
-    }],
-    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"]
+    "headers": [
+      {
+        "regex": "^/([^.]*|.*\\.(html|css|js))$",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache, max-age=0, must-revalidate"
+          }
+        ]
+      }
+    ],
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ]
   },
   "emulators": {
     "auth": {

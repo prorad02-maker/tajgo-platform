@@ -1,3 +1,4 @@
+import '../../shared/widgets/tajgo_map_attribution.dart';
 import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -558,11 +559,7 @@ class _MarketplaceDeliveryPointScreenState
                     ),
                 ],
               ),
-              RichAttributionWidget(
-                attributions: const [
-                  TextSourceAttribution(MapProviderConfig.attributionText),
-                ],
-              ),
+              const TajGoMapAttribution(),
             ],
           ),
         ),

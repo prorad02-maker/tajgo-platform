@@ -71,6 +71,7 @@ export interface AuthoritativeRouteResult {
   durationSeconds: number;
   provider: string;
   transportMode: DeliveryTransportMode;
+  geometry?: {latitude: number; longitude: number}[];
 }
 
 export type AuthoritativeRouteResolver = (
@@ -211,6 +212,7 @@ export class TajGoAuthoritativeCore {
       distanceMeters: route.distanceMeters,
       durationSeconds: route.durationSeconds,
       routeProvider: route.provider,
+      ...(route.geometry ? {geometry: route.geometry} : {}),
       authoritative: true,
       ...quote,
       issuedAt: Timestamp.fromDate(issuedAt),
@@ -226,6 +228,7 @@ export class TajGoAuthoritativeCore {
       distanceMeters: route.distanceMeters,
       durationSeconds: route.durationSeconds,
       routeSource: route.provider,
+      ...(route.geometry ? {geometry: route.geometry} : {}),
       ...quote,
     };
   }
@@ -603,6 +606,26 @@ export class TajGoAuthoritativeCore {
     );
   }
 
+  async getOrderContact({principal, data}: CommandContext): Promise<Result> {
+    assertOnlyKeys(data, new Set(["orderId"]));
+    const orderId = requiredString(data, "orderId", {max: 128});
+    return this.db.runTransaction(async transaction => {
+      const order = (await transaction.get(this.db.collection("orders").doc(orderId))).data();
+      if (!order || !["accepted", "courierSelected", "arrivedPickup", "pickedUp", "arrivedDropoff", "delivered", "disputed"].includes(String(order.status)) || order.completedAt != null) {
+        throw new CoreError("failed-precondition", "Контакт доступен только во время доставки.");
+      }
+      const assigned = order.courierId ?? order.selectedCourierId;
+      const target = principal.uid === order.customerId ? assigned : principal.uid === assigned ? order.customerId : null;
+      if (typeof target !== "string" || !target || target.includes("/")) throw new CoreError("permission-denied", "Нет доступа к контакту этого заказа.");
+      const user = (await transaction.get(this.db.collection("users").doc(target))).data();
+      const phoneNumber = user?.phoneNumber;
+      if (user?.phoneVerified !== true || typeof phoneNumber !== "string" || !/^\+[1-9]\d{7,14}$/.test(phoneNumber)) {
+        throw new CoreError("not-found", "Номер получателя недоступен. Обратитесь в поддержку.");
+      }
+      return {phoneNumber};
+    });
+  }
+
   async createCustomDeliveryOrder(
     context: CommandContext,
   ): Promise<Result> {
@@ -733,6 +756,8 @@ export class TajGoAuthoritativeCore {
           toText,
           fromLocation: toGeoPoint(from),
           toLocation: toGeoPoint(to),
+          pickup: {...from, address: fromText},
+          dropoff: {...to, address: toText},
           distanceKm: Number(distanceKm.toFixed(2)),
           etaMinutes,
           price: suggestedPrice,
@@ -747,6 +772,7 @@ export class TajGoAuthoritativeCore {
           quoteId,
           quoteInputFingerprint: quote.inputFingerprint,
           routeProvider: quote.routeProvider,
+          ...(Array.isArray(quote.geometry) ? {routeGeometry: quote.geometry} : {}),
           routeMode: quote.transportMode,
           currency: "TJS",
           codeAvailable: true,
@@ -1271,6 +1297,7 @@ export class TajGoAuthoritativeCore {
             orderRef,
             courierRef,
             order,
+            courierDoc.data()!,
             "customer",
           );
           return {orderId, status: "completed"};
@@ -1372,7 +1399,14 @@ export class TajGoAuthoritativeCore {
         ]);
         const order = orderDoc.data();
         const courier = courierDoc.data();
-        const secret = secretDoc.data();
+        let secret = secretDoc.data();
+        // Pre-server mobile orders retain their original visible code until
+        // settlement so old clients keep working during the staged rollout.
+        // Attempt counters remain private and transactional in the new client.
+        if (secret == null && order != null && Number(order.schemaVersion ?? 0) < 8 &&
+            order.commandVersion !== "server-v1" && typeof order.confirmationCode === "string" && /^\d{4}$/.test(order.confirmationCode)) {
+          secret = {...hashDeliveryCode(order.confirmationCode), failedAttempts: 0, locked: false};
+        }
         if (order == null || courier == null || secret == null) {
           throw new CoreError(
             "not-found",
@@ -1416,11 +1450,13 @@ export class TajGoAuthoritativeCore {
         });
         if (!valid) {
           const nextAttempts = attempts + 1;
-          transaction.update(secretRef, {
+          transaction.set(secretRef, {
+            salt: secret.salt,
+            hash: secret.hash,
             failedAttempts: nextAttempts,
             locked: nextAttempts >= MAX_CODE_ATTEMPTS,
             lastFailedAt: FieldValue.serverTimestamp(),
-          });
+          }, {merge: true});
           transaction.create(this.db.collection("admin_logs").doc(), {
             action: "deliveryCodeRejected",
             actorId: principal.uid,
@@ -1439,6 +1475,7 @@ export class TajGoAuthoritativeCore {
           orderRef,
           courierRef,
           order,
+          courier,
           "code",
         );
         transaction.create(this.db.collection("admin_logs").doc(), {
@@ -1665,6 +1702,8 @@ export class TajGoAuthoritativeCore {
           toText: deliveryAddress,
           fromLocation: toGeoPoint(pickup),
           toLocation: toGeoPoint(delivery),
+          pickup: {...pickup, address: partner.address ?? "Худжанд"},
+          dropoff: {...delivery, address: deliveryAddress},
           partnerId,
           partnerName: partner.name ?? "Партнёр TajGo",
           partnerSnapshot: {
@@ -2011,7 +2050,10 @@ export class TajGoAuthoritativeCore {
           courierId == null
             ? null
             : this.db.collection("couriers").doc(courierId);
-        if (courierRef != null) await transaction.get(courierRef);
+        const cancelCourier = courierRef == null ? null : (await transaction.get(courierRef)).data();
+        if (order.completedAt != null) {
+          throw new CoreError("failed-precondition", "Завершённую доставку нельзя вернуть или отменить.");
+        }
         for (const offer of pendingOffers.docs) {
           transaction.update(offer.ref, {
             status: "rejected",
@@ -2028,7 +2070,7 @@ export class TajGoAuthoritativeCore {
           updatedAt: FieldValue.serverTimestamp(),
         });
         this.deleteDeliverySecret(transaction, orderId);
-        if (courierRef != null) {
+        if (courierRef != null && cancelCourier?.activeOrderId === orderId) {
           transaction.update(courierRef, {
             activeOrderId: null,
             currentOrderId: null,
@@ -2177,7 +2219,10 @@ export class TajGoAuthoritativeCore {
           courierId == null
             ? null
             : this.db.collection("couriers").doc(courierId);
-        if (courierRef != null) await transaction.get(courierRef);
+        const courier = courierRef == null ? null : (await transaction.get(courierRef)).data();
+        if (order.completedAt != null && resolution !== "complete") {
+          throw new CoreError("failed-precondition", "Завершённую доставку нельзя вернуть или отменить.");
+        }
         if (resolution === "markDisputed") {
           transaction.update(orderRef, {
             status: "disputed",
@@ -2194,6 +2239,7 @@ export class TajGoAuthoritativeCore {
             orderRef,
             courierRef,
             order,
+            courier ?? {},
             "admin",
             principal.uid,
           );
@@ -2207,7 +2253,7 @@ export class TajGoAuthoritativeCore {
             updatedAt: FieldValue.serverTimestamp(),
           });
           this.deleteDeliverySecret(transaction, orderId);
-          if (courierRef != null) {
+          if (courierRef != null && courier?.activeOrderId === orderId) {
             transaction.update(courierRef, {
               activeOrderId: null,
               currentOrderId: null,
@@ -2234,7 +2280,7 @@ export class TajGoAuthoritativeCore {
             offersCount: 0,
             updatedAt: FieldValue.serverTimestamp(),
           });
-          if (courierRef != null) {
+          if (courierRef != null && courier?.activeOrderId === orderId) {
             transaction.update(courierRef, {
               activeOrderId: null,
               currentOrderId: null,
@@ -3277,9 +3323,19 @@ export class TajGoAuthoritativeCore {
     orderRef: DocumentReference,
     courierRef: DocumentReference,
     order: Data,
+    courier: Data,
     method: "code" | "customer" | "admin",
     adminId?: string,
   ): void {
+    if (order.completedAt != null) {
+      if (method !== "admin") throw new CoreError("failed-precondition", "Эта доставка уже завершена.");
+      transaction.update(orderRef, {status: "completed", resolvedBy: adminId,
+        resolvedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp()});
+      return;
+    }
+    if (courier.activeOrderId !== orderRef.id || courier.isBusy !== true) {
+      throw new CoreError("failed-precondition", "Назначение курьера изменилось. Обновите заказ.");
+    }
     const earning = Number(order.finalPrice ?? order.price ?? 0);
     transaction.update(orderRef, {
       status: "completed",

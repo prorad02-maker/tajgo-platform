@@ -22,17 +22,9 @@ class CustomerOrdersTab extends StatefulWidget {
 class _CustomerOrdersTabState extends State<CustomerOrdersTab> {
   _OrdersFilter _filter = _OrdersFilter.all;
 
-  static const _active = {
-    OrderStatus.waiting,
-    OrderStatus.accepted,
-    OrderStatus.pickedUp,
-    OrderStatus.delivered,
-    OrderStatus.disputed,
-  };
-
   bool _matches(TajGoOrder order) => switch (_filter) {
     _OrdersFilter.all => true,
-    _OrdersFilter.active => _active.contains(order.status),
+    _OrdersFilter.active => order.isActive,
     _OrdersFilter.completed => order.status == OrderStatus.completed,
     _OrdersFilter.cancelled => order.status == OrderStatus.cancelled,
   };
@@ -66,11 +58,9 @@ class _CustomerOrdersTabState extends State<CustomerOrdersTab> {
                 }
                 final all = snapshot.data!;
                 final active = all
-                    .where((o) => _active.contains(o.status))
+                    .where((o) => o.isActive)
                     .toList(growable: false);
-                final filtered = all
-                    .where(_matches)
-                    .toList(growable: false);
+                final filtered = all.where(_matches).toList(growable: false);
                 if (filtered.isEmpty) {
                   return TajGoEmptyState(
                     icon: Icons.receipt_long_outlined,
@@ -97,7 +87,7 @@ class _CustomerOrdersTabState extends State<CustomerOrdersTab> {
                       ),
                       const TajGoSectionHeader(title: 'История'),
                       ...filtered
-                          .where((o) => !_active.contains(o.status))
+                          .where((o) => !o.isActive)
                           .map((o) => TajGoOrderHistoryTile(order: o)),
                     ] else
                       ...filtered.map((o) => TajGoOrderHistoryTile(order: o)),
@@ -125,17 +115,19 @@ class _CustomerOrdersTabState extends State<CustomerOrdersTab> {
         vertical: TajGoSpacing.sm,
       ),
       child: Row(
-        children: _OrdersFilter.values.map((f) {
-          return Padding(
-            padding: const EdgeInsets.only(right: TajGoSpacing.sm),
-            child: ChoiceChip(
-              label: Text(labels[f]!),
-              selected: f == _filter,
-              onSelected: (_) => setState(() => _filter = f),
-              selectedColor: TajGoColors.mint,
-            ),
-          );
-        }).toList(growable: false),
+        children: _OrdersFilter.values
+            .map((f) {
+              return Padding(
+                padding: const EdgeInsets.only(right: TajGoSpacing.sm),
+                child: ChoiceChip(
+                  label: Text(labels[f]!),
+                  selected: f == _filter,
+                  onSelected: (_) => setState(() => _filter = f),
+                  selectedColor: TajGoColors.mint,
+                ),
+              );
+            })
+            .toList(growable: false),
       ),
     );
   }

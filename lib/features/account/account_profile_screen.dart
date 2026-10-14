@@ -17,6 +17,7 @@ import '../startup/intent_selection_screen.dart';
 import 'addresses/saved_addresses_screen.dart';
 import 'security_data_screen.dart';
 import 'settings_screen.dart';
+import 'order_history_screen.dart';
 
 class CustomerProfileScreen extends StatelessWidget {
   const CustomerProfileScreen({super.key});
@@ -95,7 +96,13 @@ class AccountProfileScreen extends StatelessWidget {
               _Tile(
                 icon: Icons.history_rounded,
                 title: 'История заказов',
-                onTap: () => _soon(context),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) =>
+                        OrderHistoryScreen(currentMode: currentMode),
+                  ),
+                ),
               ),
               _Tile(
                 icon: Icons.favorite_rounded,
@@ -156,8 +163,9 @@ class AccountProfileScreen extends StatelessWidget {
                 onTap: () => Navigator.push(
                   context,
                   MaterialPageRoute<void>(
-                    builder: (_) =>
-                        const LegalDocumentScreen(document: LegalDocuments.privacy),
+                    builder: (_) => const LegalDocumentScreen(
+                      document: LegalDocuments.privacy,
+                    ),
                   ),
                 ),
               ),
@@ -167,8 +175,9 @@ class AccountProfileScreen extends StatelessWidget {
                 onTap: () => Navigator.push(
                   context,
                   MaterialPageRoute<void>(
-                    builder: (_) =>
-                        const LegalDocumentScreen(document: LegalDocuments.terms),
+                    builder: (_) => const LegalDocumentScreen(
+                      document: LegalDocuments.terms,
+                    ),
                   ),
                 ),
               ),
@@ -314,7 +323,7 @@ class AccountProfileScreen extends StatelessWidget {
     final uid = scope.authService.currentUser?.uid;
     if (uid != null) {
       try {
-        await scope.pushNotificationService.disableForUser(uid);
+        await scope.notificationService.beforeSignOut();
       } catch (_) {}
     }
     if (currentMode == AppUserRole.courier && uid != null) {
@@ -337,12 +346,6 @@ class AccountProfileScreen extends StatelessWidget {
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute<void>(builder: (_) => screen),
       (_) => false,
-    );
-  }
-
-  void _soon(BuildContext context) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Раздел готовится к пилоту TajGo.')),
     );
   }
 }

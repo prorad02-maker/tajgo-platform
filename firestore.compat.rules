@@ -1,0 +1,1037 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function serverCommandsRequired() {
+      return exists(/databases/$(database)/documents/_config/order_commands)
+        && get(/databases/$(database)/documents/_config/order_commands).data
+          .get('enabled', false) == true;
+    }
+
+    function legacyOrder(data) {
+      return data.get('commandVersion', 'legacy') != 'server-v1'
+        && data.get('schemaVersion', 0) < 8;
+    }
+
+    match /order_receipts/{orderId} {
+      allow get: if signedIn() && resource.data.customerId == request.auth.uid;
+      allow list, write: if false;
+    }
+    match /_order_secrets/{orderId} { allow read, write: if false; }
+    match /_order_commands/{commandId} { allow read, write: if false; }
+    match /_customer_orders/{uid} { allow read, write: if false; }
+    match /_config/{configId} { allow read, write: if false; }
+    match /_notification_tokens/{deviceId} { allow read, write: if false; }
+    match /_notification_events/{eventId} { allow read, write: if false; }
+    match /_notification_accounts/{uid} { allow read, write: if false; }
+
+    // Transition policy: preserve old clients while schemaVersion 8 orders and
+    // canonical command state are protected from every direct mobile write.
+    match /order_customer_codes/{orderId} {
+      allow get: if signedIn() && resource.data.customerId == request.auth.uid;
+      allow list, write: if false;
+    }
+    match /order_secrets/{orderId} { allow read, write: if false; }
+    match /delivery_quotes/{quoteId} { allow read, write: if false; }
+    match /command_results/{commandId} { allow read, write: if false; }
+    match /account_deletion_requests/{uid} {
+      allow get: if owns(uid) || isAdmin();
+      allow list: if isAdmin();
+      allow write: if false;
+    }
+    match /merchant_applications/{uid} {
+      allow get: if owns(uid) || isAdmin();
+      allow list: if isAdmin();
+      allow write: if false;
+    }
+    match /users/{uid}/addresses/{addressId} {
+      allow read, write: if owns(uid);
+    }
+    function owns(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function isCourier() {
+      return signedIn() && approvedCourier(request.auth.uid);
+    }
+
+    function approvedCourier(uid) {
+      return exists(/databases/$(database)/documents/couriers/$(uid))
+        && exists(/databases/$(database)/documents/users/$(uid))
+        && get(/databases/$(database)/documents/users/$(uid)).data
+          .get('courierStatus', 'none') == 'approved'
+        && get(/databases/$(database)/documents/users/$(uid)).data
+          .get('courierOnboardingCompleted', false) == true
+        && 'courier' in get(
+          /databases/$(database)/documents/users/$(uid)
+        ).data.get('roles', []);
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
+          == 'admin';
+    }
+
+    function authPhone() {
+      return request.auth.token.get('phone_number', null);
+    }
+
+    function phoneMatchesAuth(data) {
+      return data.get('phoneNumber', null) == null
+        || data.get('phoneNumber', null) == authPhone();
+    }
+
+    match /users/{uid} {
+      function accountFieldsAreWellFormed(data) {
+        let roles = data.get('roles', ['customer']);
+        let status = data.get('courierStatus', 'none');
+        let mode = data.get('lastMode', 'customer');
+        let selectedRole = data.get('selectedRole', mode);
+        return roles is list
+          && roles.hasOnly(['customer', 'courier'])
+          && 'customer' in roles
+          && status in [
+            'none', 'draft', 'pending', 'approved', 'rejected', 'suspended'
+          ]
+          && mode in ['customer', 'courier']
+          && selectedRole in ['customer', 'courier']
+          && data.get('onboardingCompleted', false) is bool
+          && data.get('phoneVerified', false) == (authPhone() != null)
+          && data.get('profileComplete', false) is bool
+          && data.get('courierOnboardingCompleted', false) is bool
+          && (!data.get('courierOnboardingCompleted', false)
+            || (status == 'approved' && 'courier' in roles));
+      }
+
+      function hasLegacyCourierProof(uid) {
+        return resource.data.get('role', 'customer') == 'courier'
+          || exists(/databases/$(database)/documents/couriers/$(uid));
+      }
+
+      function canMigrateLegacyCourier(uid) {
+        return resource.data.get('courierStatus', 'none') == 'none'
+          && hasLegacyCourierProof(uid);
+      }
+
+      function ownerRolesAreValid(uid) {
+        let before = resource.data.get('roles', ['customer']);
+        let after = request.resource.data.get('roles', ['customer']);
+        return after == before
+          || (canMigrateLegacyCourier(uid)
+            && after.hasOnly(['customer', 'courier'])
+            && 'customer' in after
+            && 'courier' in after);
+      }
+
+      function ownerCourierStatusIsValid(uid) {
+        let before = resource.data.get('courierStatus', 'none');
+        let after = request.resource.data.get('courierStatus', 'none');
+        return after == before
+          || (before == 'none' && after == 'draft')
+          || (before == 'draft' && after == 'pending')
+          || (before == 'rejected' && after in ['draft', 'pending'])
+          || (canMigrateLegacyCourier(uid) && after == 'approved');
+      }
+
+      function ownerModeAndLegacyRoleAreValid() {
+        let mode = request.resource.data.get('lastMode', 'customer');
+        let status = request.resource.data.get('courierStatus', 'none');
+        let roles = request.resource.data.get('roles', ['customer']);
+        let beforeRole = resource.data.get('role', 'customer');
+        let afterRole = request.resource.data.get('role', 'customer');
+        let courierModeAllowed = status == 'approved' && 'courier' in roles;
+        return (mode == 'customer' || courierModeAllowed)
+          && (beforeRole == 'admin'
+            ? afterRole == 'admin'
+            : (afterRole == 'customer'
+              || (afterRole == 'courier' && courierModeAllowed)));
+      }
+
+      allow get: if owns(uid) || isAdmin();
+      allow list: if isAdmin();
+
+      allow create: if owns(uid)
+        && request.resource.data.uid == uid
+        && request.resource.data.role == 'customer'
+        && request.resource.data.get('roles', ['customer']).hasOnly([
+          'customer'
+        ])
+        && request.resource.data.get('lastMode', 'customer') == 'customer'
+        && request.resource.data.get('courierStatus', 'none') in [
+          'none', 'draft'
+        ]
+        && accountFieldsAreWellFormed(request.resource.data)
+        && phoneMatchesAuth(request.resource.data)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+
+      allow update: if (owns(uid)
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.createdAt == resource.data.createdAt
+        && phoneMatchesAuth(request.resource.data)
+        && accountFieldsAreWellFormed(request.resource.data)
+        && ownerRolesAreValid(uid)
+        && ownerCourierStatusIsValid(uid)
+        && ownerModeAndLegacyRoleAreValid()
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'phoneNumber',
+          'displayName',
+          'name',
+          'photoUrl',
+          'roles',
+          'lastMode',
+          'courierStatus',
+          'phoneVerified',
+          'profileComplete',
+          'courierOnboardingCompleted',
+          'onboardingCompleted',
+          'selectedRole',
+          'roleSelectedAt',
+          'targetRole',
+          'role',
+          'city',
+          'language',
+          'updatedAt'
+        ])) || (isAdmin()
+          && request.resource.data.uid == resource.data.uid
+          && request.resource.data.createdAt == resource.data.createdAt
+          && request.resource.data.updatedAt == request.time);
+
+      allow delete: if false;
+    }
+
+    match /courier_applications/{uid} {
+      function applicationDataIsValid(data) {
+        return data.uid == uid
+          && data.get('status', 'draft') in [
+            'draft', 'pending', 'approved', 'rejected', 'suspended'
+          ]
+          && data.get('currentStep', 0) is int
+          && data.get('currentStep', 0) >= 0
+          && data.get('currentStep', 0) <= 4
+          && data.get('transport', 'bicycle') in [
+            'bicycle', 'electric_bike', 'scooter', 'car'
+          ]
+          && data.get('termsAccepted', false) is bool
+          && data.get('dataConsent', false) is bool
+          && phoneMatchesAuth(data);
+      }
+
+      function ownerDraftUpdateIsValid() {
+        let before = resource.data.status;
+        let after = request.resource.data.status;
+        return owns(uid)
+          && before in ['draft', 'rejected']
+          && after in ['draft', 'pending']
+          && applicationDataIsValid(request.resource.data)
+          && request.resource.data.createdAt == resource.data.createdAt
+          && request.resource.data.updatedAt == request.time
+          && (after != 'pending'
+            || request.resource.data.submittedAt == request.time)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'displayName',
+            'name',
+            'phoneNumber',
+            'status',
+            'currentStep',
+            'birthDate',
+            'profilePhotoUrl',
+            'transport',
+            'documentType',
+            'documentNumber',
+            'documentPhotoUrl',
+            'transportPhotoUrl',
+            'city',
+            'workDistrict',
+            'availability',
+            'termsAccepted',
+            'dataConsent',
+            'storageEnabled',
+            'verificationMethod',
+            'submittedAt',
+            'updatedAt'
+          ]);
+      }
+
+      allow get: if owns(uid) || isAdmin();
+      allow list: if isAdmin();
+      allow create: if isAdmin() || (owns(uid)
+        && request.resource.data.status == 'draft'
+        && applicationDataIsValid(request.resource.data)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time);
+      allow update: if ownerDraftUpdateIsValid() || isAdmin();
+      allow delete: if false;
+    }
+
+    match /couriers/{uid} {
+      function baseCourierDataIsValid() {
+        return request.resource.data.uid == uid
+          && phoneMatchesAuth(request.resource.data)
+          && request.resource.data.get('isOnline', false)
+            == request.resource.data.get('online', false);
+      }
+
+      function ownerProfileUpdateIsValid() {
+        return owns(uid)
+          && isCourier()
+          && baseCourierDataIsValid()
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'phoneNumber',
+            'displayName',
+            'name',
+            'city',
+            'isOnline',
+            'online',
+            'transport',
+            'location',
+            'locationUpdatedAt',
+            'heading',
+            'speed',
+            'locationAccuracy',
+            'updatedAt'
+          ]);
+      }
+
+      function ownerAcceptUpdateIsValid() {
+        let orderId = request.resource.data.get('activeOrderId', null);
+        let orderAfter = getAfter(
+          /databases/$(database)/documents/orders/$(orderId)
+        );
+        return owns(uid)
+          && resource.data.get('activeOrderId', null) == null
+          && orderId is string
+          && legacyOrder(orderAfter.data)
+          && orderAfter.data.courierId == uid
+          && orderAfter.data.status == 'accepted'
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'activeOrderId',
+            'isBusy',
+            'updatedAt'
+          ]);
+      }
+
+      function completionStatsUpdateIsValid() {
+        let orderId = resource.data.get('activeOrderId', null);
+        let orderAfter = getAfter(
+          /databases/$(database)/documents/orders/$(orderId)
+        );
+        return orderId is string
+          && legacyOrder(orderAfter.data)
+          && orderAfter.data.courierId == uid
+          && orderAfter.data.status == 'completed'
+          && request.resource.data.get('activeOrderId', null) == null
+          && request.resource.data.get('isBusy', false) == false
+          && request.resource.data.earningsToday
+            == resource.data.earningsToday + orderAfter.data.price
+          && request.resource.data.ordersToday == resource.data.ordersToday + 1
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'activeOrderId',
+            'isBusy',
+            'earningsToday',
+            'ordersToday',
+            'updatedAt'
+          ]);
+      }
+
+      function assignedCustomerCompletesOrder() {
+        let orderId = resource.data.get('activeOrderId', null);
+        let orderAfter = getAfter(
+          /databases/$(database)/documents/orders/$(orderId)
+        );
+        return signedIn()
+          && orderId is string
+          && orderAfter.data.customerId == request.auth.uid
+          && completionStatsUpdateIsValid();
+      }
+
+      function assignedCustomerSelectsOffer() {
+        let orderId = request.resource.data.get('activeOrderId', null);
+        let orderAfter = getAfter(
+          /databases/$(database)/documents/orders/$(orderId)
+        );
+        return signedIn()
+          && resource.data.get('activeOrderId', null) == null
+          && resource.data.get('isBusy', false) == false
+          && orderId is string
+          && legacyOrder(orderAfter.data)
+          && orderAfter.data.customerId == request.auth.uid
+          && orderAfter.data.courierId == uid
+          && orderAfter.data.status == 'accepted'
+          && request.resource.data.get('isBusy', false) == true
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'activeOrderId',
+            'isBusy',
+            'updatedAt'
+          ]);
+      }
+
+      allow get: if owns(uid) || isAdmin();
+      allow list: if isAdmin();
+
+      allow create: if isAdmin() || (owns(uid)
+        && isCourier()
+        && baseCourierDataIsValid()
+        && request.resource.data.rating == 5
+        && request.resource.data.score == 100
+        && request.resource.data.earningsToday == 0
+        && request.resource.data.ordersToday == 0
+        && request.resource.data.get('activeOrderId', null) == null
+        && request.resource.data.updatedAt == request.time);
+
+      allow update: if ownerProfileUpdateIsValid()
+        || ownerAcceptUpdateIsValid()
+        || (owns(uid) && completionStatsUpdateIsValid())
+        || assignedCustomerCompletesOrder()
+        || assignedCustomerSelectsOffer()
+        || isAdmin();
+
+      allow delete: if false;
+    }
+
+    // Public projection used by the live map and customer tracking. Sensitive
+    // courier fields (phone, activeOrderId and earnings) never live here.
+    match /courier_public/{uid} {
+      function assignedCustomerCanRead() {
+        let privateCourier = get(
+          /databases/$(database)/documents/couriers/$(uid)
+        );
+        let orderId = privateCourier.data.get('activeOrderId', null);
+        return signedIn()
+          && orderId is string
+          && exists(/databases/$(database)/documents/orders/$(orderId))
+          && get(/databases/$(database)/documents/orders/$(orderId)).data.customerId
+            == request.auth.uid;
+      }
+
+      function publicDataMatchesPrivate() {
+        let privateAfter = getAfter(
+          /databases/$(database)/documents/couriers/$(uid)
+        );
+        return request.resource.data.uid == uid
+          && request.resource.data.displayName == privateAfter.data.displayName
+          && request.resource.data.name == privateAfter.data.name
+          && request.resource.data.isOnline == privateAfter.data.isOnline
+          && request.resource.data.online == privateAfter.data.online
+          && request.resource.data.rating == privateAfter.data.rating
+          && request.resource.data.transport == privateAfter.data.transport
+          && request.resource.data.get('location', null)
+            == privateAfter.data.get('location', null)
+          && request.resource.data.get('locationUpdatedAt', null)
+            == privateAfter.data.get('locationUpdatedAt', null)
+          && request.resource.data.get('heading', null)
+            == privateAfter.data.get('heading', null)
+          && request.resource.data.get('speed', null)
+            == privateAfter.data.get('speed', null)
+          && request.resource.data.get('locationAccuracy', null)
+            == privateAfter.data.get('locationAccuracy', null)
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.keys().hasOnly([
+            'uid',
+            'displayName',
+            'name',
+            'isOnline',
+            'online',
+            'rating',
+            'transport',
+            'location',
+            'locationUpdatedAt',
+            'heading',
+            'speed',
+            'locationAccuracy',
+            'updatedAt'
+          ]);
+      }
+
+      allow get: if signedIn()
+        && (owns(uid)
+          || isAdmin()
+          || resource.data.get('isOnline', false) == true
+          || assignedCustomerCanRead());
+      allow list: if isAdmin()
+        || (signedIn()
+          && resource.data.get('isOnline', false) == true
+          && request.query.limit != null
+          && request.query.limit <= 50);
+
+      allow create, update: if (owns(uid)
+          && isCourier()
+          && publicDataMatchesPrivate())
+        || isAdmin();
+      allow delete: if false;
+    }
+
+    match /orders/{orderId} {
+      function orderTypeDataIsValid(data) {
+        let type = data.get('orderType', 'customDelivery');
+        return (type == 'customDelivery'
+            && data.get('priceNegotiable', true) == true)
+          || (type == 'catalogOrder'
+            && data.get('priceNegotiable', true) == false
+            && data.get('partnerId', null) is string
+            && data.get('partnerName', null) is string
+            && data.get('items', []) is list
+            && data.get('items', []).size() > 0
+            && data.get('subtotal', null) is number
+            && data.get('subtotal', 0) >= 0
+            && data.get('deliveryFee', null) is number
+            && data.get('deliveryFee', 0) >= 10
+            && data.get('total', null) is number
+            && data.total >= data.subtotal + data.deliveryFee - 0.000001
+            && data.total <= data.subtotal + data.deliveryFee + 0.000001
+            && data.price == data.deliveryFee
+            && catalogPartnerDataMatches(data)
+            && exists(
+              /databases/$(database)/documents/partners/$(data.partnerId)
+            )
+            && get(
+              /databases/$(database)/documents/partners/$(data.partnerId)
+            ).data.get('isActive', false) == true
+            && get(
+              /databases/$(database)/documents/partners/$(data.partnerId)
+            ).data.get('isOpen', false) == true);
+      }
+
+      function catalogPartnerDataMatches(data) {
+        let partner = get(
+          /databases/$(database)/documents/partners/$(data.partnerId)
+        ).data;
+        let expectedDeliveryFee = partner.deliveryFee < 10
+          ? 10
+          : partner.deliveryFee;
+        return data.partnerName == partner.name
+          && data.type == partner.category
+          && data.fromText == partner.address
+          && data.fromLocation == partner.location
+          && data.subtotal >= partner.minimumOrder
+          && data.deliveryFee == expectedDeliveryFee
+          && data.items.size() <= 50;
+      }
+
+      function customerCancels() {
+        return resource.data.customerId == request.auth.uid
+          && resource.data.status in ['waiting', 'waitingOffers']
+          && request.resource.data.status == 'cancelled'
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'status',
+            'updatedAt'
+          ]);
+      }
+
+      function customerCompletes() {
+        let courierId = resource.data.get('courierId', null);
+        let courierBefore = get(
+          /databases/$(database)/documents/couriers/$(courierId)
+        );
+        let courierAfter = getAfter(
+          /databases/$(database)/documents/couriers/$(courierId)
+        );
+        return courierId is string
+          && resource.data.customerId == request.auth.uid
+          && resource.data.status == 'delivered'
+          && request.resource.data.status == 'completed'
+          && request.resource.data.completedAt == request.time
+          && request.resource.data.updatedAt == request.time
+          && courierBefore.data.get('activeOrderId', null) == orderId
+          && courierAfter.data.get('activeOrderId', null) == null
+          && courierAfter.data.get('isBusy', false) == false
+          && courierAfter.data.earningsToday
+            == courierBefore.data.earningsToday + resource.data.price
+          && courierAfter.data.ordersToday
+            == courierBefore.data.ordersToday + 1
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'status',
+            'completedAt',
+            'updatedAt'
+          ]);
+      }
+
+      function customerDisputes() {
+        return resource.data.customerId == request.auth.uid
+          && resource.data.status == 'delivered'
+          && request.resource.data.status == 'disputed'
+          && request.resource.data.disputedAt == request.time
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'status',
+            'disputedAt',
+            'updatedAt'
+          ]);
+      }
+
+      function courierDeclines() {
+        return isCourier()
+          && resource.data.status in ['waiting', 'waitingOffers']
+          && request.resource.data.status == resource.data.status
+          && request.auth.uid in request.resource.data.declinedBy
+          && request.resource.data.declinedBy.size()
+            <= resource.data.declinedBy.size() + 1
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'declinedBy',
+            'updatedAt'
+          ]);
+      }
+
+      function courierAccepts() {
+        let courierAfter = getAfter(
+          /databases/$(database)/documents/couriers/$(request.auth.uid)
+        );
+        return isCourier()
+          && resource.data.status == 'waiting'
+          && request.resource.data.status == 'accepted'
+          && request.resource.data.courierId == request.auth.uid
+          && courierAfter.data.get('activeOrderId', null) == orderId
+          && (resource.data.get('pricingVersion', 'legacy') != 'v2'
+            || courierAfter.data.get('isBusy', false) == true)
+          && request.resource.data.acceptedAt == request.time
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'status',
+            'courierId',
+            'acceptedAt',
+            'updatedAt'
+          ]);
+      }
+
+      function assignedCourierUpdates() {
+        return isCourier()
+          && resource.data.courierId == request.auth.uid
+          && request.resource.data.courierId == request.auth.uid;
+      }
+
+      function customerSelectsOffer() {
+        let courierId = request.resource.data.get('selectedCourierId', null);
+        let offerId = request.resource.data.get('selectedOfferId', null);
+        let offerAfter = getAfter(
+          /databases/$(database)/documents/orders/$(orderId)/offers/$(offerId)
+        );
+        let courierAfter = getAfter(
+          /databases/$(database)/documents/couriers/$(courierId)
+        );
+        return resource.data.customerId == request.auth.uid
+          && resource.data.status in ['waiting', 'waitingOffers']
+          && request.resource.data.status == 'accepted'
+          && courierId is string
+          && approvedCourier(courierId)
+          && offerId is string
+          && request.resource.data.courierId == courierId
+          && offerAfter.data.courierId == courierId
+          && offerAfter.data.status == 'accepted'
+          && request.resource.data.finalPrice == offerAfter.data.proposedPrice
+          && request.resource.data.price == offerAfter.data.proposedPrice
+          && courierAfter.data.get('activeOrderId', null) == orderId
+          && courierAfter.data.get('isBusy', false) == true
+          && request.resource.data.acceptedAt == request.time
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'status',
+            'courierId',
+            'selectedCourierId',
+            'selectedOfferId',
+            'finalPrice',
+            'price',
+            'acceptedAt',
+            'updatedAt'
+          ]);
+      }
+
+      function courierUpdatesOfferCounter() {
+        let offerAfter = getAfter(
+          /databases/$(database)/documents/orders/$(orderId)/offers/$(request.auth.uid)
+        );
+        return isCourier()
+          && resource.data.status in ['waiting', 'waitingOffers']
+          && request.resource.data.status == resource.data.status
+          && offerAfter.data.courierId == request.auth.uid
+          && offerAfter.data.status == 'pending'
+          && request.resource.data.offersCount
+            == resource.data.get('offersCount', 0) + 1
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'offersCount',
+            'offerExpiresAt',
+            'updatedAt'
+          ]);
+      }
+
+      function courierArrives() {
+        return assignedCourierUpdates()
+          && resource.data.status == 'accepted'
+          && request.resource.data.status == 'accepted'
+          && request.resource.data.arrivedAtPickupAt == request.time
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'arrivedAtPickupAt',
+            'updatedAt'
+          ]);
+      }
+
+      function courierPicksUp() {
+        return assignedCourierUpdates()
+          && resource.data.status == 'accepted'
+          && resource.data.get('arrivedAtPickupAt', null) != null
+          && request.resource.data.status == 'pickedUp'
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'status',
+            'updatedAt'
+          ]);
+      }
+
+      function courierDelivers() {
+        return assignedCourierUpdates()
+          && resource.data.status == 'pickedUp'
+          && request.resource.data.status == 'delivered'
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'status',
+            'updatedAt'
+          ]);
+      }
+
+      function courierCompletesWithCode() {
+        let courierAfter = getAfter(
+          /databases/$(database)/documents/couriers/$(request.auth.uid)
+        );
+        return assignedCourierUpdates()
+          && resource.data.status == 'pickedUp'
+          && request.resource.data.status == 'completed'
+          && request.resource.data.completedAt == request.time
+          && request.resource.data.updatedAt == request.time
+          && courierAfter.data.get('activeOrderId', null) == null
+          && courierAfter.data.earningsToday
+            == get(/databases/$(database)/documents/couriers/$(request.auth.uid)).data.earningsToday
+              + resource.data.price
+          && courierAfter.data.ordersToday
+            == get(/databases/$(database)/documents/couriers/$(request.auth.uid)).data.ordersToday
+              + 1
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'status',
+            'completedAt',
+            'updatedAt'
+          ]);
+      }
+
+      // Each transition restricts affectedKeys, so unrelated order fields
+      // cannot change. Dispatch first rather than evaluating every transition;
+      // the latter can exhaust the Rules expression limit on legacy orders.
+      function customerUpdateIsValid() {
+        let before = resource.data.status;
+        let after = request.resource.data.status;
+        return before in ['waiting', 'waitingOffers']
+          ? (after == 'cancelled' ? customerCancels()
+            : (after == 'accepted' && customerSelectsOffer()))
+          : (before == 'delivered'
+            && (after == 'completed' ? customerCompletes()
+              : (after == 'disputed' && customerDisputes())));
+      }
+
+      function courierUpdateIsValid() {
+        let before = resource.data.status;
+        let after = request.resource.data.status;
+        return before in ['waiting', 'waitingOffers']
+          ? (after == 'accepted' ? courierAccepts()
+            : (after == before
+              && (request.resource.data.diff(resource.data).affectedKeys()
+                  .hasAny(['offersCount'])
+                ? courierUpdatesOfferCounter() : courierDeclines())))
+          : (before == 'accepted'
+            ? (after == 'pickedUp' ? courierPicksUp()
+              : (after == before && courierArrives()))
+            : (before == 'pickedUp'
+              && (after == 'completed' ? courierCompletesWithCode()
+                : (after == 'delivered' && courierDelivers()))));
+      }
+
+      allow create: if signedIn()
+        && !serverCommandsRequired()
+        && request.resource.data.customerId == request.auth.uid
+        && request.resource.data.status in ['waiting', 'waitingOffers']
+        && request.resource.data.price is number
+        && request.resource.data.price >= 10
+        && request.resource.data.currency == 'TJS'
+        && orderTypeDataIsValid(request.resource.data)
+        && request.resource.data.get('courierId', null) == null
+        && (authPhone() != null
+          || request.resource.data.get('isTestOrder', false) == true)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.keys().hasOnly([
+          'customerId',
+          'customerName',
+          'status',
+          'type',
+          'city',
+          'fromText',
+          'toText',
+          'price',
+          'orderType',
+          'suggestedPrice',
+          'clientPrice',
+          'finalPrice',
+          'priceNegotiable',
+          'offersCount',
+          'selectedOfferId',
+          'selectedCourierId',
+          'offerExpiresAt',
+          'pricingVersion',
+          'currency',
+          'confirmationCode',
+          'fromLocation',
+          'toLocation',
+          'distanceKm',
+          'etaMinutes',
+          'partnerId',
+          'partnerName',
+          'items',
+          'subtotal',
+          'deliveryFee',
+          'total',
+          'comment',
+          'isTestOrder',
+          'declinedBy',
+          'createdAt',
+          'updatedAt'
+        ]);
+
+      allow get, list: if signedIn()
+        && (isAdmin()
+          || resource.data.customerId == request.auth.uid
+          || (isCourier() && resource.data.status in ['waiting', 'waitingOffers'])
+          || resource.data.get('courierId', null) == request.auth.uid);
+
+      allow update: if signedIn() && (legacyOrder(resource.data) ? (isAdmin()
+        || (resource.data.customerId == request.auth.uid
+          ? customerUpdateIsValid() : courierUpdateIsValid()))
+        : (resource.data.get('schemaVersion', 0) < 8 && isAdmin() && request.resource.data.updatedAt == request.time
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['adminNote', 'updatedAt'])));
+
+      match /offers/{offerId} {
+        function parentOrder() {
+          return get(/databases/$(database)/documents/orders/$(orderId));
+        }
+
+        function customerOwnsParent() {
+          return signedIn() && parentOrder().data.customerId == request.auth.uid;
+        }
+
+        function courierOfferDataIsValid() {
+          let clientPrice = parentOrder().data.get(
+            'clientPrice',
+            parentOrder().data.price
+          );
+          return isCourier()
+            && offerId == request.auth.uid
+            && request.resource.data.courierId == request.auth.uid
+            && request.resource.data.originalClientPrice == clientPrice
+            && request.resource.data.proposedPrice is number
+            && (parentOrder().data.get('priceNegotiable', true) == true
+              ? request.resource.data.proposedPrice >= clientPrice
+              : request.resource.data.proposedPrice == clientPrice)
+            && request.resource.data.status in ['pending', 'withdrawn']
+            && request.resource.data.updatedAt == request.time
+            && request.resource.data.keys().hasOnly([
+              'courierId',
+              'courierName',
+              'courierRating',
+              'courierTransport',
+              'courierDistanceMeters',
+              'proposedPrice',
+              'originalClientPrice',
+              'status',
+              'createdAt',
+              'updatedAt',
+              'expiresAt',
+              'isTest'
+            ]);
+        }
+
+        allow get, list: if isAdmin()
+          || customerOwnsParent()
+          || (isCourier() && resource.data.courierId == request.auth.uid);
+
+        allow create: if legacyOrder(parentOrder().data) && (isAdmin() || (courierOfferDataIsValid()
+          && request.resource.data.status == 'pending'
+          && request.resource.data.createdAt == request.time
+          && parentOrder().data.status in ['waiting', 'waitingOffers']));
+
+        allow update: if legacyOrder(parentOrder().data) && (isAdmin()
+          || (courierOfferDataIsValid()
+            && request.resource.data.createdAt == resource.data.createdAt
+            && parentOrder().data.status in ['waiting', 'waitingOffers'])
+          || (customerOwnsParent()
+            && request.resource.data.courierId == resource.data.courierId
+            && resource.data.status == 'pending'
+            && request.resource.data.status in ['accepted', 'rejected', 'expired']
+            && request.resource.data.updatedAt == request.time
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'status',
+              'updatedAt'
+            ])));
+
+        allow delete: if false;
+      }
+
+      allow delete: if false;
+    }
+
+    match /partners/{partnerId} {
+      function partnerDataIsValid(data) {
+        return data.get('name', null) is string
+          && data.name.size() > 0
+          && data.name.size() <= 120
+          && data.get('category', null) in ['food', 'groceries', 'flowers']
+          && data.get('description', '') is string
+          && data.get('imageUrl', '') is string
+          && data.get('address', null) is string
+          && data.address.size() > 0
+          && data.address.size() <= 300
+          && data.get('location', null) is latlng
+          && data.get('minimumOrder', null) is number
+          && data.get('minimumOrder', -1) >= 0
+          && data.get('minimumOrder', 0) <= 100000
+          && data.get('deliveryFee', null) is number
+          && data.get('deliveryFee', -1) >= 0
+          && data.get('deliveryFee', 0) <= 10000
+          && data.get('rating', 5) is number
+          && data.get('rating', 5) >= 0
+          && data.get('rating', 5) <= 5
+          && data.get('preparationMinutes', 20) is int
+          && data.get('preparationMinutes', 20) >= 0
+          && data.get('preparationMinutes', 20) <= 240
+          && data.get('sortOrder', 0) is int
+          && data.get('sortOrder', 0) >= -10000
+          && data.get('sortOrder', 0) <= 10000
+          && data.get('workingHours', '') is string
+          && data.get('isOpen', null) is bool
+          && data.get('isActive', null) is bool
+          && data.get('isTest', false) is bool
+          && data.keys().hasOnly([
+            'name',
+            'category',
+            'description',
+            'imageUrl',
+            'address',
+            'location',
+            'minimumOrder',
+            'deliveryFee',
+            'rating',
+            'preparationMinutes',
+            'sortOrder',
+            'workingHours',
+            'isOpen',
+            'isActive',
+            'isTest',
+            'createdAt',
+            'updatedAt'
+          ]);
+      }
+
+      allow get, list: if signedIn()
+        && (isAdmin() || resource.data.get('isActive', false) == true);
+      allow create: if isAdmin()
+        && partnerDataIsValid(request.resource.data)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+      allow update: if isAdmin()
+        && partnerDataIsValid(request.resource.data)
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if false;
+    }
+
+    match /products/{productId} {
+      function productPartnerIsActive(data) {
+        return data.get('partnerId', null) is string
+          && exists(
+            /databases/$(database)/documents/partners/$(data.partnerId)
+          )
+          && get(
+            /databases/$(database)/documents/partners/$(data.partnerId)
+          ).data.get('isActive', false) == true;
+      }
+
+      function productDataIsValid(data) {
+        return data.get('partnerId', null) is string
+          && existsAfter(
+            /databases/$(database)/documents/partners/$(data.partnerId)
+          )
+          && data.get('name', null) is string
+          && data.name.size() > 0
+          && data.name.size() <= 160
+          && data.get('description', '') is string
+          && data.get('imageUrl', '') is string
+          && data.get('price', null) is number
+          && data.get('price', -1) >= 0
+          && data.get('price', 0) <= 100000
+          && (data.get('oldPrice', null) == null
+            || (data.oldPrice is number
+              && data.oldPrice >= data.price
+              && data.oldPrice <= 100000))
+          && data.get('unit', null) in ['item', 'kg', 'portion', 'bouquet']
+          && data.get('isAvailable', null) is bool
+          && data.get('hidden', null) is bool
+          && data.get('popularity', 0) is int
+          && data.get('popularity', 0) >= 0
+          && data.get('popularity', 0) <= 1000000
+          && data.get('sortOrder', 0) is int
+          && data.get('sortOrder', 0) >= -10000
+          && data.get('sortOrder', 0) <= 10000
+          && data.get('isTest', false) is bool
+          && data.keys().hasOnly([
+            'partnerId',
+            'name',
+            'description',
+            'imageUrl',
+            'price',
+            'oldPrice',
+            'unit',
+            'isAvailable',
+            'hidden',
+            'popularity',
+            'sortOrder',
+            'isTest',
+            'createdAt',
+            'updatedAt'
+          ]);
+      }
+
+      allow get, list: if signedIn()
+        && (isAdmin()
+          || (resource.data.get('hidden', true) == false
+            && productPartnerIsActive(resource.data)));
+      allow create: if isAdmin()
+        && productDataIsValid(request.resource.data)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+      allow update: if isAdmin()
+        && productDataIsValid(request.resource.data)
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if false;
+    }
+
+    match /admin_logs/{logId} {
+      allow create, read: if isAdmin();
+      allow update, delete: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

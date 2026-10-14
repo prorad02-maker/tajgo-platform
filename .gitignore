@@ -58,6 +58,8 @@ app.*.map.json
 # Firebase Functions build/emulator output
 /functions/lib/
 /functions/node_modules/
+**/node_modules/
+android/.kotlin/
 /.firebase/
 firebase-debug.log
 firestore-debug.log

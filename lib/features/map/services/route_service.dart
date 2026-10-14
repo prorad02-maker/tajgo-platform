@@ -5,6 +5,7 @@ import '../models/tajgo_route.dart';
 import 'direct_route_provider.dart';
 import 'map_performance_monitor.dart';
 import 'road_route_provider.dart';
+import 'route_provider.dart';
 import 'route_cache.dart';
 import 'route_sanity_service.dart';
 import 'routing_health_monitor.dart';
@@ -21,12 +22,14 @@ class RouteUnavailableException implements Exception {
 class RouteService {
   RouteService({
     RoadRouteProvider? roadProvider,
+    RouteProvider? serverProvider,
     DirectRouteProvider? directProvider,
     RouteCache? cache,
     RouteSanityService? sanityService,
     RoutingHealthMonitor? healthMonitor,
     MapPerformanceMonitor? performanceMonitor,
-  }) : _road = roadProvider ?? RoadRouteProvider(),
+  }) : _server = serverProvider,
+       _road = roadProvider ?? RoadRouteProvider(),
        _direct = directProvider ?? const DirectRouteProvider(),
        _cache = cache ?? RouteCache(),
        _sanity =
@@ -40,6 +43,7 @@ class RouteService {
            RoutingHealthMonitor((roadProvider ?? RoadRouteProvider()).config);
 
   final RoadRouteProvider _road;
+  final RouteProvider? _server;
   final DirectRouteProvider _direct;
   final RouteCache _cache;
   final RouteSanityService _sanity;
@@ -118,9 +122,9 @@ class RouteService {
     late RouteSanityResult checked;
     var routeSource = 'unavailable';
 
-    if (_road.configured) {
+    if (_server != null || _road.configured) {
       try {
-        final candidate = await _road.buildRoute(
+        final candidate = await (_server ?? _road).buildRoute(
           from: from,
           to: to,
           mode: mode,

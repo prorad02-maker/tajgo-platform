@@ -356,7 +356,7 @@ void main() {
         contains('MapProviderConfig.current.tileUrlTemplate'),
         reason: file.path,
       );
-      expect(source, contains('RichAttributionWidget'), reason: file.path);
+      expect(source, contains('TajGoMapAttribution'), reason: file.path);
     }
   });
 

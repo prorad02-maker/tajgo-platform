@@ -165,7 +165,7 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
       _error = null;
     });
     try {
-      await scope.pushNotificationService.disableForUser(uid);
+      await scope.notificationService.beforeSignOut();
       await scope.userRepository.deleteAccountRequest(uid: uid);
       await scope.authService.signOut();
       if (!mounted) return;

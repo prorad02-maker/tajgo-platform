@@ -67,6 +67,9 @@ class _CourierHomeScreenState extends State<CourierHomeScreen>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) TajGoScope.of(context).notificationService.navigationReady();
+    });
     if (_profileEnsured) {
       return;
     }

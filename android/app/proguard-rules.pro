@@ -15,6 +15,7 @@
 
 # Keep annotations and generic signatures used by Firestore serialization
 -keepattributes Signature,*Annotation*,EnclosingMethod,InnerClasses
+-keepattributes SourceFile,LineNumberTable
 
 # Play Integrity / App Check
 -keep class com.google.android.play.core.** { *; }

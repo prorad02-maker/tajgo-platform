@@ -66,7 +66,58 @@ class FeatureFlags {
   /// Разбор bool-переопределения из dart-define.
   static bool _override(String key, bool fallback) {
     const notSet = '__unset__';
-    final raw = String.fromEnvironment(key, defaultValue: notSet);
+    // Environment declarations are guaranteed in AOT only with const reads.
+    const values = <String, String>{
+      'TAJGO_FF_MARKETPLACE': String.fromEnvironment(
+        'TAJGO_FF_MARKETPLACE',
+        defaultValue: notSet,
+      ),
+      'TAJGO_FF_CUSTOM_PRICE': String.fromEnvironment(
+        'TAJGO_FF_CUSTOM_PRICE',
+        defaultValue: notSet,
+      ),
+      'TAJGO_FF_MERCHANT_APPS': String.fromEnvironment(
+        'TAJGO_FF_MERCHANT_APPS',
+        defaultValue: notSet,
+      ),
+      'TAJGO_FF_NOTIFICATIONS': String.fromEnvironment(
+        'TAJGO_FF_NOTIFICATIONS',
+        defaultValue: notSet,
+      ),
+      'TAJGO_FF_CRASH': String.fromEnvironment(
+        'TAJGO_FF_CRASH',
+        defaultValue: notSet,
+      ),
+      'TAJGO_FF_DIAGNOSTICS': String.fromEnvironment(
+        'TAJGO_FF_DIAGNOSTICS',
+        defaultValue: notSet,
+      ),
+      'TAJGO_FF_ADMIN_IMPORT': String.fromEnvironment(
+        'TAJGO_FF_ADMIN_IMPORT',
+        defaultValue: notSet,
+      ),
+      'TAJGO_FF_PREVIEW_DATA': String.fromEnvironment(
+        'TAJGO_FF_PREVIEW_DATA',
+        defaultValue: notSet,
+      ),
+      'TAJGO_FF_APP_CHECK': String.fromEnvironment(
+        'TAJGO_FF_APP_CHECK',
+        defaultValue: notSet,
+      ),
+      'TAJGO_ROUTING_ENABLED': String.fromEnvironment(
+        'TAJGO_ROUTING_ENABLED',
+        defaultValue: notSet,
+      ),
+      'TAJGO_FF_DEMO_TOOLS': String.fromEnvironment(
+        'TAJGO_FF_DEMO_TOOLS',
+        defaultValue: notSet,
+      ),
+      'TAJGO_FF_ANON_LOGIN': String.fromEnvironment(
+        'TAJGO_FF_ANON_LOGIN',
+        defaultValue: notSet,
+      ),
+    };
+    final raw = values[key] ?? notSet;
     if (raw == notSet) return fallback;
     final value = raw.trim().toLowerCase();
     return value == 'true' || value == '1' || value == 'yes' || value == 'on';

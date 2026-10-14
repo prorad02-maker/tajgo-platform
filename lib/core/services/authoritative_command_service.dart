@@ -1,6 +1,8 @@
 import 'dart:math' as math;
+import 'dart:convert';
 
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:crypto/crypto.dart';
 
 import 'safe_diagnostics.dart';
 
@@ -184,12 +186,11 @@ class TajGoIdempotencyKey {
   }
 
   static String stable(String operation, Iterable<Object?> parts) {
-    final raw = '$operation:${parts.join(':')}';
-    var hash = 0x811c9dc5;
-    for (final unit in raw.codeUnits) {
-      hash ^= unit;
-      hash = (hash * 0x01000193) & 0x7fffffff;
-    }
-    return '${operation.replaceAll(RegExp(r'[^A-Za-z0-9._:-]'), '-')}-${hash.toRadixString(16)}-request';
+    final raw = jsonEncode([
+      operation,
+      ...parts.map((value) => value?.toString()),
+    ]);
+    final hash = sha256.convert(utf8.encode(raw)).toString().substring(0, 32);
+    return '${operation.replaceAll(RegExp(r'[^A-Za-z0-9._:-]'), '-')}-$hash-request';
   }
 }

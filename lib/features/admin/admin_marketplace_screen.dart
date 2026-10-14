@@ -1,3 +1,4 @@
+import '../../shared/widgets/tajgo_map_attribution.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -1019,11 +1020,7 @@ class _AdminPartnerLocationScreenState
                   MapProviderConfig.current.userAgentPackageName,
               maxZoom: 19,
             ),
-            RichAttributionWidget(
-              attributions: const [
-                TextSourceAttribution(MapProviderConfig.attributionText),
-              ],
-            ),
+            const TajGoMapAttribution(),
           ],
         ),
         const IgnorePointer(

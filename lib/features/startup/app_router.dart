@@ -203,6 +203,13 @@ class _AppStartupRouterState extends State<AppStartupRouter> {
       return _ProfileErrorScreen(onRetry: _inFlight ? null : () => _load());
     }
     final state = _state!;
+    if (state.profile != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          TajGoScope.maybeOf(context)?.notificationService.navigationReady();
+        }
+      });
+    }
     return switch (state.destination) {
       StartupDestination.intent => const IntentSelectionScreen(),
       StartupDestination.roleOnboarding => const RoleOnboardingScreen(),

@@ -1,7 +1,7 @@
 {
   "name": "tajgo-functions",
   "private": true,
-  "version": "1.8.0",
+  "version": "1.8.1",
   "main": "lib/src/index.js",
   "engines": {
     "node": "22"
@@ -16,13 +16,16 @@
     "test:core": "npm run test && npm run test:rules && npm run test:functions"
   },
   "dependencies": {
-    "firebase-admin": "^13.10.0",
-    "firebase-functions": "7.2.2"
+    "firebase-admin": "14.5.0",
+    "firebase-functions": "7.4.0"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^5.0.1",
     "@types/node": "^20.19.43",
     "firebase-tools": "^15.22.4",
     "typescript": "^5.9.3"
+  },
+  "overrides": {
+    "@grpc/grpc-js": "1.14.6"
   }
 }

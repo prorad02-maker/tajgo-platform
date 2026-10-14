@@ -1,3 +1,4 @@
+import '../../shared/widgets/tajgo_map_attribution.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -225,14 +226,15 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
       setState(() => _routeLoading = true);
-      final route = await TajGoScope.of(
-        context,
-      ).routeService.buildRoute(from: from, to: to, mode: RouteMode.bicycle);
-      if (mounted && _routeKey == key) {
-        setState(() {
-          _route = route;
-          _routeLoading = false;
-        });
+      try {
+        final route = await TajGoScope.of(
+          context,
+        ).routeService.buildRoute(from: from, to: to, mode: RouteMode.bicycle);
+        if (mounted && _routeKey == key) setState(() => _route = route);
+      } catch (_) {
+        if (mounted && _routeKey == key) setState(() => _route = null);
+      } finally {
+        if (mounted && _routeKey == key) setState(() => _routeLoading = false);
       }
     });
   }
@@ -263,13 +265,17 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
     _liveRoute = null;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
-      final route = await TajGoScope.of(context).routeService.buildRoute(
-        from: courier,
-        to: target,
-        mode: RouteMode.bicycle,
-      );
-      if (mounted && _liveRouteKey == key) {
-        setState(() => _liveRoute = route);
+      try {
+        final route = await TajGoScope.of(context).routeService.buildRoute(
+          from: courier,
+          to: target,
+          mode: RouteMode.bicycle,
+        );
+        if (mounted && _liveRouteKey == key) {
+          setState(() => _liveRoute = route);
+        }
+      } catch (_) {
+        if (mounted && _liveRouteKey == key) setState(() => _liveRoute = null);
       }
     });
   }
@@ -283,6 +289,7 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
 
   String _title(TajGoOrder order, {required bool courierNearby}) =>
       switch (order.status) {
+        OrderStatus.unknown => 'Статус заказа недоступен',
         OrderStatus.waiting => '🔎 Ищем курьера…',
         OrderStatus.accepted when order.arrivedAtPickupAt != null =>
           '📍 Курьер забирает заказ',
@@ -372,12 +379,7 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
         ? pricing.haversineDistanceKm(courierPoint, liveTarget)
         : null;
     _ensureLiveRoute(courierPoint, liveTarget);
-    final liveEta = courierPoint == null
-        ? null
-        : _liveRoute?.etaMinutes ??
-              (liveDistance == null
-                  ? null
-                  : pricing.courierNavigationEtaMinutes(liveDistance));
+    final liveEta = courierPoint == null ? null : _liveRoute?.etaMinutes;
     final courierNearby = liveDistance != null && liveDistance <= 0.12;
     _fitMap(from, to);
     return Column(
@@ -400,11 +402,11 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
                         MapProviderConfig.current.userAgentPackageName,
                     maxZoom: 19,
                   ),
-                  if (from != null && to != null)
+                  if (_route?.routeQuality == RouteQuality.road)
                     PolylineLayer(
                       polylines: [
                         Polyline(
-                          points: _route?.points ?? [from, to],
+                          points: _route!.points,
                           color: _route?.routeQuality == RouteQuality.road
                               ? TajGoColors.green
                               : TajGoColors.warning,
@@ -470,11 +472,7 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
                         ),
                     ],
                   ),
-                  RichAttributionWidget(
-                    attributions: const [
-                      TextSourceAttribution(MapProviderConfig.attributionText),
-                    ],
-                  ),
+                  const TajGoMapAttribution(),
                 ],
               ),
               SafeArea(
@@ -549,6 +547,15 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
           onShowRoute: from == null || to == null
               ? null
               : () => _showEntireRoute(from, to),
+          onRetryRoute: from == null || to == null
+              ? null
+              : () {
+                  setState(() {
+                    _routeKey = null;
+                    _liveRouteKey = null;
+                  });
+                  _ensureRoute(from, to);
+                },
         ),
       ],
     );
@@ -574,6 +581,7 @@ class _StatusPanel extends StatelessWidget {
     required this.courierLocationUpdatedAt,
     required this.courierNearby,
     required this.onShowRoute,
+    this.onRetryRoute,
   });
 
   final TajGoOrder order;
@@ -593,6 +601,7 @@ class _StatusPanel extends StatelessWidget {
   final DateTime? courierLocationUpdatedAt;
   final bool courierNearby;
   final VoidCallback? onShowRoute;
+  final VoidCallback? onRetryRoute;
 
   @override
   Widget build(BuildContext context) => Material(
@@ -685,6 +694,7 @@ class _StatusPanel extends StatelessWidget {
                 TajGoRouteSummaryCard(
                   route: route,
                   loading: routeLoading,
+                  onRetry: onRetryRoute,
                   onShowEntireRoute: onShowRoute,
                   compact: true,
                 ),
@@ -727,14 +737,16 @@ class _StatusPanel extends StatelessWidget {
               if (order.status == OrderStatus.pickedUp) ...[
                 const SizedBox(height: 14),
                 StreamBuilder<String?>(
-                  stream: TajGoScope.of(
-                    context,
-                  ).orderRepository.customerDeliveryCodeStream(order.id),
+                  stream: TajGoScope.of(context).orderRepository
+                      .customerDeliveryCodeStream(
+                        order.id,
+                        serverV1: order.commandVersion == 'server-v1',
+                      ),
                   builder: (context, snapshot) {
-                    final code = snapshot.data;
+                    final code = snapshot.data ?? order.confirmationCode;
                     if (code == null) {
                       return const Text(
-                        'Готовим защищённый код получения…',
+                        'Код недоступен. Проверьте интернет и обновите экран.',
                         style: TextStyle(color: TajGoColors.muted),
                       );
                     }

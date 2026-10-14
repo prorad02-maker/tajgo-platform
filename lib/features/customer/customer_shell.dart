@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../shared/design/tajgo_components.dart';
+import '../../shared/widgets/tajgo_scope.dart';
 import '../account/account_profile_screen.dart';
 import '../map/screens/new_order_map_screen.dart';
 import 'tabs/customer_orders_tab.dart';
@@ -16,6 +17,14 @@ class CustomerShell extends StatefulWidget {
 }
 
 class _CustomerShellState extends State<CustomerShell> {
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) TajGoScope.of(context).notificationService.navigationReady();
+    });
+  }
+
   static const _tabCount = 3;
   late int _index = widget.initialIndex.clamp(0, _tabCount - 1);
   late final List<ScrollController> _controllers = List.generate(
