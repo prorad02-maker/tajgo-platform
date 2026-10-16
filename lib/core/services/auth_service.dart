@@ -214,7 +214,7 @@ class PhoneAuthFailure implements Exception {
   factory PhoneAuthFailure.fromFirebase(FirebaseAuthException error) {
     final message = switch (error.code) {
       'invalid-phone-number' =>
-        'Проверьте номер. Нужен формат +992 XX XXX XX XX.',
+        'Проверьте полный номер телефона с кодом страны.',
       'invalid-verification-code' =>
         'Неверный код. Проверьте SMS и попробуйте ещё раз.',
       'session-expired' => 'Срок действия кода истёк. Запросите новый.',

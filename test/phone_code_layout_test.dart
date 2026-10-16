@@ -41,7 +41,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.scrollUntilVisible(find.byType(TextField), 180);
+      await tester.ensureVisible(find.byType(TextField));
       await tester.enterText(find.byType(TextField), '+992900000001');
       await tester.testTextInput.receiveAction(TextInputAction.done);
       await tester.pumpAndSettle();

@@ -49,10 +49,11 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
   }
 
   Future<void> _requestCode({bool resend = false}) async {
-    final phone = normalizeTajikPhone(_phoneController.text);
+    final phone = normalizeLoginPhone(_phoneController.text);
     if (phone == null) {
       setState(
-        () => _error = 'Проверьте номер. Нужен формат +992 XX XXX XX XX.',
+        () => _error =
+            'Введите полный номер с кодом страны, например +992 или +7.',
       );
       return;
     }
@@ -202,120 +203,125 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('Вход в TajGo')),
     body: SafeArea(
-      child: ListView(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(24, 18, 24, 24),
-        children: [
-          const Icon(
-            Icons.phone_android_rounded,
-            color: TajGoColors.darkGreen,
-            size: 64,
-          ),
-          const SizedBox(height: 22),
-          Text(
-            _waitingForCode ? 'Код из SMS' : 'Ваш номер телефона',
-            style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            _waitingForCode
-                ? 'Отправили на ${_phoneController.text}.'
-                : 'По номеру мы привяжем ваши заказы и код получения. Никакого спама.',
-            style: const TextStyle(color: TajGoColors.muted, fontSize: 16),
-          ),
-          const SizedBox(height: 24),
-          if (!_waitingForCode)
-            TextField(
-              controller: _phoneController,
-              enabled: !_loading,
-              autofocus: true,
-              keyboardType: TextInputType.phone,
-              inputFormatters: const [TajikPhoneInputFormatter()],
-              onSubmitted: (_) => _requestCode(),
-              decoration: const InputDecoration(
-                labelText: 'Номер телефона',
-                hintText: '+992 XX XXX XX XX',
-                border: OutlineInputBorder(),
-              ),
-            )
-          else ...[
-            TextField(
-              controller: _codeController,
-              focusNode: _codeFocus,
-              enabled: !_loading,
-              keyboardType: TextInputType.number,
-              inputFormatters: [
-                FilteringTextInputFormatter.digitsOnly,
-                LengthLimitingTextInputFormatter(6),
-              ],
-              onChanged: (value) {
-                if (value.length == 6 && !_loading) _confirmCode();
-              },
-              decoration: const InputDecoration(
-                labelText: 'SMS-код',
-                hintText: '000000',
-                border: OutlineInputBorder(),
-              ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Icon(
+              Icons.phone_android_rounded,
+              color: TajGoColors.darkGreen,
+              size: 64,
             ),
-            Wrap(
-              alignment: WrapAlignment.spaceBetween,
-              spacing: 8,
-              runSpacing: 4,
-              children: [
-                TextButton(
-                  onPressed: _loading ? null : _changePhone,
-                  child: const Text('Изменить номер'),
-                ),
-                TextButton(
-                  onPressed: _loading || _resendSeconds > 0
-                      ? null
-                      : () => _requestCode(resend: true),
-                  child: Text(
-                    _resendSeconds > 0
-                        ? 'Повторить через $_resendSeconds с'
-                        : 'Отправить ещё раз',
-                  ),
-                ),
-              ],
-            ),
-          ],
-          if (_error != null) ...[
-            const SizedBox(height: 10),
+            const SizedBox(height: 22),
             Text(
-              _error!,
-              style: const TextStyle(
-                color: TajGoColors.error,
-                fontWeight: FontWeight.w700,
-              ),
+              _waitingForCode ? 'Код из SMS' : 'Ваш номер телефона',
+              style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900),
             ),
-          ],
-          const SizedBox(height: 18),
-          FilledButton(
-            onPressed: _loading
-                ? null
-                : _waitingForCode
-                ? _confirmCode
-                : _requestCode,
-            child: _loading
-                ? const SizedBox.square(
-                    dimension: 22,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : Text(_waitingForCode ? 'Подтвердить' : 'Получить код'),
-          ),
-          if (_demoAllowed) ...[
+            const SizedBox(height: 8),
+            Text(
+              _waitingForCode
+                  ? 'Отправили на ${_phoneController.text}.'
+                  : 'По номеру мы привяжем ваши заказы и код получения. Никакого спама.',
+              style: const TextStyle(color: TajGoColors.muted, fontSize: 16),
+            ),
+            const SizedBox(height: 24),
+            if (!_waitingForCode)
+              TextField(
+                controller: _phoneController,
+                enabled: !_loading,
+                autofocus: true,
+                keyboardType: TextInputType.phone,
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(RegExp(r'[0-9+ ()-]')),
+                ],
+                onSubmitted: (_) => _requestCode(),
+                decoration: const InputDecoration(
+                  labelText: 'Номер телефона',
+                  hintText: '+992 XX XXX XX XX или +7 XXX XXX XX XX',
+                  border: OutlineInputBorder(),
+                ),
+              )
+            else ...[
+              TextField(
+                controller: _codeController,
+                focusNode: _codeFocus,
+                enabled: !_loading,
+                keyboardType: TextInputType.number,
+                inputFormatters: [
+                  FilteringTextInputFormatter.digitsOnly,
+                  LengthLimitingTextInputFormatter(6),
+                ],
+                onChanged: (value) {
+                  if (value.length == 6 && !_loading) _confirmCode();
+                },
+                decoration: const InputDecoration(
+                  labelText: 'SMS-код',
+                  hintText: '000000',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              Wrap(
+                alignment: WrapAlignment.spaceBetween,
+                spacing: 8,
+                runSpacing: 4,
+                children: [
+                  TextButton(
+                    onPressed: _loading ? null : _changePhone,
+                    child: const Text('Изменить номер'),
+                  ),
+                  TextButton(
+                    onPressed: _loading || _resendSeconds > 0
+                        ? null
+                        : () => _requestCode(resend: true),
+                    child: Text(
+                      _resendSeconds > 0
+                          ? 'Повторить через $_resendSeconds с'
+                          : 'Отправить ещё раз',
+                    ),
+                  ),
+                ],
+              ),
+            ],
+            if (_error != null) ...[
+              const SizedBox(height: 10),
+              Text(
+                _error!,
+                style: const TextStyle(
+                  color: TajGoColors.error,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
             const SizedBox(height: 18),
-            const Center(
-              child: Chip(
-                avatar: Icon(Icons.science_rounded, size: 18),
-                label: Text('Тестовый вход'),
+            FilledButton(
+              onPressed: _loading
+                  ? null
+                  : _waitingForCode
+                  ? _confirmCode
+                  : _requestCode,
+              child: _loading
+                  ? const SizedBox.square(
+                      dimension: 22,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Text(_waitingForCode ? 'Подтвердить' : 'Получить код'),
+            ),
+            if (_demoAllowed) ...[
+              const SizedBox(height: 18),
+              const Center(
+                child: Chip(
+                  avatar: Icon(Icons.science_rounded, size: 18),
+                  label: Text('Тестовый вход'),
+                ),
               ),
-            ),
-            TextButton(
-              onPressed: _loading ? null : _demoLogin,
-              child: const Text('Продолжить без подтверждённого номера'),
-            ),
+              TextButton(
+                onPressed: _loading ? null : _demoLogin,
+                child: const Text('Продолжить без подтверждённого номера'),
+              ),
+            ],
           ],
-        ],
+        ),
       ),
     ),
   );
@@ -328,28 +334,17 @@ String? normalizeTajikPhone(String input) {
   return '+992$digits';
 }
 
-class TajikPhoneInputFormatter extends TextInputFormatter {
-  const TajikPhoneInputFormatter();
-
-  @override
-  TextEditingValue formatEditUpdate(
-    TextEditingValue oldValue,
-    TextEditingValue newValue,
-  ) {
-    var digits = newValue.text.replaceAll(RegExp(r'\D'), '');
-    if (digits.startsWith('992')) digits = digits.substring(3);
-    if (digits.length > 9) digits = digits.substring(0, 9);
-    final buffer = StringBuffer('+992');
-    for (var index = 0; index < digits.length; index++) {
-      if (index == 0 || index == 2 || index == 5 || index == 7) {
-        buffer.write(' ');
-      }
-      buffer.write(digits[index]);
-    }
-    final value = buffer.toString();
-    return TextEditingValue(
-      text: value,
-      selection: TextSelection.collapsed(offset: value.length),
-    );
+/// Explicit country codes are preserved; local nine-digit input remains Tajik.
+String? normalizeLoginPhone(String input) {
+  final text = input.trim();
+  if (!RegExp(r'^[0-9+ ()\-\u00a0\u202f]+$').hasMatch(text)) return null;
+  final compact = text.replaceAll(RegExp(r'[ ()\-\u00a0\u202f]'), '');
+  if (!compact.startsWith('+')) {
+    if (compact.contains('+')) return null;
+    return normalizeTajikPhone(compact);
   }
+  if (!RegExp(r'^\+[1-9]\d{7,14}$').hasMatch(compact)) return null;
+  if (compact.startsWith('+992') && compact.length != 13) return null;
+  if (compact.startsWith('+7') && compact.length != 12) return null;
+  return compact;
 }

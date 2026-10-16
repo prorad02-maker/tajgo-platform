@@ -22,7 +22,7 @@ import '../test/support/ui_fixture.dart';
 
 const _project = 'demo-tajgo-android';
 const _phone = '+992900000001'; // Synthetic account in the local emulator only.
-const _uiPhone = '+992900000002';
+const _uiPhone = '+79000000002'; // Synthetic +7 login; no production SMS.
 
 class _NativeAuth extends AuthService {
   _NativeAuth(super.auth);
