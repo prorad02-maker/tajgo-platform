@@ -104,6 +104,8 @@ class FixtureOrders extends Fake implements OrderRepository {
 }
 
 class FixtureCourier extends Fake implements CourierRepository {
+  @override
+  Stream<List<TajGoCourier>> onlineCouriersStream() => Stream.value([]);
   bool failEnsure = false;
   Object? ensureError;
   TajGoCourier? cachedCourier;
@@ -218,9 +220,14 @@ class UiFixture {
     preferences: FixturePreferences(),
   );
   final cart = MarketplaceCart();
-  Widget wrap(Widget child) => TajGoScope.withServices(
-    authService: FixtureAuth(),
-    userRepository: users,
+  Widget wrap(
+    Widget child, {
+    AuthService? authService,
+    UserRepository? userRepository,
+    TajGoLocationService? locationService,
+  }) => TajGoScope.withServices(
+    authService: authService ?? FixtureAuth(),
+    userRepository: userRepository ?? users,
     accountModeService: UnusedMode(),
     accountMigrationService: UnusedMigration(),
     rolePreferenceService: UnusedRoles(),
@@ -230,7 +237,7 @@ class UiFixture {
     courierApplicationRepository: FixtureApplications(),
     orderRepository: orders,
     routeService: RouteService(),
-    locationService: UnusedLocation(),
+    locationService: locationService ?? UnusedLocation(),
     externalNavigatorService: navigator,
     marketplaceRepository: marketplace,
     merchantApplicationRepository: FixtureMerchants(),

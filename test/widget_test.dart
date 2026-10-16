@@ -1184,7 +1184,7 @@ void main() {
       find.byKey(const ValueKey('new-order-map-confirm')),
     );
 
-    expect(mapRect, const Rect.fromLTWH(0, 0, 360, 800));
+    expect(mapRect, const Rect.fromLTWH(0, 0, 360, 528));
     expect(panelRect.top, 528);
     expect(panelRect.bottom, 800);
     expect(panelRect.height, lessThanOrEqualTo(300));

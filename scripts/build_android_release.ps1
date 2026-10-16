@@ -24,10 +24,13 @@ Write-Host '== flutter test ==' -ForegroundColor Cyan
 Invoke-TajGoCommand flutter test --no-pub
 
 Write-Host '== build release APK ==' -ForegroundColor Cyan
-Invoke-TajGoCommand flutter build apk --release --no-pub
+# Let Flutter regenerate release plugin registration after debug/native tests.
+# --no-pub reuses the debug registrant, which includes integration_test even
+# though Gradle correctly excludes dev plugins from release dependencies.
+Invoke-TajGoCommand flutter build apk --release --dart-define=TAJGO_ENV=production --dart-define=TAJGO_FF_NOTIFICATIONS=true --dart-define=TAJGO_FF_CRASH=true
 
 Write-Host '== build release AAB ==' -ForegroundColor Cyan
-Invoke-TajGoCommand flutter build appbundle --release --no-pub
+Invoke-TajGoCommand flutter build appbundle --release --dart-define=TAJGO_ENV=production --dart-define=TAJGO_FF_NOTIFICATIONS=true --dart-define=TAJGO_FF_CRASH=true
 
 $apk = 'build/app/outputs/flutter-apk/app-release.apk'
 $aab = 'build/app/outputs/bundle/release/app-release.aab'

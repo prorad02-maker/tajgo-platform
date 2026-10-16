@@ -1,5 +1,6 @@
 import '../../../shared/widgets/tajgo_map_attribution.dart';
 import 'dart:async';
+import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -28,6 +29,7 @@ import '../services/place_search_service.dart';
 import '../services/tajgo_map_camera.dart';
 import '../services/tajgo_location_service.dart';
 import '../widgets/tajgo_location_widgets.dart';
+import '../widgets/tajgo_map_loading_status.dart';
 import '../widgets/address_details_dialog.dart';
 import '../widgets/tajgo_place_search_sheet.dart';
 import '../widgets/tajgo_route_summary_card.dart';
@@ -79,6 +81,7 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen>
   bool _gestureMoving = false;
   bool _userMovedCamera = false;
   bool _mapLoading = true;
+  int _mapTileRevision = 0;
   bool _tileReadyScheduled = false;
   bool _showLocateHint = false;
   bool _showYouAreHere = false;
@@ -126,6 +129,7 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen>
     final storedCity = await _citySelection.load();
     if (mounted &&
         ownership == _cityOwnershipGeneration &&
+        !_userMovedCamera &&
         storedCity.id != _city.id) {
       setState(() => _city = storedCity);
       _map.move(storedCity.center, storedCity.defaultZoom);
@@ -140,17 +144,23 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen>
     }
     final point = LatLng(position.latitude, position.longitude);
     final detected = ServiceAreaRegistry.detect(point);
+    final canDetectCity =
+        ownership == _cityOwnershipGeneration && !_userMovedCamera;
     setState(() {
       _current = point;
-      if (detected != null && ownership == _cityOwnershipGeneration) {
+      if (detected != null && canDetectCity) {
         _city = detected;
       }
       _gpsWeak = position.accuracy > 50;
     });
-    if (detected != null && ownership == _cityOwnershipGeneration) {
+    if (detected != null && canDetectCity) {
       unawaited(_citySelection.save(detected));
     }
-    await _moveToCurrent(point);
+    if (ownership == _cityOwnershipGeneration &&
+        !_userMovedCamera &&
+        _city.contains(point)) {
+      await _moveToCurrent(point);
+    }
     await _resolveCenter();
     unawaited(_refreshFreshLocation());
   }
@@ -170,17 +180,21 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen>
       }
       final point = LatLng(position.latitude, position.longitude);
       final detected = ServiceAreaRegistry.detect(point);
+      final canDetectCity =
+          ownership == _cityOwnershipGeneration && !_userMovedCamera;
       setState(() {
         _current = point;
         _gpsWeak = position.accuracy > 50;
-        if (detected != null && ownership == _cityOwnershipGeneration) {
+        if (detected != null && canDetectCity) {
           _city = detected;
         }
       });
-      if (detected != null && ownership == _cityOwnershipGeneration) {
+      if (detected != null && canDetectCity) {
         unawaited(_citySelection.save(detected));
       }
-      if (!_userMovedCamera) {
+      if (ownership == _cityOwnershipGeneration &&
+          !_userMovedCamera &&
+          _city.contains(point)) {
         await _moveToCurrent(point);
         await _resolveCenter();
       }
@@ -907,8 +921,10 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen>
               return NewOrderMapStack(
                 key: const ValueKey('new-order-map-screen'),
                 children: [
-                  Positioned.fill(
+                  NewOrderMapViewport(
                     key: const ValueKey('new-order-map-viewport'),
+                    panelHeight: panelHeight,
+                    selecting: selecting,
                     child: FlutterMap(
                       mapController: _map,
                       options: MapOptions(
@@ -932,6 +948,7 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen>
                       ),
                       children: [
                         TileLayer(
+                          key: ValueKey(_mapTileRevision),
                           urlTemplate:
                               MapProviderConfig.current.tileUrlTemplate,
                           userAgentPackageName:
@@ -1009,16 +1026,9 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen>
                     ),
                   ),
                   if (selecting)
-                    Positioned.fill(
-                      bottom: panelHeight,
-                      child: IgnorePointer(
-                        child: Center(
-                          child: Transform.translate(
-                            offset: const Offset(0, -24),
-                            child: _SelectionPin(stage: _stage),
-                          ),
-                        ),
-                      ),
+                    NewOrderSelectionPinAnchor(
+                      panelHeight: panelHeight,
+                      child: _SelectionPin(stage: _stage),
                     ),
                   Positioned(
                     top: 0,
@@ -1062,10 +1072,15 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen>
                   if (_mapLoading)
                     Positioned(
                       top: MediaQuery.paddingOf(context).top + 70,
-                      left: 0,
-                      right: 0,
-                      child: const Center(
-                        child: _MapStatusChip(text: 'Загружаем карту…'),
+                      left: 16,
+                      right: 16,
+                      child: Center(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 360),
+                          child: TajGoMapLoadingStatus(
+                            onRetry: () => setState(() => _mapTileRevision++),
+                          ),
+                        ),
                       ),
                     ),
                   Positioned(
@@ -1440,17 +1455,9 @@ class _SelectionPin extends StatelessWidget {
       child: Stack(
         alignment: Alignment.topCenter,
         children: [
-          Icon(
-            Icons.location_pin,
-            size: 58,
-            color: color,
-            shadows: const [
-              Shadow(
-                color: Color(0x66000000),
-                blurRadius: 8,
-                offset: Offset(0, 4),
-              ),
-            ],
+          CustomPaint(
+            size: const Size.square(NewOrderMapLayout.selectionPinSize),
+            painter: _SelectionPinPainter(color),
           ),
           Positioned(
             top: 11,
@@ -1467,6 +1474,30 @@ class _SelectionPin extends StatelessWidget {
       ),
     );
   }
+}
+
+class _SelectionPinPainter extends CustomPainter {
+  const _SelectionPinPainter(this.color);
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width, h = size.height;
+    // The painted tip is exactly bottomCenter, the coordinate anchor.
+    final path = ui.Path()
+      ..moveTo(w / 2, h)
+      ..cubicTo(w * .40, h * .76, w * .10, h * .52, w * .10, h * .35)
+      ..cubicTo(w * .10, h * .11, w * .28, 0, w / 2, 0)
+      ..cubicTo(w * .72, 0, w * .90, h * .11, w * .90, h * .35)
+      ..cubicTo(w * .90, h * .52, w * .60, h * .76, w / 2, h)
+      ..close();
+    canvas.drawShadow(path, const Color(0x66000000), 4, true);
+    canvas.drawPath(path, Paint()..color = color);
+  }
+
+  @override
+  bool shouldRepaint(_SelectionPinPainter oldDelegate) =>
+      oldDelegate.color != color;
 }
 
 class _CityChip extends StatelessWidget {
@@ -1879,8 +1910,10 @@ Widget buildNewOrderEmergencyMapLayoutForTest({
     size: size,
     child: NewOrderMapStack(
       children: [
-        Positioned.fill(
+        NewOrderMapViewport(
           key: const ValueKey('new-order-map-viewport'),
+          panelHeight: panelHeight,
+          selecting: true,
           child: FlutterMap(
             options: const MapOptions(
               initialCenter: LatLng(40.2833, 69.6222),
@@ -1888,6 +1921,10 @@ Widget buildNewOrderEmergencyMapLayoutForTest({
             ),
             children: const [],
           ),
+        ),
+        NewOrderSelectionPinAnchor(
+          panelHeight: panelHeight,
+          child: const _SelectionPin(stage: _Stage.pickFrom),
         ),
         Positioned(
           key: const ValueKey('new-order-map-gps'),

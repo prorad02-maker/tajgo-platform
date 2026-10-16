@@ -21,6 +21,7 @@ class PlaceSearchService {
     this._savedPlaces,
     MapPerformanceMonitor? performanceMonitor,
     this.loadLocalStores = true,
+    this.allowPreviewPlaces = false,
   }) : _remoteProvider = remoteProvider ?? const NativeGeocodingProvider(),
        _normalizer = normalizer ?? const AddressNormalizer(),
        _reverseGeocoding = reverseGeocoding ?? const ReverseGeocodingService(),
@@ -36,6 +37,7 @@ class PlaceSearchService {
   SavedPlacesService get savedPlaces => _savedPlaces ??= SavedPlacesService();
   final MapPerformanceMonitor performance;
   final bool loadLocalStores;
+  final bool allowPreviewPlaces;
   List<PlaceSuggestion>? _localCache;
 
   Future<List<PlaceSuggestion>> search(
@@ -57,6 +59,7 @@ class PlaceSearchService {
 
     void addMatches(List<PlaceSuggestion> places, String source) {
       for (final place in places) {
+        if (!_canSelect(place)) continue;
         if (activeCity != null && !activeCity.contains(place.point)) continue;
         final score = query.isEmpty
             ? 0.5
@@ -85,6 +88,7 @@ class PlaceSearchService {
         activeCity?.center ?? near,
       );
       for (final place in remote) {
+        if (!_canSelect(place)) continue;
         if (activeCity != null && !activeCity.contains(place.point)) continue;
         output.add(_withDistance(place.copyWith(cityId: activeCity?.id), near));
       }
@@ -134,7 +138,7 @@ class PlaceSearchService {
       final places = decoded
           .whereType<Map<String, dynamic>>()
           .map((item) => PlaceSuggestion.fromJson(item, source: 'local'))
-          .where((place) => place.lat != 0 || place.lng != 0)
+          .where(_canSelect)
           .toList();
       _localCache = places;
       return places;
@@ -150,6 +154,9 @@ class PlaceSearchService {
       distanceMetersFromUser: distance.as(LengthUnit.Meter, near, place.point),
     );
   }
+
+  bool _canSelect(PlaceSuggestion place) =>
+      place.hasValidCoordinates && (allowPreviewPlaces || !place.isPreview);
 
   int _sourcePriority(String source) => switch (source) {
     'favorite' => 0,

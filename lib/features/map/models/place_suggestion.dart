@@ -53,6 +53,23 @@ class PlaceSuggestion {
 
   LatLng get point => LatLng(lat, lng);
 
+  /// Preview records must stay out of ordering, including persisted favorites.
+  bool get isPreview =>
+      id.toLowerCase().startsWith('demo_') ||
+      (partnerId?.toLowerCase().startsWith('demo_') ?? false) ||
+      tags.any((tag) => tag.toLowerCase() == 'demo') ||
+      title.toLowerCase().startsWith('демо:') ||
+      address.toLowerCase().startsWith('демо-точка');
+
+  bool get hasValidCoordinates =>
+      lat.isFinite &&
+      lng.isFinite &&
+      lat >= -90 &&
+      lat <= 90 &&
+      lng >= -180 &&
+      lng <= 180 &&
+      (lat != 0 || lng != 0);
+
   PlaceSuggestion copyWith({
     double? distanceMetersFromUser,
     double? confidence,
