@@ -98,12 +98,23 @@ class _CustomerOrdersTabState extends State<CustomerOrdersTab> {
                           ),
                         ),
                       ),
-                      const TajGoSectionHeader(title: 'История'),
+                      if (filtered.any((o) => !o.isActive))
+                        const TajGoSectionHeader(title: 'История'),
                       ...filtered
                           .where((o) => !o.isActive)
                           .map((o) => TajGoOrderHistoryTile(order: o)),
                     ] else
-                      ...filtered.map((o) => TajGoOrderHistoryTile(order: o)),
+                      ...filtered.map(
+                        (o) => o.isActive
+                            ? ActiveOrderCard(
+                                order: o,
+                                margin: const EdgeInsets.symmetric(
+                                  horizontal: TajGoSpacing.screenH,
+                                  vertical: TajGoSpacing.xs,
+                                ),
+                              )
+                            : TajGoOrderHistoryTile(order: o),
+                      ),
                   ],
                 );
               },
@@ -137,6 +148,20 @@ class _CustomerOrdersTabState extends State<CustomerOrdersTab> {
                   selected: f == _filter,
                   onSelected: (_) => setState(() => _filter = f),
                   selectedColor: TajGoColors.mint,
+                  labelStyle: const TextStyle(
+                    fontFamily: 'Roboto',
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: TajGoColors.ink,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  side: BorderSide(
+                    color: f == _filter
+                        ? Colors.transparent
+                        : const Color(0xFFD7E2DA),
+                  ),
                 ),
               );
             })

@@ -1223,7 +1223,8 @@ void main() {
         findsOneWidget,
       );
       expect(find.byKey(const ValueKey('new-order-map-gps')), findsOneWidget);
-      expect(find.textContaining('Откуда: ул. Асири'), findsOneWidget);
+      expect(find.text('Откуда'), findsOneWidget);
+      expect(find.textContaining('ул. Асири'), findsOneWidget);
       expect(find.textContaining('7JM5+9C8'), findsNothing);
       expect(find.text('Использовать моё местоположение'), findsNothing);
       expect(find.text('GPS'), findsNothing);

@@ -20,6 +20,7 @@ import '../../../core/services/order_repository.dart';
 import '../../../core/services/pricing.dart' as pricing;
 import '../../../core/services/safe_diagnostics.dart';
 import '../../../shared/widgets/tajgo_scope.dart';
+import '../../../shared/delivery/delivery_widgets.dart';
 import '../../customer/order_tracking_screen.dart';
 import '../models/place_suggestion.dart';
 import '../models/map_session_state.dart';
@@ -1339,13 +1340,13 @@ class _AddressField extends StatelessWidget {
   @override
   Widget build(BuildContext context) => InkWell(
     onTap: onTap,
-    borderRadius: BorderRadius.circular(12),
+    borderRadius: BorderRadius.circular(16),
     child: Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
         color: active ? const Color(0xFFEAF4E7) : const Color(0xFFF5F6F5),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: active ? TajGoColors.green : const Color(0xFFE2E5E3),
         ),
@@ -1362,7 +1363,7 @@ class _AddressField extends StatelessWidget {
                   label,
                   style: const TextStyle(
                     color: TajGoColors.muted,
-                    fontSize: 10,
+                    fontSize: 12,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
@@ -1371,7 +1372,7 @@ class _AddressField extends StatelessWidget {
                   maxLines: 2,
                   style: const TextStyle(
                     fontWeight: FontWeight.w700,
-                    fontSize: 13,
+                    fontSize: 15,
                   ),
                 ),
                 Text(
@@ -1380,7 +1381,7 @@ class _AddressField extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     color: TajGoColors.muted,
-                    fontSize: 10,
+                    fontSize: 12,
                   ),
                 ),
               ],
@@ -1423,6 +1424,7 @@ class _PointBadge extends StatelessWidget {
             )
           : Text(
               label,
+              textScaler: TextScaler.noScaling,
               style: TextStyle(
                 color: active
                     ? label == 'A'
@@ -1598,55 +1600,59 @@ class _DetailsPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Material(
     color: Colors.white,
-    borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+    borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+    clipBehavior: Clip.antiAlias,
     child: SafeArea(
       top: false,
       child: Column(
         children: [
           Expanded(
             child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  const Text(
+                    'Ваша доставка',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
+                  ),
+                  const SizedBox(height: 12),
                   _DetailsAddressRow(
                     label: 'Откуда',
                     address: from.address,
                     marker: 'A',
                     onTap: () => onEdit(_Stage.pickFrom),
                   ),
-                  const SizedBox(height: 5),
+                  const SizedBox(height: 8),
                   _DetailsAddressRow(
                     label: 'Куда',
                     address: to.address,
                     marker: 'B',
                     onTap: () => onEdit(_Stage.pickTo),
                   ),
-                  const SizedBox(height: 8),
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
+                  const SizedBox(height: 12),
+                  if (types.length > 1) ...[
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
                       children: types.entries
                           .map(
-                            (entry) => Padding(
-                              padding: const EdgeInsets.only(right: 6),
-                              child: ChoiceChip(
-                                label: Text(entry.value),
-                                selected: type == entry.key,
-                                selectedColor: TajGoColors.darkGreen,
-                                labelStyle: TextStyle(
-                                  color: type == entry.key
-                                      ? Colors.white
-                                      : TajGoColors.ink,
-                                ),
-                                onSelected: (_) => onType(entry.key),
+                            (entry) => ChoiceChip(
+                              label: Text(entry.value),
+                              selected: type == entry.key,
+                              selectedColor: TajGoColors.deepGreen,
+                              labelStyle: TextStyle(
+                                color: type == entry.key
+                                    ? Colors.white
+                                    : TajGoColors.ink,
                               ),
+                              onSelected: (_) => onType(entry.key),
                             ),
                           )
                           .toList(),
                     ),
-                  ),
-                  const SizedBox(height: 8),
+                    const SizedBox(height: 12),
+                  ],
                   TajGoRouteSummaryCard(
                     route: route,
                     loading: routeLoading,
@@ -1654,94 +1660,80 @@ class _DetailsPanel extends StatelessWidget {
                     onShowEntireRoute: onShowRoute,
                     compact: true,
                   ),
-                  if (routeError != null)
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Icons.route_outlined),
-                      title: Text(routeError!),
-                      trailing: TextButton(
-                        onPressed: onRetryRoute,
-                        child: const Text('Повторить'),
-                      ),
+                  if (routeError != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      routeError!,
+                      style: const TextStyle(color: TajGoColors.muted),
                     ),
+                    TextButton.icon(
+                      onPressed: onRetryRoute,
+                      icon: const Icon(Icons.refresh_rounded),
+                      label: const Text('Повторить'),
+                    ),
+                  ],
                   if (quoteLoading) const LinearProgressIndicator(minHeight: 2),
                   if (quoteError != null)
                     Padding(
-                      padding: const EdgeInsets.only(top: 6),
+                      padding: const EdgeInsets.only(top: 8),
                       child: Text(
                         quoteError!,
                         style: const TextStyle(
-                          color: TajGoColors.muted,
-                          fontSize: 12,
+                          color: TajGoColors.error,
+                          fontSize: 13,
                         ),
                       ),
                     ),
-                  const SizedBox(height: 7),
+                  const SizedBox(height: 12),
                   TextField(
                     controller: comment,
                     maxLength: 200,
-                    maxLines: 1,
+                    minLines: 1,
+                    maxLines: 3,
                     decoration: const InputDecoration(
-                      labelText: 'Подъезд, ориентир или комментарий',
+                      labelText: 'Комментарий курьеру',
+                      hintText: 'Подъезд, этаж, ориентир',
                       counterText: '',
                       isDense: true,
                     ),
                   ),
-                  const SizedBox(height: 7),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              price.text.isEmpty
-                                  ? 'Рассчитываем предварительную цену'
-                                  : 'Доставка — ${price.text} сомони',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                            const Text(
-                              'Предварительная цена. Финальная цена подтверждается сервисом.',
-                              style: TextStyle(
-                                color: TajGoColors.muted,
-                                fontSize: 11,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      SizedBox(
-                        width: 105,
-                        child: TextField(
-                          controller: price,
-                          readOnly: true,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'Цена',
-                            suffixText: 'сом.',
-                            isDense: true,
-                          ),
-                        ),
-                      ),
-                    ],
+                  const SizedBox(height: 10),
+                  const Text(
+                    'Предварительная цена. Финальная цена подтверждается сервисом.',
+                    style: TextStyle(color: TajGoColors.muted, fontSize: 12),
                   ),
                 ],
               ),
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
-            child: SizedBox(
-              width: double.infinity,
-              child: FilledButton(
-                style: FilledButton.styleFrom(minimumSize: const Size(0, 48)),
-                onPressed: busy || route == null || !quoteReady
-                    ? null
-                    : onSubmit,
-                child: Text(busy ? 'Оформляем...' : 'Оформить доставку'),
-              ),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+            decoration: const BoxDecoration(
+              border: Border(top: BorderSide(color: Color(0xFFEDF1EE))),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  price.text.isEmpty
+                      ? 'Рассчитываем стоимость…'
+                      : 'Доставка · ${price.text} сомони',
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                    color: TajGoColors.deepGreen,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                DeliveryPrimaryAction(
+                  label: 'Оформить доставку',
+                  busy: busy,
+                  onPressed: route == null || !quoteReady ? null : onSubmit,
+                  icon: Icons.arrow_forward_rounded,
+                ),
+              ],
             ),
           ),
         ],
@@ -1769,34 +1761,48 @@ class _DetailsAddressRow extends StatelessWidget {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(10),
-      child: Row(
-        children: [
-          _PointBadge(label: marker, active: true, selected: false),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '$label: ${presentation.primary}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.w700),
-                ),
-                Text(
-                  presentation.secondary,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: TajGoColors.muted,
-                    fontSize: 12,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(
+          children: [
+            _PointBadge(label: marker, active: true, selected: false),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: const TextStyle(
+                      color: TajGoColors.muted,
+                      fontSize: 12,
+                    ),
                   ),
-                ),
-              ],
+                  Text(
+                    presentation.primary,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 15,
+                      height: 1.3,
+                    ),
+                  ),
+                  Text(
+                    presentation.secondary,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: TajGoColors.muted,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-          const Icon(Icons.edit_rounded, size: 17, color: TajGoColors.muted),
-        ],
+            const Icon(Icons.edit_rounded, size: 17, color: TajGoColors.muted),
+          ],
+        ),
       ),
     );
   }

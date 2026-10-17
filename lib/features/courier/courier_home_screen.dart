@@ -22,7 +22,7 @@ import '../../shared/widgets/tajgo_state_view.dart';
 import '../../core/services/user_error_message.dart';
 import '../../core/services/authoritative_command_service.dart';
 import '../../core/design/tajgo_money.dart';
-import '../../shared/widgets/tajgo_status_pill.dart';
+import '../../shared/delivery/delivery_widgets.dart';
 import 'courier_order_screen.dart';
 import 'courier_application_status_screen.dart';
 import 'courier_onboarding_screen.dart';
@@ -555,6 +555,7 @@ class _CourierHomeScreenState extends State<CourierHomeScreen>
                       child: Column(
                         children: [
                           _CourierHeader(
+                            city: courier?.city ?? 'Худжанд',
                             online: online,
                             broadcasting: _broadcasting,
                             busy: _busy || !_profileReady,
@@ -606,14 +607,24 @@ class _CourierHomeScreenState extends State<CourierHomeScreen>
                               courier: courier,
                             ),
                           ),
-                          TabBar(
-                            isScrollable:
-                                MediaQuery.textScalerOf(context).scale(14) > 20,
-                            tabs: const [
-                              Tab(text: 'Рядом'),
-                              Tab(text: 'Дальше'),
-                              Tab(text: 'Мой заказ'),
-                            ],
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 6, 16, 8),
+                            child: TabBar(
+                              dividerColor: Colors.transparent,
+                              indicatorSize: TabBarIndicatorSize.tab,
+                              indicator: BoxDecoration(
+                                color: TajGoColors.mint,
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                              isScrollable:
+                                  MediaQuery.textScalerOf(context).scale(14) >
+                                  20,
+                              tabs: const [
+                                Tab(text: 'Рядом'),
+                                Tab(text: 'Дальше'),
+                                Tab(text: 'Мой заказ'),
+                              ],
+                            ),
                           ),
                         ],
                       ),
@@ -628,6 +639,7 @@ class _CourierHomeScreenState extends State<CourierHomeScreen>
                         )
                       else
                         _PilotOrdersFeed(
+                          onRetry: () => setState(() {}),
                           courier: courier,
                           repository: repository,
                           courierId: _uid,
@@ -645,6 +657,7 @@ class _CourierHomeScreenState extends State<CourierHomeScreen>
                         )
                       else
                         _PilotOrdersFeed(
+                          onRetry: () => setState(() {}),
                           courier: courier,
                           repository: repository,
                           courierId: _uid,
@@ -765,83 +778,126 @@ class _PilotStatsState extends State<_PilotStats> {
   }
 
   @override
-  Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, constraints) {
-      final courier = widget.courier;
-      final columns = MediaQuery.textScalerOf(context).scale(11) > 15 ? 2 : 4;
-      final width = (constraints.maxWidth - 8 * (columns - 1)) / columns;
-      final items = <Widget>[
-        _MiniStat(
-          label: 'GPS',
-          value: courier?.location == null
-              ? 'выключен'
-              : (courier?.locationAccuracy ?? 999) <= 50
-              ? 'точный'
-              : 'слабый',
-        ),
-        _MiniStat(
-          label: 'Транспорт',
-          value: CourierTransport.label(
-            CourierTransport.normalize(courier?.transport),
-          ),
-        ),
-        FutureBuilder<NavigatorPreference>(
-          future: _navigator,
-          builder: (context, snapshot) => _MiniStat(
-            label: 'Навигатор',
-            value: switch (snapshot.data?.navigator) {
-              ExternalNavigator.yandex => 'Яндекс',
-              ExternalNavigator.google => 'Google',
-              ExternalNavigator.twoGis => '2ГИС',
-              ExternalNavigator.system => 'Телефон',
-              _ => 'TajGo',
-            },
-          ),
-        ),
-        _MiniStat(
-          label: 'Сегодня',
-          value:
-              '${courier?.ordersToday ?? 0} · ${TajGoMoney.format(courier?.earningsToday ?? 0)}',
-        ),
-      ];
-      return Wrap(
-        spacing: 8,
-        runSpacing: 12,
+  Widget build(BuildContext context) {
+    final courier = widget.courier;
+    final large = MediaQuery.textScalerOf(context).scale(14) > 20;
+    final income = _MiniStat(
+      label: 'Доход сегодня',
+      value: TajGoMoney.amount(courier?.earningsToday ?? 0),
+      unit: 'сомони',
+    );
+    final completed = _MiniStat(
+      label: 'Доставок сегодня',
+      value: '${courier?.ordersToday ?? 0}',
+    );
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: const Color(0xFFDEE8E0)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          for (final item in items) SizedBox(width: width, child: item),
+          if (large) ...[
+            income,
+            const SizedBox(height: 12),
+            completed,
+          ] else
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: income),
+                const SizedBox(width: 16),
+                Expanded(child: completed),
+              ],
+            ),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 7,
+            runSpacing: 7,
+            children: [
+              DeliveryPill(
+                icon: Icons.gps_fixed_rounded,
+                label: courier?.location == null
+                    ? 'GPS выключен'
+                    : (courier?.locationAccuracy ?? 999) <= 50
+                    ? 'GPS точный'
+                    : 'GPS слабый',
+                warning:
+                    courier?.location != null &&
+                    (courier?.locationAccuracy ?? 999) > 50,
+              ),
+              DeliveryPill(
+                icon: Icons.pedal_bike_rounded,
+                label: CourierTransport.label(
+                  CourierTransport.normalize(courier?.transport),
+                ),
+              ),
+              FutureBuilder<NavigatorPreference>(
+                future: _navigator,
+                builder: (context, snapshot) => DeliveryPill(
+                  icon: Icons.navigation_outlined,
+                  label: switch (snapshot.data?.navigator) {
+                    ExternalNavigator.yandex => 'Яндекс',
+                    ExternalNavigator.google => 'Google',
+                    ExternalNavigator.twoGis => '2ГИС',
+                    ExternalNavigator.system => 'Телефон',
+                    _ => 'TajGo',
+                  },
+                ),
+              ),
+            ],
+          ),
         ],
-      );
-    },
-  );
+      ),
+    );
+  }
 }
 
 class _MiniStat extends StatelessWidget {
-  const _MiniStat({required this.label, required this.value});
-  final String label;
-  final String value;
-
+  const _MiniStat({required this.label, required this.value, this.unit});
+  final String label, value;
+  final String? unit;
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 3),
-    child: Column(
-      children: [
-        Text(
-          label,
-          style: const TextStyle(color: TajGoColors.muted, fontSize: 10),
-        ),
-        Text(
-          value,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 11),
-        ),
-      ],
-    ),
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(
+        label,
+        style: const TextStyle(color: TajGoColors.muted, fontSize: 12),
+      ),
+      const SizedBox(height: 4),
+      Wrap(
+        spacing: 4,
+        crossAxisAlignment: WrapCrossAlignment.end,
+        children: [
+          Text(
+            value,
+            style: const TextStyle(
+              fontSize: 25,
+              fontWeight: FontWeight.w900,
+              color: TajGoColors.ink,
+            ),
+          ),
+          if (unit != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 3),
+              child: Text(
+                unit!,
+                style: const TextStyle(color: TajGoColors.muted, fontSize: 12),
+              ),
+            ),
+        ],
+      ),
+    ],
   );
 }
 
 class _PilotOrdersFeed extends StatelessWidget {
   const _PilotOrdersFeed({
+    required this.onRetry,
     required this.courier,
     required this.repository,
     required this.courierId,
@@ -852,6 +908,7 @@ class _PilotOrdersFeed extends StatelessWidget {
   });
 
   final TajGoCourier? courier;
+  final VoidCallback onRetry;
   final CourierRepository repository;
   final String courierId;
   final bool nearby;
@@ -874,6 +931,21 @@ class _PilotOrdersFeed extends StatelessWidget {
   Widget build(BuildContext context) => StreamBuilder<List<TajGoOrder>>(
     stream: repository.waitingOrdersStream(),
     builder: (context, snapshot) {
+      if (snapshot.hasError) {
+        return TajGoStateView(
+          icon: Icons.cloud_off_rounded,
+          title: 'Не удалось загрузить заказы',
+          message: userErrorMessage(snapshot.error),
+          onRetry: onRetry,
+          actionLabel: 'Повторить',
+        );
+      }
+      if (!snapshot.hasData &&
+          snapshot.connectionState == ConnectionState.waiting) {
+        return const Center(
+          child: CircularProgressIndicator(semanticsLabel: 'Загружаем заказы'),
+        );
+      }
       final orders =
           (snapshot.data ?? const <TajGoOrder>[])
               .where(
@@ -931,27 +1003,15 @@ class _PilotOrdersFeed extends StatelessWidget {
                   )
                 else ...[
                   const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      if (order.priceNegotiable) ...[
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: busy ? null : () => onCustomPrice(order),
-                            child: const Text('Предложить свою'),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                      ],
-                      Expanded(
-                        child: FilledButton(
-                          onPressed: busy ? null : () => onAcceptPrice(order),
-                          child: Text(
-                            'Принять ${TajGoMoney.format(order.clientPrice ?? order.price)}',
-                          ),
-                        ),
-                      ),
-                    ],
+                  DeliveryPrimaryAction(
+                    label: 'Предложить доставку',
+                    onPressed: busy ? null : () => onAcceptPrice(order),
                   ),
+                  if (order.priceNegotiable)
+                    TextButton(
+                      onPressed: busy ? null : () => onCustomPrice(order),
+                      child: const Text('Предложить свою цену'),
+                    ),
                 ],
               ],
             ),
@@ -1015,35 +1075,26 @@ class _LocationIssueCard extends StatelessWidget {
 
 class _CourierHeader extends StatelessWidget {
   const _CourierHeader({
+    required this.city,
     required this.online,
     required this.broadcasting,
     required this.busy,
     required this.onToggle,
     required this.onProfileReturned,
   });
-
-  final bool online;
-  final bool broadcasting;
-  final bool busy;
-  final VoidCallback onToggle;
-  final VoidCallback onProfileReturned;
-
+  final String city;
+  final bool online, broadcasting, busy;
+  final VoidCallback onToggle, onProfileReturned;
   @override
-  Widget build(BuildContext context) => Container(
+  Widget build(BuildContext context) => Padding(
     padding: EdgeInsets.fromLTRB(
-      12,
-      MediaQuery.paddingOf(context).top + 6,
-      18,
-      24,
-    ),
-    decoration: const BoxDecoration(
-      gradient: LinearGradient(
-        colors: [TajGoColors.deepGreen, TajGoColors.darkGreen],
-      ),
-      borderRadius: BorderRadius.vertical(bottom: Radius.circular(24)),
+      16,
+      MediaQuery.paddingOf(context).top + 12,
+      16,
+      0,
     ),
     child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Row(
           children: [
@@ -1051,69 +1102,121 @@ class _CourierHeader extends StatelessWidget {
               IconButton(
                 onPressed: () => Navigator.maybePop(context),
                 tooltip: 'Назад',
-                color: Colors.white,
                 icon: const Icon(Icons.arrow_back_rounded),
               ),
-            const Expanded(
-              child: Text(
-                'TajGo Курьер · Худжанд',
-                style: TextStyle(color: Colors.white70, fontSize: 13),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'TajGo Курьер',
+                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
+                  ),
+                  Text(
+                    city,
+                    style: const TextStyle(
+                      color: TajGoColors.muted,
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
               ),
             ),
-            IconButton(
+            IconButton.filledTonal(
               tooltip: 'Профиль',
-              color: Colors.white,
               onPressed: () => Navigator.push(
                 context,
                 MaterialPageRoute<void>(
                   builder: (_) => const CourierProfileScreen(),
                 ),
               ).then((_) => onProfileReturned()),
-              icon: const Icon(Icons.account_circle_rounded),
+              icon: const Icon(Icons.person_outline_rounded),
             ),
           ],
         ),
-        const SizedBox(height: 12),
-        TajGoStatusPill(online: online),
-        const SizedBox(height: 12),
-        Text(
-          online ? 'Вы на линии' : 'Готовы выйти на линию?',
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 28,
-            fontWeight: FontWeight.w900,
-          ),
-        ),
-        if (broadcasting)
-          const Padding(
-            padding: EdgeInsets.only(top: 6),
-            child: Text(
-              '📡 координаты передаются',
-              style: TextStyle(color: Colors.white70, fontSize: 12),
-            ),
-          ),
         const SizedBox(height: 16),
-        ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: 48),
-          child: SizedBox(
-            width: double.infinity,
-            child: online
-                ? OutlinedButton(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.white,
-                      side: const BorderSide(color: Colors.white, width: 1.5),
+        Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [TajGoColors.deepGreen, Color(0xFF187546)],
+            ),
+            borderRadius: BorderRadius.circular(24),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(11),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(14),
                     ),
-                    onPressed: busy ? null : onToggle,
-                    child: const Text('Уйти с линии'),
-                  )
-                : FilledButton(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      foregroundColor: TajGoColors.darkGreen,
+                    child: Icon(
+                      online
+                          ? Icons.delivery_dining_rounded
+                          : Icons.power_settings_new_rounded,
+                      color: TajGoColors.mint,
+                      size: 24,
                     ),
-                    onPressed: busy ? null : onToggle,
-                    child: const Text('Выйти на линию'),
                   ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          online ? 'Вы на линии' : 'Начать смену',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 22,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          online
+                              ? broadcasting
+                                    ? 'Геолокация передаётся клиентам'
+                                    : 'Подготавливаем геолокацию'
+                              : 'Выходите на линию, когда готовы принимать заказы',
+                          style: const TextStyle(
+                            color: Color(0xFFD7EDDE),
+                            fontSize: 13,
+                            height: 1.4,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: online
+                      ? Colors.white.withValues(alpha: 0.12)
+                      : TajGoColors.lime,
+                  foregroundColor: online ? Colors.white : TajGoColors.ink,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 14,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                ),
+                onPressed: busy ? null : onToggle,
+                icon: const Icon(Icons.power_settings_new_rounded, size: 20),
+                label: Text(
+                  online ? 'Уйти с линии' : 'Выйти на линию',
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ],
           ),
         ),
       ],

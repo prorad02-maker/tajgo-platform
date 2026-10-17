@@ -1,11 +1,10 @@
-import 'dart:io';
 import 'dart:async';
-import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
-import 'package:flutter/services.dart';
+
 import 'package:flutter_test/flutter_test.dart';
-import 'package:tajgo/app/tajgo_theme.dart';
+
 import 'package:tajgo/core/models/app_user.dart';
 import 'package:tajgo/core/models/tajgo_order.dart';
 import 'package:tajgo/features/account/account_profile_screen.dart';
@@ -24,99 +23,17 @@ import 'package:tajgo/core/models/tajgo_courier.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:tajgo/shared/design/tajgo_components.dart';
 import 'support/ui_fixture.dart';
+import 'support/ui_capture.dart';
 
-const captureKey = ValueKey('ui-capture');
 void main() {
-  setUpAll(() async {
-    final fonts = Platform.environment['TAJGO_UI_FONT_DIR'];
-    if (fonts == null) return;
-    final loader = FontLoader('Roboto');
-    for (final name in [
-      'roboto-regular.ttf',
-      'roboto-medium.ttf',
-      'roboto-bold.ttf',
-      'roboto-black.ttf',
-    ]) {
-      loader.addFont(
-        File(
-          '$fonts/$name',
-        ).readAsBytes().then((data) => ByteData.sublistView(data)),
-      );
-    }
-    await loader.load();
-    // Flutter's test engine uses Ahem for unresolved platform fonts. Use the
-    // same Roboto face there for readable previews, without changing the app.
-    await (FontLoader('Ahem')..addFont(
-          File(
-            '$fonts/roboto-regular.ttf',
-          ).readAsBytes().then((data) => ByteData.sublistView(data)),
-        ))
-        .load();
-    await (FontLoader('MaterialIcons')..addFont(
-          File(
-            '$fonts/materialicons-regular.otf',
-          ).readAsBytes().then((data) => ByteData.sublistView(data)),
-        ))
-        .load();
-  });
-  Future<void> pump(
-    WidgetTester tester,
-    UiFixture fixture,
-    Widget screen, {
-    double width = 360,
-    double height = 800,
-    double scale = 1,
-    double keyboard = 0,
-  }) async {
-    tester.view.physicalSize = Size(width, height);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    await tester.pumpWidget(
-      RepaintBoundary(
-        key: captureKey,
-        child: fixture.wrap(
-          MaterialApp(
-            debugShowCheckedModeBanner: false,
-            theme: TajGoTheme.light,
-            builder: (context, child) => MediaQuery(
-              data: MediaQuery.of(context).copyWith(
-                textScaler: TextScaler.linear(scale),
-                viewInsets: EdgeInsets.only(bottom: keyboard),
-              ),
-              child: child!,
-            ),
-            home: screen,
-          ),
-        ),
-      ),
-    );
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
-  }
-
-  Future<void> capture(WidgetTester tester, String name) async {
-    final dir = Platform.environment['TAJGO_UI_CAPTURE_DIR'];
-    if (dir == null) return;
-    await tester.runAsync(() async {
-      final boundary = tester.renderObject<RenderRepaintBoundary>(
-        find.byKey(captureKey),
-      );
-      final image = await boundary.toImage(pixelRatio: 1);
-      final data = await image.toByteData(format: ui.ImageByteFormat.png);
-      await Directory(dir).create(recursive: true);
-      await File('$dir/$name.png').writeAsBytes(data!.buffer.asUint8List());
-      image.dispose();
-    });
-  }
-
+  setUpAll(loadUiFonts);
   testWidgets(
     'profile failure and missing profile offer recovery instead of endless loading',
     (tester) async {
       final fixture = UiFixture();
       addTearDown(fixture.dispose);
       fixture.users.fail = true;
-      await pump(tester, fixture, const CustomerProfileScreen());
+      await pumpUi(tester, fixture, const CustomerProfileScreen());
       expect(find.textContaining('PRIVATE'), findsNothing);
       expect(find.text('Повторить'), findsOneWidget);
       fixture.users.fail = false;
@@ -125,7 +42,7 @@ void main() {
       expect(find.text('Мадина'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
       fixture.users.profile = null;
-      await pump(tester, fixture, const CustomerProfileScreen());
+      await pumpUi(tester, fixture, const CustomerProfileScreen());
       expect(find.byType(CircularProgressIndicator), findsNothing);
       expect(find.text('Повторить'), findsOneWidget);
     },
@@ -138,7 +55,7 @@ void main() {
     final controller = ScrollController();
     addTearDown(controller.dispose);
     fixture.orders.fail = true;
-    await pump(
+    await pumpUi(
       tester,
       fixture,
       CustomerOrdersTab(scrollController: controller),
@@ -156,7 +73,7 @@ void main() {
       final fixture = UiFixture();
       addTearDown(fixture.dispose);
       fixture.courier.failEnsure = true;
-      await pump(tester, fixture, const CourierHomeScreen());
+      await pumpUi(tester, fixture, const CourierHomeScreen());
       expect(tester.takeException(), isNull);
       expect(find.text('Повторить'), findsOneWidget);
       fixture.courier.failEnsure = false;
@@ -172,7 +89,7 @@ void main() {
       final fixture = UiFixture();
       addTearDown(fixture.dispose);
       var retried = false;
-      await pump(
+      await pumpUi(
         tester,
         fixture,
         Scaffold(
@@ -201,7 +118,7 @@ void main() {
       addTearDown(fixture.dispose);
       final semantics = tester.ensureSemantics();
       const label = 'Подтвердить отправление';
-      await pump(
+      await pumpUi(
         tester,
         fixture,
         Scaffold(
@@ -223,7 +140,7 @@ void main() {
       );
       final paragraph = tester.renderObject<RenderParagraph>(find.text(label));
       expect(paragraph.didExceedMaxLines, isFalse);
-      await pump(
+      await pumpUi(
         tester,
         fixture,
         const Scaffold(body: TajGoPrimaryButton(label: label, loading: true)),
@@ -241,7 +158,7 @@ void main() {
         final controller = ScrollController();
         addTearDown(controller.dispose);
         fixture.marketplace.fail = true;
-        await pump(
+        await pumpUi(
           tester,
           fixture,
           search
@@ -267,7 +184,7 @@ void main() {
       const screen = AdminAccessGate(
         child: Scaffold(body: Text('Управление заказами')),
       );
-      await pump(tester, fixture, screen);
+      await pumpUi(tester, fixture, screen);
       expect(find.text('Не удалось проверить доступ'), findsOneWidget);
       final profile = StreamController<AppUser?>();
       addTearDown(profile.close);
@@ -292,7 +209,7 @@ void main() {
       final controller = ScrollController();
       addTearDown(controller.dispose);
       fixture.orders.activeFail = true;
-      await pump(
+      await pumpUi(
         tester,
         fixture,
         Scaffold(
@@ -324,7 +241,7 @@ void main() {
       addTearDown(controller.dispose);
       final request = Completer<AppUser?>();
       fixture.users.getOverride = request.future;
-      await pump(
+      await pumpUi(
         tester,
         fixture,
         Scaffold(
@@ -350,7 +267,7 @@ void main() {
     (tester) async {
       final fixture = UiFixture();
       addTearDown(fixture.dispose);
-      await pump(tester, fixture, const CourierHomeScreen());
+      await pumpUi(tester, fixture, const CourierHomeScreen());
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Профиль'));
       await tester.pumpAndSettle();
@@ -396,7 +313,7 @@ void main() {
         price: 25,
         currency: 'TJS',
       );
-      await pump(tester, fixture, const CourierHomeScreen());
+      await pumpUi(tester, fixture, const CourierHomeScreen());
       await tester.pumpAndSettle();
       expect(find.text('Профиль не обновлён'), findsOneWidget);
       await tester.ensureVisible(find.text('Мой заказ'));
@@ -452,10 +369,10 @@ void main() {
             'courier' => const CourierHomeScreen(),
             _ => const AdminHomeScreen(),
           };
-          await pump(tester, fixture, screen, scale: scale);
+          await pumpUi(tester, fixture, screen, scale: scale);
           await tester.pumpAndSettle();
           expect(tester.takeException(), isNull);
-          await capture(tester, '$name-${scale.toInt()}x');
+          await captureUi(tester, '$name-${scale.toInt()}x');
           await tester.pumpWidget(const SizedBox());
         },
       );
@@ -467,7 +384,7 @@ void main() {
       (tester) async {
         final fixture = UiFixture();
         addTearDown(fixture.dispose);
-        await pump(
+        await pumpUi(
           tester,
           fixture,
           Scaffold(
@@ -486,7 +403,7 @@ void main() {
           scale: 2,
         );
         expect(tester.takeException(), isNull);
-        await capture(tester, details ? 'map-details-2x' : 'map-pickup-2x');
+        await captureUi(tester, details ? 'map-details-2x' : 'map-pickup-2x');
         await tester.pumpWidget(const SizedBox());
       },
     );

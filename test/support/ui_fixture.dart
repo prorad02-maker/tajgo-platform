@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:tajgo/core/config/app_environment.dart';
 import 'package:tajgo/core/config/feature_flags.dart';
 import 'package:tajgo/core/models/app_user.dart';
+import 'package:tajgo/core/models/courier_offer.dart';
 import 'package:tajgo/core/models/marketplace_cart.dart';
 import 'package:tajgo/core/models/marketplace_partner.dart';
 import 'package:tajgo/core/models/marketplace_product.dart';
@@ -77,6 +78,12 @@ class FixtureUsers extends Fake implements UserRepository {
 }
 
 class FixtureOrders extends Fake implements OrderRepository {
+  String? deliveryCode;
+  @override
+  Stream<String?> customerDeliveryCodeStream(
+    String orderId, {
+    bool serverV1 = false,
+  }) => Stream.value(deliveryCode);
   bool fail = false;
   bool activeFail = false;
   int subscriptions = 0;
@@ -104,6 +111,19 @@ class FixtureOrders extends Fake implements OrderRepository {
 }
 
 class FixtureCourier extends Fake implements CourierRepository {
+  List<TajGoOrder> waitingOrders = [];
+  bool waitingFail = false;
+  int waitingSubscriptions = 0;
+  @override
+  Future<void> updateLocation({
+    required String uid,
+    required double latitude,
+    required double longitude,
+    double? heading,
+    double? speed,
+    double? accuracy,
+    bool force = false,
+  }) async {}
   @override
   Stream<List<TajGoCourier>> onlineCouriersStream() => Stream.value([]);
   bool failEnsure = false;
@@ -138,7 +158,13 @@ class FixtureCourier extends Fake implements CourierRepository {
   @override
   Stream<List<TajGoOrder>> historyStream(String uid) => Stream.value([]);
   @override
-  Stream<List<TajGoOrder>> waitingOrdersStream() => Stream.value([]);
+  Stream<List<TajGoOrder>> waitingOrdersStream() {
+    waitingSubscriptions++;
+    return waitingFail
+        ? Stream.error(StateError('PRIVATE BACKEND DETAILS'))
+        : Stream.value(waitingOrders);
+  }
+
   @override
   Future<TajGoCourier?> getCourier(String uid) async => cachedCourier;
   @override
@@ -190,7 +216,18 @@ class UnusedMigration extends Fake implements AccountMigrationService {}
 
 class UnusedRoles extends Fake implements RolePreferenceService {}
 
-class UnusedOffers extends Fake implements CourierOfferRepository {}
+class FixtureOffers extends Fake implements CourierOfferRepository {
+  List<CourierOffer> offers = [];
+  bool fail = false;
+  int subscriptions = 0;
+  @override
+  Stream<List<CourierOffer>> offersStream(String orderId) {
+    subscriptions++;
+    return fail
+        ? Stream.error(StateError('PRIVATE BACKEND DETAILS'))
+        : Stream.value(offers);
+  }
+}
 
 class UnusedAddresses extends Fake implements SavedAddressRepository {}
 
@@ -206,9 +243,11 @@ class FixturePreferences extends Fake implements SharedPreferencesAsync {
 /// These adapters never access Firebase or a phone. They exercise production
 /// screen rendering with deterministic data, including failures and retries.
 class UiFixture {
+  TajGoLocationService? locationOverride;
   final users = FixtureUsers();
   final orders = FixtureOrders();
   final courier = FixtureCourier();
+  final offers = FixtureOffers();
   final marketplace = FixtureMarketplace();
   final navigator = FixtureNavigator();
   final notifications = OrderNotificationService(
@@ -233,11 +272,11 @@ class UiFixture {
     rolePreferenceService: UnusedRoles(),
     adminRepository: FixtureAdmin(),
     courierRepository: courier,
-    courierOfferRepository: UnusedOffers(),
+    courierOfferRepository: offers,
     courierApplicationRepository: FixtureApplications(),
     orderRepository: orders,
     routeService: RouteService(),
-    locationService: locationService ?? UnusedLocation(),
+    locationService: locationService ?? locationOverride ?? UnusedLocation(),
     externalNavigatorService: navigator,
     marketplaceRepository: marketplace,
     merchantApplicationRepository: FixtureMerchants(),

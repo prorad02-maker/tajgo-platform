@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-
 import '../../core/constants/tajgo_colors.dart';
 
 class TajGoOrderProgress extends StatelessWidget {
@@ -14,68 +13,49 @@ class TajGoOrderProgress extends StatelessWidget {
       'Доставлено',
     ],
   });
-
   final int currentStep;
   final List<String> labels;
-
   @override
-  Widget build(BuildContext context) => Row(
-    children: List.generate(labels.length, (index) {
-      final reached = index <= currentStep;
-      final current = index == currentStep;
-      return Expanded(
-        child: Column(
-          children: [
-            Row(
-              children: [
-                if (index > 0)
-                  Expanded(
-                    child: Container(
-                      height: 3,
-                      color: reached
-                          ? TajGoColors.green
-                          : const Color(0xFFD8E5D3),
-                    ),
+  Widget build(BuildContext context) {
+    if (labels.isEmpty) return const SizedBox.shrink();
+    final step = currentStep.clamp(0, labels.length - 1);
+    return Semantics(
+      label: 'Этап ${step + 1} из ${labels.length}: ${labels[step]}',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: List.generate(
+              labels.length,
+              (index) => Expanded(
+                child: Padding(
+                  padding: EdgeInsets.only(
+                    right: index == labels.length - 1 ? 0 : 5,
                   ),
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 250),
-                  width: current ? 18 : 14,
-                  height: current ? 18 : 14,
-                  decoration: BoxDecoration(
-                    color: reached
-                        ? TajGoColors.green
-                        : const Color(0xFFD8E5D3),
-                    shape: BoxShape.circle,
-                    border: current
-                        ? Border.all(color: TajGoColors.mint, width: 4)
-                        : null,
+                  child: Container(
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: index <= step
+                          ? TajGoColors.darkGreen
+                          : const Color(0xFFE0E9E2),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
                   ),
                 ),
-                if (index < labels.length - 1)
-                  Expanded(
-                    child: Container(
-                      height: 3,
-                      color: index < currentStep
-                          ? TajGoColors.green
-                          : const Color(0xFFD8E5D3),
-                    ),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 5),
-            Text(
-              labels[index],
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: reached ? TajGoColors.darkGreen : TajGoColors.muted,
-                fontSize: 9,
-                fontWeight: current ? FontWeight.w800 : FontWeight.w500,
               ),
             ),
-          ],
-        ),
-      );
-    }),
-  );
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '${step + 1} / ${labels.length}  ·  ${labels[step]}',
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: TajGoColors.muted,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
