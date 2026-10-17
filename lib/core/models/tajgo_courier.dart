@@ -40,7 +40,7 @@ class TajGoCourier {
   factory TajGoCourier.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data() ?? const <String, dynamic>{};
     return TajGoCourier(
-      uid: data['uid'] as String? ?? doc.id,
+      uid: doc.id,
       phoneNumber: data['phoneNumber'] as String?,
       displayName:
           data['displayName'] as String? ?? data['name'] as String? ?? 'Курьер',

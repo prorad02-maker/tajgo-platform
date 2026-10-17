@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../../../core/config/service_area_config.dart';
 import '../models/place_suggestion.dart';
 import 'address_normalizer.dart';
 import 'geocoding_provider.dart';
@@ -14,47 +15,63 @@ import 'map_performance_monitor.dart';
 class PlaceSearchService {
   PlaceSearchService({
     GeocodingProvider? remoteProvider,
-    RecentPlacesService? recentPlaces,
+    this._recentPlaces,
     AddressNormalizer? normalizer,
     ReverseGeocodingService? reverseGeocoding,
-    SavedPlacesService? savedPlaces,
+    this._savedPlaces,
     MapPerformanceMonitor? performanceMonitor,
+    this.loadLocalStores = true,
+    this.allowPreviewPlaces = false,
   }) : _remoteProvider = remoteProvider ?? const NativeGeocodingProvider(),
-       recentPlaces = recentPlaces ?? RecentPlacesService(),
        _normalizer = normalizer ?? const AddressNormalizer(),
        _reverseGeocoding = reverseGeocoding ?? const ReverseGeocodingService(),
-       savedPlaces = savedPlaces ?? SavedPlacesService(),
        performance = performanceMonitor ?? MapPerformanceMonitor.shared;
 
   final GeocodingProvider _remoteProvider;
-  final RecentPlacesService recentPlaces;
+  RecentPlacesService? _recentPlaces;
+  RecentPlacesService get recentPlaces =>
+      _recentPlaces ??= RecentPlacesService();
   final AddressNormalizer _normalizer;
   final ReverseGeocodingService _reverseGeocoding;
-  final SavedPlacesService savedPlaces;
+  SavedPlacesService? _savedPlaces;
+  SavedPlacesService get savedPlaces => _savedPlaces ??= SavedPlacesService();
   final MapPerformanceMonitor performance;
+  final bool loadLocalStores;
+  final bool allowPreviewPlaces;
   List<PlaceSuggestion>? _localCache;
 
   Future<List<PlaceSuggestion>> search(
     String input, {
     LatLng? near,
+    ServiceAreaConfig? activeCity,
     String? recentType,
   }) async {
     final stopwatch = Stopwatch()..start();
     final query = _normalizer.normalizeQuery(input);
     final local = await _loadLocal();
-    final recent = await recentPlaces.load(type: recentType);
-    final favorites = await savedPlaces.load();
+    final recent = loadLocalStores
+        ? await recentPlaces.load(type: recentType)
+        : const <PlaceSuggestion>[];
+    final favorites = loadLocalStores
+        ? await savedPlaces.load()
+        : const <PlaceSuggestion>[];
     final output = <PlaceSuggestion>[];
 
     void addMatches(List<PlaceSuggestion> places, String source) {
       for (final place in places) {
+        if (!_canSelect(place)) continue;
+        if (activeCity != null && !activeCity.contains(place.point)) continue;
         final score = query.isEmpty
             ? 0.5
             : _normalizer.scoreMatch(query, place);
         if (query.isNotEmpty && score < 0.35) continue;
         output.add(
           _withDistance(
-            place.copyWith(source: source, confidence: score),
+            place.copyWith(
+              source: source,
+              confidence: score,
+              cityId: activeCity?.id,
+            ),
             near,
           ),
         );
@@ -63,12 +80,17 @@ class PlaceSearchService {
 
     addMatches(favorites, 'favorite');
     addMatches(recent, 'recent');
-    addMatches(local, 'local');
+    if (activeCity?.id != 'dushanbe') addMatches(local, 'local');
 
     if (query.length >= 2) {
-      final remote = await _remoteProvider.search(input.trim(), near);
+      final remote = await _remoteProvider.search(
+        input.trim(),
+        activeCity?.center ?? near,
+      );
       for (final place in remote) {
-        output.add(_withDistance(place, near));
+        if (!_canSelect(place)) continue;
+        if (activeCity != null && !activeCity.contains(place.point)) continue;
+        output.add(_withDistance(place.copyWith(cityId: activeCity?.id), near));
       }
     }
 
@@ -116,7 +138,7 @@ class PlaceSearchService {
       final places = decoded
           .whereType<Map<String, dynamic>>()
           .map((item) => PlaceSuggestion.fromJson(item, source: 'local'))
-          .where((place) => place.lat != 0 || place.lng != 0)
+          .where(_canSelect)
           .toList();
       _localCache = places;
       return places;
@@ -132,6 +154,9 @@ class PlaceSearchService {
       distanceMetersFromUser: distance.as(LengthUnit.Meter, near, place.point),
     );
   }
+
+  bool _canSelect(PlaceSuggestion place) =>
+      place.hasValidCoordinates && (allowPreviewPlaces || !place.isPreview);
 
   int _sourcePriority(String source) => switch (source) {
     'favorite' => 0,

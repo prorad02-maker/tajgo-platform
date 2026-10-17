@@ -14,6 +14,11 @@ class RoutingConfig {
     required this.mode,
     required this.debugLogging,
     this.profileOverride = '',
+    this.supportedModes = const {
+      RouteMode.bicycle,
+      RouteMode.scooter,
+      RouteMode.car,
+    },
   });
 
   final bool enabled;
@@ -24,6 +29,7 @@ class RoutingConfig {
   final RouteMode mode;
   final bool debugLogging;
   final String profileOverride;
+  final Set<RouteMode> supportedModes;
 
   factory RoutingConfig.fromEnvironment() {
     const preferredProvider = String.fromEnvironment('ROUTING_PROVIDER');
@@ -40,7 +46,10 @@ class RoutingConfig {
       defaultValue: 'bicycle',
     );
     const modeValue = preferredMode == '' ? legacyMode : preferredMode;
-    const preferredBaseUrl = String.fromEnvironment('ROUTING_BASE_URL');
+    const preferredBaseUrl = String.fromEnvironment(
+      'ROUTING_BASE_URL',
+      defaultValue: 'https://router.project-osrm.org',
+    );
     const legacyBaseUrl = String.fromEnvironment('TAJGO_ROUTE_ENDPOINT');
     const preferredKey = String.fromEnvironment('ROUTING_API_KEY');
     const legacyKey = String.fromEnvironment('TAJGO_ROUTE_API_KEY');
@@ -52,17 +61,20 @@ class RoutingConfig {
       'TAJGO_ROUTE_TIMEOUT_MS',
       defaultValue: 7000,
     );
+    final providerType = provider == 'graphhopper'
+        ? RoutingProviderType.graphHopper
+        : RoutingProviderType.osrm;
+    final baseUrl = preferredBaseUrl == '' ? legacyBaseUrl : preferredBaseUrl;
+    final isPublicOsrm =
+        providerType == RoutingProviderType.osrm &&
+        baseUrl.contains('router.project-osrm.org');
     return RoutingConfig(
-      enabled:
-          const bool.fromEnvironment('ROUTING_ENABLED', defaultValue: false) ||
-          const bool.fromEnvironment(
-            'TAJGO_ROUTE_ENABLED',
-            defaultValue: false,
-          ),
-      providerType: provider == 'graphhopper'
-          ? RoutingProviderType.graphHopper
-          : RoutingProviderType.osrm,
-      baseUrl: preferredBaseUrl == '' ? legacyBaseUrl : preferredBaseUrl,
+      enabled: const bool.fromEnvironment(
+        'TAJGO_ROUTING_ENABLED',
+        defaultValue: kDebugMode,
+      ),
+      providerType: providerType,
+      baseUrl: baseUrl,
       apiKey: preferredKey == '' ? legacyKey : preferredKey,
       timeout: Duration(
         milliseconds: timeoutSeconds > 0
@@ -71,7 +83,13 @@ class RoutingConfig {
       ),
       mode: routeModeFromString(modeValue),
       debugLogging: kDebugMode,
-      profileOverride: const String.fromEnvironment('ROUTING_PROFILE'),
+      profileOverride: const String.fromEnvironment(
+        'ROUTING_PROFILE',
+        defaultValue: '',
+      ),
+      supportedModes: isPublicOsrm
+          ? const {RouteMode.car}
+          : const {RouteMode.bicycle, RouteMode.scooter, RouteMode.car},
     );
   }
 

@@ -1,0 +1,172 @@
+import 'package:flutter/material.dart';
+
+import '../../../core/models/tajgo_order.dart';
+import '../../../shared/design/tajgo_components.dart';
+import '../../../shared/widgets/tajgo_order_history_tile.dart';
+import '../../../shared/widgets/tajgo_scope.dart';
+import '../widgets/active_order_card.dart';
+
+enum _OrdersFilter { all, active, completed, cancelled }
+
+/// Вкладка «Заказы»: активные / завершённые / отменённые / спорные,
+/// custom и catalog, с фильтрами и человеческими статусами.
+class CustomerOrdersTab extends StatefulWidget {
+  const CustomerOrdersTab({super.key, required this.scrollController});
+
+  final ScrollController scrollController;
+
+  @override
+  State<CustomerOrdersTab> createState() => _CustomerOrdersTabState();
+}
+
+class _CustomerOrdersTabState extends State<CustomerOrdersTab> {
+  _OrdersFilter _filter = _OrdersFilter.all;
+  Stream<List<TajGoOrder>>? _orders;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _orders ??= _load();
+  }
+
+  Stream<List<TajGoOrder>> _load() {
+    final scope = TajGoScope.of(context);
+    return scope.orderRepository.customerOrdersStream(
+      scope.authService.currentUser!.uid,
+    );
+  }
+
+  bool _matches(TajGoOrder order) => switch (_filter) {
+    _OrdersFilter.all => true,
+    _OrdersFilter.active => order.isActive,
+    _OrdersFilter.completed => order.status == OrderStatus.completed,
+    _OrdersFilter.cancelled => order.status == OrderStatus.cancelled,
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    return TajGoScaffold(
+      appBar: const TajGoAppBar(title: 'Мои заказы'),
+      body: Column(
+        children: [
+          _filters(),
+          Expanded(
+            child: StreamBuilder<List<TajGoOrder>>(
+              stream: _orders,
+              builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return TajGoErrorState(
+                    onRetry: () => setState(() => _orders = _load()),
+                  );
+                }
+                if (!snapshot.hasData) {
+                  return ListView(
+                    controller: widget.scrollController,
+                    children: const [
+                      TajGoCardSkeleton(),
+                      TajGoCardSkeleton(),
+                      TajGoCardSkeleton(),
+                    ],
+                  );
+                }
+                final all = snapshot.data!;
+                final active = all
+                    .where((o) => o.isActive)
+                    .toList(growable: false);
+                final filtered = all.where(_matches).toList(growable: false);
+                if (filtered.isEmpty) {
+                  return TajGoEmptyState(
+                    icon: Icons.receipt_long_outlined,
+                    title: _filter == _OrdersFilter.all
+                        ? 'Заказов пока нет'
+                        : 'Здесь пусто',
+                    message: 'Ваши заказы появятся здесь.',
+                  );
+                }
+                return ListView(
+                  controller: widget.scrollController,
+                  padding: const EdgeInsets.only(bottom: TajGoSpacing.xxl),
+                  children: [
+                    if (_filter == _OrdersFilter.all && active.isNotEmpty) ...[
+                      const TajGoSectionHeader(title: 'Активные'),
+                      ...active.map(
+                        (o) => ActiveOrderCard(
+                          order: o,
+                          margin: const EdgeInsets.symmetric(
+                            horizontal: TajGoSpacing.screenH,
+                            vertical: TajGoSpacing.xs,
+                          ),
+                        ),
+                      ),
+                      if (filtered.any((o) => !o.isActive))
+                        const TajGoSectionHeader(title: 'История'),
+                      ...filtered
+                          .where((o) => !o.isActive)
+                          .map((o) => TajGoOrderHistoryTile(order: o)),
+                    ] else
+                      ...filtered.map(
+                        (o) => o.isActive
+                            ? ActiveOrderCard(
+                                order: o,
+                                margin: const EdgeInsets.symmetric(
+                                  horizontal: TajGoSpacing.screenH,
+                                  vertical: TajGoSpacing.xs,
+                                ),
+                              )
+                            : TajGoOrderHistoryTile(order: o),
+                      ),
+                  ],
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _filters() {
+    const labels = {
+      _OrdersFilter.all: 'Все',
+      _OrdersFilter.active: 'Активные',
+      _OrdersFilter.completed: 'Завершённые',
+      _OrdersFilter.cancelled: 'Отменённые',
+    };
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(
+        horizontal: TajGoSpacing.screenH,
+        vertical: TajGoSpacing.sm,
+      ),
+      child: Row(
+        children: _OrdersFilter.values
+            .map((f) {
+              return Padding(
+                padding: const EdgeInsets.only(right: TajGoSpacing.sm),
+                child: ChoiceChip(
+                  label: Text(labels[f]!),
+                  selected: f == _filter,
+                  onSelected: (_) => setState(() => _filter = f),
+                  selectedColor: TajGoColors.mint,
+                  labelStyle: const TextStyle(
+                    fontFamily: 'Roboto',
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: TajGoColors.ink,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  side: BorderSide(
+                    color: f == _filter
+                        ? Colors.transparent
+                        : const Color(0xFFD7E2DA),
+                  ),
+                ),
+              );
+            })
+            .toList(growable: false),
+      ),
+    );
+  }
+}

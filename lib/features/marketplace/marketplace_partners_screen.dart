@@ -1,214 +1,213 @@
 import 'package:flutter/material.dart';
 
-import '../../core/constants/tajgo_colors.dart';
 import '../../core/models/marketplace_partner.dart';
+import '../../shared/design/tajgo_components.dart';
 import '../../shared/widgets/tajgo_scope.dart';
 import 'partner_catalog_screen.dart';
+import 'widgets/marketplace_partner_card.dart';
 
-class MarketplacePartnersScreen extends StatelessWidget {
+enum _PartnerSort { smart, rating, faster }
+
+class MarketplacePartnersScreen extends StatefulWidget {
   const MarketplacePartnersScreen({super.key, required this.category});
 
   final String category;
 
   @override
+  State<MarketplacePartnersScreen> createState() =>
+      _MarketplacePartnersScreenState();
+}
+
+class _MarketplacePartnersScreenState extends State<MarketplacePartnersScreen> {
+  bool _openOnly = false;
+  _PartnerSort _sort = _PartnerSort.smart;
+  Stream<List<MarketplacePartner>>? _partners;
+  Stream<List<MarketplacePartner>> _load() {
+    final scope = TajGoScope.of(context);
+    return scope.marketplaceRepository.partnersStream(
+      category: widget.category,
+      allowPreview: scope.featureFlags.previewData,
+    );
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _partners ??= _load();
+  }
+
+  List<MarketplacePartner> _apply(List<MarketplacePartner> input) {
+    var list = input.where((p) => !_openOnly || p.isOpen).toList();
+    switch (_sort) {
+      case _PartnerSort.rating:
+        list.sort((a, b) => b.rating.compareTo(a.rating));
+      case _PartnerSort.faster:
+        list.sort(
+          (a, b) => a.preparationMinutes.compareTo(b.preparationMinutes),
+        );
+      case _PartnerSort.smart:
+        list.sort((a, b) {
+          final open = (b.isOpen ? 1 : 0).compareTo(a.isOpen ? 1 : 0);
+          if (open != 0) return open;
+          return a.sortOrder.compareTo(b.sortOrder);
+        });
+    }
+    return list;
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final repository = TajGoScope.of(context).marketplaceRepository;
-    return Scaffold(
-      appBar: AppBar(title: Text(marketplaceCategoryLabel(category))),
+    final flags = TajGoScope.of(context).featureFlags;
+    return TajGoScaffold(
+      appBar: TajGoAppBar(title: marketplaceCategoryLabel(widget.category)),
       body: StreamBuilder<List<MarketplacePartner>>(
-        stream: repository.partnersStream(category: category),
+        stream: _partners,
         builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting &&
-              !snapshot.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
           if (snapshot.hasError) {
-            return const _Message(
-              icon: Icons.cloud_off_rounded,
+            return TajGoErrorState(
               title: 'Не удалось загрузить партнёров',
-              subtitle: 'Проверьте интернет и Firestore Rules.',
+              onRetry: () => setState(() => _partners = _load()),
+              message: 'Проверьте интернет и повторите.',
             );
           }
-          final partners = snapshot.data ?? const <MarketplacePartner>[];
-          if (partners.isEmpty) {
-            return const _Message(
-              icon: Icons.storefront_rounded,
-              title: 'Партнёры скоро появятся',
-              subtitle: 'Мы подключаем проверенные места Худжанда.',
+          if (!snapshot.hasData) {
+            return ListView(
+              children: const [
+                TajGoCardSkeleton(),
+                TajGoCardSkeleton(),
+                TajGoCardSkeleton(),
+                TajGoCardSkeleton(),
+              ],
             );
           }
-          final preview = partners.any((partner) => partner.isPreview);
-          return ListView.separated(
-            padding: const EdgeInsets.all(16),
-            itemCount: partners.length + (preview ? 1 : 0),
-            separatorBuilder: (_, _) => const SizedBox(height: 10),
-            itemBuilder: (context, index) {
-              if (preview && index == 0) {
-                return const Card(
-                  color: Color(0xFFFFF8E1),
-                  child: Padding(
-                    padding: EdgeInsets.all(12),
-                    child: Row(
-                      children: [
-                        Icon(Icons.auto_awesome_rounded),
-                        SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            'Пока база заполняется, показываем временные '
-                            'примеры заведений Худжанда.',
-                            style: TextStyle(fontWeight: FontWeight.w700),
-                          ),
+          final raw = snapshot.data!
+              .where((p) => !p.isPreview || flags.previewData)
+              .toList();
+          if (raw.isEmpty) {
+            return const TajGoEmptyState(
+              icon: Icons.storefront_outlined,
+              title: 'Заведений пока нет',
+              message: 'Выберите другую категорию или зайдите позже.',
+            );
+          }
+          final preview = raw.any((p) => p.isPreview);
+          final partners = _apply(raw);
+          return Column(
+            children: [
+              _filters(),
+              if (preview) _previewBanner(),
+              Expanded(
+                child: partners.isEmpty
+                    ? const TajGoEmptyState(
+                        icon: Icons.filter_alt_off_outlined,
+                        title: 'Ничего не найдено',
+                        message: 'Измените фильтр.',
+                      )
+                    : ListView(
+                        padding: const EdgeInsets.only(
+                          top: TajGoSpacing.xs,
+                          bottom: TajGoSpacing.xxl,
                         ),
-                      ],
-                    ),
-                  ),
-                );
-              }
-              final partner = partners[index - (preview ? 1 : 0)];
-              return Card(
-                clipBehavior: Clip.antiAlias,
-                child: InkWell(
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute<void>(
-                      builder: (_) => PartnerCatalogScreen(partner: partner),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      SizedBox(
-                        width: 104,
-                        height: 112,
-                        child: _MarketplaceImage(
-                          imageUrl: partner.imageUrl,
-                          icon: _categoryIcon(partner.category),
-                        ),
-                      ),
-                      Expanded(
-                        child: Padding(
-                          padding: const EdgeInsets.all(14),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      partner.name,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        fontSize: 17,
-                                        fontWeight: FontWeight.w900,
-                                      ),
-                                    ),
+                        children: partners
+                            .map(
+                              (partner) => MarketplacePartnerCard(
+                                partner: partner,
+                                onTap: () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute<void>(
+                                    builder: (_) =>
+                                        PartnerCatalogScreen(partner: partner),
                                   ),
-                                  Text(
-                                    '★ ${partner.rating.toStringAsFixed(1)}',
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                partner.description.isEmpty
-                                    ? partner.address
-                                    : partner.description,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  color: TajGoColors.muted,
                                 ),
                               ),
-                              const SizedBox(height: 6),
-                              Text(
-                                partner.isOpen
-                                    ? 'Открыто · ~${partner.preparationMinutes} мин · '
-                                          'доставка ${partner.deliveryFee} TJS'
-                                    : 'Закрыто · ${partner.workingHours}',
-                                style: TextStyle(
-                                  color: partner.isOpen
-                                      ? TajGoColors.darkGreen
-                                      : TajGoColors.warning,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
+                            )
+                            .toList(growable: false),
                       ),
-                    ],
-                  ),
-                ),
-              );
-            },
+              ),
+            ],
           );
         },
       ),
     );
   }
-}
 
-IconData _categoryIcon(String category) => switch (category) {
-  'food' => Icons.restaurant_rounded,
-  'groceries' => Icons.shopping_basket_rounded,
-  'flowers' => Icons.local_florist_rounded,
-  _ => Icons.storefront_rounded,
-};
-
-class _Message extends StatelessWidget {
-  const _Message({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-  });
-
-  final IconData icon;
-  final String title;
-  final String subtitle;
-
-  @override
-  Widget build(BuildContext context) => Center(
-    child: Padding(
-      padding: const EdgeInsets.all(32),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
+  Widget _filters() {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(
+        horizontal: TajGoSpacing.screenH,
+        vertical: TajGoSpacing.sm,
+      ),
+      child: Row(
         children: [
-          Icon(icon, size: 56, color: TajGoColors.green),
-          const SizedBox(height: 14),
-          Text(
-            title,
-            textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
+          FilterChip(
+            label: const Text('Открыто'),
+            selected: _openOnly,
+            onSelected: (v) => setState(() => _openOnly = v),
+            selectedColor: TajGoColors.mint,
           ),
-          const SizedBox(height: 6),
-          Text(
-            subtitle,
-            textAlign: TextAlign.center,
-            style: const TextStyle(color: TajGoColors.muted),
+          const SizedBox(width: TajGoSpacing.sm),
+          ChoiceChip(
+            label: const Text('По рейтингу'),
+            selected: _sort == _PartnerSort.rating,
+            onSelected: (_) => setState(() => _sort = _PartnerSort.rating),
+            selectedColor: TajGoColors.mint,
+          ),
+          const SizedBox(width: TajGoSpacing.sm),
+          ChoiceChip(
+            label: const Text('Быстрее'),
+            selected: _sort == _PartnerSort.faster,
+            onSelected: (_) => setState(() => _sort = _PartnerSort.faster),
+            selectedColor: TajGoColors.mint,
           ),
         ],
       ),
-    ),
-  );
+    );
+  }
+
+  Widget _previewBanner() {
+    return Container(
+      margin: const EdgeInsets.symmetric(
+        horizontal: TajGoSpacing.screenH,
+        vertical: TajGoSpacing.xs,
+      ),
+      padding: const EdgeInsets.all(TajGoSpacing.md),
+      decoration: BoxDecoration(
+        color: TajGoColors.warning.withValues(alpha: 0.15),
+        borderRadius: TajGoRadius.smAll,
+      ),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.auto_awesome_rounded,
+            size: TajGoIconSizes.md,
+            color: Color(0xFF92600A),
+          ),
+          const SizedBox(width: TajGoSpacing.sm),
+          const Expanded(
+            child: Text(
+              'Пока база заполняется, показываем временные примеры. '
+              'Их нельзя заказать.',
+              style: TextStyle(
+                color: Color(0xFF92600A),
+                fontWeight: FontWeight.w600,
+                fontSize: 13,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
+/// Публичная обёртка изображения каталога (используется экраном партнёра).
 class MarketplaceImage extends StatelessWidget {
   const MarketplaceImage({
     super.key,
     required this.imageUrl,
     required this.icon,
   });
-
-  final String imageUrl;
-  final IconData icon;
-
-  @override
-  Widget build(BuildContext context) =>
-      _MarketplaceImage(imageUrl: imageUrl, icon: icon);
-}
-
-class _MarketplaceImage extends StatelessWidget {
-  const _MarketplaceImage({required this.imageUrl, required this.icon});
 
   final String imageUrl;
   final IconData icon;

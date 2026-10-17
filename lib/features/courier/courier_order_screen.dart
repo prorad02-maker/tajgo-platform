@@ -1,16 +1,22 @@
+import '../../core/design/tajgo_money.dart';
+import '../../shared/widgets/tajgo_map_attribution.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/constants/tajgo_colors.dart';
+import '../../core/config/map_provider_config.dart';
 import '../../core/models/tajgo_order.dart';
 import '../../core/services/external_navigator_service.dart';
+import '../../core/services/delivery_code_input.dart';
 import '../../core/services/pricing.dart' as pricing;
-import '../../shared/widgets/tajgo_action_button.dart';
+import '../../shared/delivery/delivery_widgets.dart';
 import '../../shared/widgets/tajgo_order_progress.dart';
+import '../../shared/widgets/order_details_load_state.dart';
 import '../../shared/widgets/tajgo_scope.dart';
 import '../map/services/tajgo_location_service.dart';
 import '../map/services/tajgo_map_camera.dart';
@@ -63,6 +69,7 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
   DateTime? _offRouteCandidateAt;
   TajGoRouteProgress? _routeProgress;
   Timer? _routeUpdatedTimer;
+  int _orderStreamAttempt = 0;
 
   String get _uid => TajGoScope.of(context).authService.currentUser!.uid;
 
@@ -84,6 +91,10 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed && _positionSubscription == null) {
       _startLocation();
+    } else if (state != AppLifecycleState.resumed) {
+      final subscription = _positionSubscription;
+      _positionSubscription = null;
+      unawaited(subscription?.cancel());
     }
   }
 
@@ -259,12 +270,27 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
   }) async {
     if (_routeLoading || !mounted) return;
     setState(() => _routeLoading = true);
-    final route = await TajGoScope.of(context).routeService.buildRoute(
-      from: from,
-      to: target,
-      mode: RouteMode.bicycle,
-      forceRefresh: force,
-    );
+    late TajGoRoute route;
+    try {
+      route = await TajGoScope.of(context).routeService.buildRoute(
+        from: from,
+        to: target,
+        mode: RouteMode.bicycle,
+        forceRefresh: force,
+      );
+    } catch (_) {
+      if (mounted && _activeTarget == target) {
+        setState(() {
+          _navigationRoute = null;
+          _routeProgress = null;
+          _routeLoading = false;
+          _lastRouteAt = DateTime.now();
+        });
+      } else if (mounted) {
+        setState(() => _routeLoading = false);
+      }
+      return;
+    }
     if (!mounted) return;
     if (_activeTarget != target) {
       setState(() => _routeLoading = false);
@@ -358,10 +384,6 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
     return pricing.haversineDistanceKm(_position!, target);
   }
 
-  int? _etaMinutes(double? distanceKm) => distanceKm == null
-      ? null
-      : pricing.courierNavigationEtaMinutes(distanceKm);
-
   Future<void> _openNavigator(LatLng target) async {
     final service = TajGoScope.of(context).externalNavigatorService;
     final preference = await service.load();
@@ -448,7 +470,7 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
           FilledButton(
             onPressed: () {
               final code = controller.text.trim();
-              if (!RegExp(r'^\d{4}$').hasMatch(code)) {
+              if (!isValidDeliveryCodeInput(code)) {
                 ScaffoldMessenger.of(dialogContext).showSnackBar(
                   const SnackBar(content: Text('Введите четыре цифры.')),
                 );
@@ -503,12 +525,22 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
     final repository = TajGoScope.of(context).courierRepository;
     return Scaffold(
       body: StreamBuilder<TajGoOrder?>(
+        key: ValueKey('courier-order-${widget.orderId}-$_orderStreamAttempt'),
         stream: repository.orderStream(widget.orderId),
         builder: (context, snapshot) {
-          final order = snapshot.data;
-          if (order == null) {
+          final state = resolveOrderDetailsLoadState(snapshot);
+          if (state == OrderDetailsLoadState.loading) {
             return const Center(child: CircularProgressIndicator());
           }
+          if (state == OrderDetailsLoadState.error ||
+              state == OrderDetailsLoadState.notFound) {
+            return OrderDetailsTerminalView(
+              notFound: state == OrderDetailsLoadState.notFound,
+              onRetry: () => setState(() => _orderStreamAttempt++),
+              onBack: () => Navigator.of(context).maybePop(),
+            );
+          }
+          final order = snapshot.data!;
           final from = order.fromLocation == null
               ? null
               : LatLng(
@@ -528,8 +560,7 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
           final progress = _routeProgress;
           final navigationDistance =
               progress?.remainingDistanceKm ?? targetDistance;
-          final etaMinutes =
-              progress?.remainingEtaMinutes ?? _etaMinutes(targetDistance);
+          final etaMinutes = progress?.remainingEtaMinutes;
           final isNearTarget = targetDistance != null && targetDistance <= 0.12;
           final navigationTarget = order.status == OrderStatus.pickedUp
               ? NavigationTarget.dropoff
@@ -569,8 +600,9 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
                       children: [
                         TileLayer(
                           urlTemplate:
-                              'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                          userAgentPackageName: 'tj.tajgo.app',
+                              MapProviderConfig.current.tileUrlTemplate,
+                          userAgentPackageName:
+                              MapProviderConfig.current.userAgentPackageName,
                           maxZoom: 19,
                         ),
                         PolylineLayer(
@@ -595,17 +627,6 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
                                     : StrokePattern.dashed(
                                         segments: const [8, 8],
                                       ),
-                              ),
-                            if (_navigationRoute == null &&
-                                _position != null &&
-                                target != null)
-                              Polyline(
-                                points: [_position!, target],
-                                color: TajGoColors.muted,
-                                strokeWidth: 3,
-                                pattern: StrokePattern.dashed(
-                                  segments: const [8, 8],
-                                ),
                               ),
                           ],
                         ),
@@ -659,11 +680,7 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
                               ),
                           ],
                         ),
-                        RichAttributionWidget(
-                          attributions: const [
-                            TextSourceAttribution('OpenStreetMap contributors'),
-                          ],
-                        ),
+                        const TajGoMapAttribution(),
                       ],
                     ),
                     SafeArea(
@@ -713,7 +730,7 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
                   ],
                 ),
               ),
-              _OrderPanel(
+              CourierDeliveryPanel(
                 order: order,
                 target: target,
                 distance: navigationDistance,
@@ -731,11 +748,17 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
                 onNavigate: target == null
                     ? null
                     : () => _openNavigator(target),
-                onClient: () => ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Звонки появятся с телефонной авторизацией'),
-                  ),
-                ),
+                onClient: () => _run(() async {
+                  final phone = await TajGoScope.of(
+                    context,
+                  ).orderRepository.orderContact(order.id);
+                  if (!mounted) return;
+                  if (!await launchUrl(Uri(scheme: 'tel', path: phone))) {
+                    throw StateError(
+                      'Не удалось открыть приложение для звонков.',
+                    );
+                  }
+                }),
                 onPrimary: () {
                   if (order.status == OrderStatus.accepted &&
                       order.arrivedAtPickupAt == null) {
@@ -770,8 +793,9 @@ class _CourierOrderScreenState extends State<CourierOrderScreen>
   }
 }
 
-class _OrderPanel extends StatelessWidget {
-  const _OrderPanel({
+class CourierDeliveryPanel extends StatelessWidget {
+  const CourierDeliveryPanel({
+    super.key,
     required this.order,
     required this.target,
     required this.distance,
@@ -790,48 +814,37 @@ class _OrderPanel extends StatelessWidget {
     required this.onClient,
     required this.onPrimary,
   });
-
   final TajGoOrder order;
   final LatLng? target;
-  final double? distance;
-  final double? directDistance;
+  final double? distance, directDistance;
   final int? etaMinutes;
-  final bool geoAvailable;
+  final bool geoAvailable, routeLoading, offRoute, isNearTarget, gpsWeak, busy;
   final String? geoError;
   final TajGoRoute? route;
-  final bool routeLoading;
-  final bool offRoute;
-  final bool isNearTarget;
-  final bool gpsWeak;
-  final VoidCallback onFixLocation;
-  final bool busy;
+  final VoidCallback onFixLocation, onClient, onPrimary;
   final VoidCallback? onNavigate;
-  final VoidCallback onClient;
-  final VoidCallback onPrimary;
-
   int get _step {
-    if (order.status == OrderStatus.completed ||
-        order.status == OrderStatus.delivered ||
-        order.status == OrderStatus.disputed) {
+    if ({
+      OrderStatus.completed,
+      OrderStatus.delivered,
+      OrderStatus.disputed,
+    }.contains(order.status)) {
       return 4;
     }
-    if (order.status == OrderStatus.pickedUp) {
-      return 3;
-    }
+    if (order.status == OrderStatus.pickedUp) return 3;
     return order.arrivedAtPickupAt == null ? 0 : 1;
   }
 
   String get _title => switch (order.status) {
     OrderStatus.accepted when order.arrivedAtPickupAt == null =>
-      'Едем к точке забора',
-    OrderStatus.accepted => 'Вы на месте',
-    OrderStatus.pickedUp => 'Везём клиенту',
-    OrderStatus.delivered => '⏳ Ждём подтверждения клиента',
-    OrderStatus.completed => '✅ Доставлено! +${order.price} TJS',
-    OrderStatus.disputed => '⚠️ Клиент сообщил, что не получил заказ',
-    _ => 'Заказ',
+      'К точке забора',
+    OrderStatus.accepted => 'Заберите заказ',
+    OrderStatus.pickedUp => 'К получателю',
+    OrderStatus.delivered => 'Ждём подтверждения',
+    OrderStatus.completed => 'Доставка завершена',
+    OrderStatus.disputed => 'Доставка на проверке',
+    _ => 'Ваша доставка',
   };
-
   String? get _primaryLabel => switch (order.status) {
     OrderStatus.accepted when order.arrivedAtPickupAt == null => 'Я на месте',
     OrderStatus.accepted => 'Забрал заказ',
@@ -839,7 +852,6 @@ class _OrderPanel extends StatelessWidget {
     OrderStatus.completed => 'К заказам',
     _ => null,
   };
-
   @override
   Widget build(BuildContext context) {
     final tooFar =
@@ -849,203 +861,242 @@ class _OrderPanel extends StatelessWidget {
         order.status == OrderStatus.pickedUp;
     final primaryEnabled =
         _primaryLabel != null && (!needsGeo || (geoAvailable && !tooFar));
-    final address = order.status == OrderStatus.accepted
-        ? order.fromText
-        : order.toText;
-    return Material(
-      color: Colors.white,
-      borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-      child: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
+    return DeliverySheet(
+      footer: _primaryLabel == null
+          ? null
+          : Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (needsGeo) ...[
+                  IntrinsicHeight(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Expanded(
+                          child: _secondary(
+                            'Навигатор',
+                            Icons.navigation_outlined,
+                            busy ? null : onNavigate,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        if (MediaQuery.textScalerOf(context).scale(14) > 20)
+                          SizedBox.square(
+                            dimension: 56,
+                            child: IconButton.outlined(
+                              tooltip: 'Клиент',
+                              onPressed: busy ? null : onClient,
+                              icon: const Icon(Icons.phone_outlined),
+                            ),
+                          )
+                        else
+                          Expanded(
+                            child: _secondary(
+                              'Клиент',
+                              Icons.phone_outlined,
+                              busy ? null : onClient,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                ],
+                if (needsGeo && !primaryEnabled)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Text(
+                      geoAvailable
+                          ? 'Подойдите ближе к точке'
+                          : 'Нужна геолокация',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Color(0xFF805C13),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                DeliveryPrimaryAction(
+                  label: _primaryLabel!,
+                  busy: busy,
+                  onPressed: primaryEnabled ? onPrimary : null,
+                  icon: order.status == OrderStatus.completed
+                      ? Icons.check_rounded
+                      : Icons.arrow_forward_rounded,
+                ),
+              ],
+            ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TajGoOrderProgress(currentStep: _step),
+          const SizedBox(height: 16),
+          Text(
+            _title,
+            style: const TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.w900,
+              height: 1.15,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
             children: [
-              TajGoOrderProgress(currentStep: _step),
-              const SizedBox(height: 14),
-              Text(
-                _title,
-                style: const TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w900,
-                ),
+              DeliveryPill(
+                icon: Icons.payments_outlined,
+                label: 'За доставку ${TajGoMoney.format(order.effectivePrice)}',
               ),
-              const SizedBox(height: 4),
-              Text(address, style: const TextStyle(color: TajGoColors.muted)),
-              const SizedBox(height: 3),
-              Text(
-                'Ваш доход за заказ: ${order.price} TJS.',
-                style: const TextStyle(
-                  color: TajGoColors.darkGreen,
-                  fontWeight: FontWeight.w800,
+              if (distance != null)
+                DeliveryPill(
+                  icon: Icons.route_rounded,
+                  label: 'До точки ${distance!.toStringAsFixed(1)} км',
                 ),
-              ),
-              if (order.fromLocation != null && order.toLocation != null)
-                Text(
-                  routeLoading
-                      ? 'Перестраиваем маршрут…'
-                      : formatRouteQuality(route),
-                  style: TextStyle(
-                    color: route?.isFallback == false
-                        ? TajGoColors.darkGreen
-                        : TajGoColors.warning,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                  ),
+              if (etaMinutes != null)
+                DeliveryPill(
+                  icon: Icons.schedule_rounded,
+                  label: '≈ $etaMinutes мин',
                 ),
-              if (offRoute)
-                const Text(
-                  'Вы отклонились от маршрута. Перестраиваем…',
-                  style: TextStyle(
-                    color: TajGoColors.warning,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              if (order.items.isNotEmpty ||
-                  (order.comment ?? '').isNotEmpty ||
-                  order.status == OrderStatus.pickedUp) ...[
-                const SizedBox(height: 8),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF3F7F1),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        order.status == OrderStatus.pickedUp
-                            ? 'Точка доставки'
-                            : 'Точка забора',
-                        style: const TextStyle(
-                          color: TajGoColors.darkGreen,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      if ((order.comment ?? '').isNotEmpty)
-                        Text(
-                          'Ориентир / комментарий: ${order.comment}',
-                          maxLines: 3,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      if (order.items.isNotEmpty)
-                        Text(
-                          'Состав: ${order.items.map((item) => '${item.name} × ${item.quantity}').join(', ')}',
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      if (order.status == OrderStatus.pickedUp)
-                        const Text('Код получения: спросите у клиента'),
-                    ],
-                  ),
-                ),
-              ],
-              if (distance != null) ...[
-                const SizedBox(height: 7),
-                Text(
-                  'До точки: ${distance!.toStringAsFixed(1)} км'
-                  '${etaMinutes == null ? '' : ' · ≈ $etaMinutes мин'}',
-                  style: const TextStyle(color: TajGoColors.muted),
-                ),
-              ],
-              if (needsGeo && geoAvailable) ...[
-                const SizedBox(height: 8),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 9,
-                  ),
-                  decoration: BoxDecoration(
-                    color: tooFar ? const Color(0xFFFFF7E6) : TajGoColors.mint,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    gpsWeak
-                        ? 'GPS слабый — точка может быть неточной'
-                        : isNearTarget
-                        ? 'Вы рядом с точкой'
-                        : tooFar
-                        ? '⚠ Подойдите ближе, чтобы подтвердить'
-                        : 'Можно подтверждать — вы у точки',
-                    style: TextStyle(
-                      color: tooFar || gpsWeak
-                          ? TajGoColors.warning
-                          : TajGoColors.darkGreen,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-              ],
-              if (needsGeo && !geoAvailable) ...[
-                const SizedBox(height: 7),
-                Text(
-                  geoError == null
-                      ? 'Ищем точную геолокацию'
-                      : 'Разрешите геолокацию для работы курьером',
-                  style: const TextStyle(
-                    color: TajGoColors.error,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                if (geoError != null)
-                  TextButton(
-                    onPressed: onFixLocation,
-                    child: const Text('Открыть настройки'),
-                  ),
-              ],
-              if (order.status == OrderStatus.delivered)
-                const Padding(
-                  padding: EdgeInsets.only(top: 10),
-                  child: Text(
-                    'Пока клиент не подтвердит получение, новые заказы недоступны.',
-                    style: TextStyle(color: TajGoColors.muted),
-                  ),
-                ),
-              if (order.status == OrderStatus.disputed)
-                const Padding(
-                  padding: EdgeInsets.only(top: 10),
-                  child: Text(
-                    'С вами свяжутся для проверки доставки.',
-                    style: TextStyle(color: TajGoColors.error),
-                  ),
-                ),
-              if (_primaryLabel != null) ...[
-                const SizedBox(height: 14),
-                Row(
-                  children: [
-                    IconButton.filledTonal(
-                      tooltip: 'Клиент',
-                      onPressed: onClient,
-                      icon: const Icon(Icons.phone_outlined),
-                    ),
-                    const SizedBox(width: 8),
-                    OutlinedButton(
-                      onPressed: onNavigate,
-                      child: const Text('Открыть в навигаторе'),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: TajGoActionButton(
-                        label: _primaryLabel!,
-                        busy: busy,
-                        onPressed: primaryEnabled ? onPrimary : null,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
             ],
           ),
-        ),
+          const SizedBox(height: 18),
+          DeliveryRouteStops(
+            from: order.fromText,
+            to: order.toText,
+            maxLines: null,
+          ),
+          if ((order.comment ?? '').isNotEmpty || order.items.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF3F7F4),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if ((order.comment ?? '').isNotEmpty)
+                    Text(
+                      order.comment!,
+                      style: const TextStyle(fontSize: 14, height: 1.4),
+                    ),
+                  if (order.items.isNotEmpty)
+                    Text(
+                      'Состав: ${order.items.map((item) => '${item.name} × ${item.quantity}').join(', ')}',
+                      style: const TextStyle(color: TajGoColors.muted),
+                    ),
+                ],
+              ),
+            ),
+          ],
+          if (order.status == OrderStatus.pickedUp)
+            const Padding(
+              padding: EdgeInsets.only(top: 12),
+              child: Text(
+                'Для завершения попросите код получения у клиента.',
+                style: TextStyle(
+                  color: TajGoColors.deepGreen,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          if (order.fromLocation != null && order.toLocation != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 14),
+              child: DeliveryPill(
+                icon: Icons.route_outlined,
+                label: routeLoading
+                    ? 'Перестраиваем маршрут…'
+                    : formatRouteQuality(route),
+                warning: !routeLoading && route?.isFallback != false,
+              ),
+            ),
+          if (offRoute)
+            const Padding(
+              padding: EdgeInsets.only(top: 8),
+              child: Text(
+                'Вы отклонились от маршрута. Перестраиваем…',
+                style: TextStyle(color: Color(0xFF805C13)),
+              ),
+            ),
+          if (needsGeo && geoAvailable)
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: DeliveryPill(
+                warning: tooFar || gpsWeak,
+                icon: gpsWeak
+                    ? Icons.gps_not_fixed_rounded
+                    : Icons.gps_fixed_rounded,
+                label: gpsWeak
+                    ? 'GPS слабый — точка может быть неточной'
+                    : isNearTarget
+                    ? 'Вы рядом с точкой'
+                    : tooFar
+                    ? 'Подойдите ближе, чтобы подтвердить'
+                    : 'Можно подтверждать — вы у точки',
+              ),
+            ),
+          if (needsGeo && !geoAvailable) ...[
+            const SizedBox(height: 12),
+            Text(
+              geoError == null
+                  ? 'Ищем точную геолокацию'
+                  : 'Разрешите геолокацию для работы курьером',
+              style: const TextStyle(
+                color: TajGoColors.error,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            if (geoError != null)
+              TextButton(
+                onPressed: onFixLocation,
+                child: const Text('Открыть настройки'),
+              ),
+          ],
+          if (order.status == OrderStatus.delivered)
+            const Padding(
+              padding: EdgeInsets.only(top: 12),
+              child: Text(
+                'После подтверждения получения будут доступны новые заказы.',
+                style: TextStyle(color: TajGoColors.muted),
+              ),
+            ),
+          if (order.status == OrderStatus.disputed)
+            const Padding(
+              padding: EdgeInsets.only(top: 12),
+              child: Text(
+                'С вами свяжутся для проверки доставки.',
+                style: TextStyle(color: TajGoColors.error),
+              ),
+            ),
+        ],
       ),
     );
   }
+
+  Widget _secondary(String label, IconData icon, VoidCallback? action) =>
+      OutlinedButton(
+        style: OutlinedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+          side: const BorderSide(color: Color(0xFFD7E2DA)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+        ),
+        onPressed: action,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 20),
+            const SizedBox(width: 6),
+            Flexible(child: Text(label, textAlign: TextAlign.center)),
+          ],
+        ),
+      );
 }
 
 class _AddressPin extends StatelessWidget {

@@ -1,8 +1,14 @@
+import 'dart:async';
+
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../../core/config/feature_flags.dart';
 import '../../core/services/auth_service.dart';
+import '../../core/services/authoritative_command_service.dart';
+import '../../core/services/compatible_command_gateway.dart';
 import '../../core/services/account_migration_service.dart';
 import '../../core/services/account_mode_service.dart';
 import '../../core/services/admin_repository.dart';
@@ -11,41 +17,74 @@ import '../../core/services/courier_offer_repository.dart';
 import '../../core/services/courier_application_repository.dart';
 import '../../core/services/external_navigator_service.dart';
 import '../../core/services/marketplace_repository.dart';
+import '../../core/services/merchant_application_repository.dart';
 import '../../core/services/order_repository.dart';
+import '../../core/services/order_notification_service.dart';
+import '../../core/services/diagnostic_service.dart';
 import '../../core/services/route_service.dart';
+import '../../core/services/saved_address_repository.dart';
 import '../../core/services/user_repository.dart';
 import '../../core/services/role_preference_service.dart';
 import '../../features/map/services/tajgo_location_service.dart';
+import '../../features/map/services/server_road_route_provider.dart';
 import '../../core/models/marketplace_cart.dart';
 
 class TajGoScope extends InheritedWidget {
-  factory TajGoScope({Key? key, required Widget child}) {
+  factory TajGoScope({
+    Key? key,
+    required Widget child,
+    FeatureFlags? featureFlags,
+    OrderNotificationService? notifications,
+    DiagnosticService? diagnostics,
+  }) {
     final db = FirebaseFirestore.instance;
+    final flags = featureFlags ?? FeatureFlags.resolve();
     final auth = AuthService(FirebaseAuth.instance);
-    final users = UserRepository(db);
+    final commands = AuthoritativeCommandService(
+      CompatibleCommandGateway.firebase(
+        FirebaseAuthoritativeCommandGateway(
+          FirebaseFunctions.instanceFor(region: 'europe-west1'),
+        ),
+        db,
+      ),
+    );
+    final users = UserRepository(db, commands);
     final rolePreferences = RolePreferenceService();
-    return TajGoScope._(
+    final cart = MarketplaceCart();
+    unawaited(cart.hydrate());
+    return TajGoScope.withServices(
       key: key,
       authService: auth,
       userRepository: users,
       accountModeService: AccountModeService(auth, users, rolePreferences),
       rolePreferenceService: rolePreferences,
-      accountMigrationService: AccountMigrationService(db),
-      adminRepository: AdminRepository(db),
-      courierRepository: CourierRepository(db),
-      courierOfferRepository: CourierOfferRepository(db),
-      courierApplicationRepository: CourierApplicationRepository(db),
-      orderRepository: OrderRepository(db),
-      routeService: RouteService(),
+      accountMigrationService: AccountMigrationService(commands),
+      adminRepository: AdminRepository(db, commands),
+      courierRepository: CourierRepository(db, commands),
+      courierOfferRepository: CourierOfferRepository(db, commands),
+      courierApplicationRepository: CourierApplicationRepository(db, commands),
+      orderRepository: OrderRepository(db, commands),
+      routeService: RouteService(
+        serverProvider: ServerRoadRouteProvider(commands),
+      ),
       locationService: TajGoLocationService(),
       externalNavigatorService: ExternalNavigatorService(),
-      marketplaceRepository: MarketplaceRepository(db),
-      marketplaceCart: MarketplaceCart(),
+      marketplaceRepository: MarketplaceRepository(db, commands),
+      merchantApplicationRepository: MerchantApplicationRepository(
+        db,
+        commands,
+      ),
+      savedAddressRepository: SavedAddressRepository(db),
+      notificationService: notifications ?? OrderNotificationService(),
+      diagnosticService: diagnostics ?? DiagnosticService(),
+      marketplaceCart: cart,
+      featureFlags: flags,
       child: child,
     );
   }
 
-  const TajGoScope._({
+  /// Explicit dependencies allow isolated previews and integration checks.
+  const TajGoScope.withServices({
     super.key,
     required super.child,
     required this.authService,
@@ -62,7 +101,12 @@ class TajGoScope extends InheritedWidget {
     required this.locationService,
     required this.externalNavigatorService,
     required this.marketplaceRepository,
+    required this.merchantApplicationRepository,
+    required this.savedAddressRepository,
+    required this.notificationService,
+    required this.diagnosticService,
     required this.marketplaceCart,
+    required this.featureFlags,
   });
 
   final AuthService authService;
@@ -79,13 +123,21 @@ class TajGoScope extends InheritedWidget {
   final TajGoLocationService locationService;
   final ExternalNavigatorService externalNavigatorService;
   final MarketplaceRepository marketplaceRepository;
+  final MerchantApplicationRepository merchantApplicationRepository;
+  final SavedAddressRepository savedAddressRepository;
+  final OrderNotificationService notificationService;
+  final DiagnosticService diagnosticService;
   final MarketplaceCart marketplaceCart;
+  final FeatureFlags featureFlags;
 
   static TajGoScope of(BuildContext context) {
     final scope = context.dependOnInheritedWidgetOfExactType<TajGoScope>();
     assert(scope != null, 'TajGoScope not found');
     return scope!;
   }
+
+  static TajGoScope? maybeOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<TajGoScope>();
 
   @override
   bool updateShouldNotify(TajGoScope oldWidget) => false;

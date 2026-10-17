@@ -1,11 +1,11 @@
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 
 import '../models/tajgo_navigation_step.dart';
 import '../models/tajgo_route.dart';
+import '../../../core/services/safe_diagnostics.dart';
 import 'navigation_instruction_formatter.dart';
 import 'route_provider.dart';
 import 'routing_config.dart';
@@ -53,23 +53,36 @@ class RoadRouteProvider implements RouteProvider {
     if (!configured) {
       throw StateError('Road route provider is disabled.');
     }
-    final effectiveMode = config.mode;
-    final uri = buildRequestUri(from: from, to: to, mode: effectiveMode);
+    if (!config.supportedModes.contains(mode)) {
+      throw UnsupportedError(
+        'Routing provider $name does not support ${mode.name}.',
+      );
+    }
+    final uri = buildRequestUri(from: from, to: to, mode: mode);
     _lastRequestUri = uri;
     _lastHttpStatus = null;
     _lastParseSuccess = null;
     _lastFailure = null;
-    if (config.debugLogging) debugPrint('TajGo routing request: $name');
+    if (config.debugLogging) {
+      SafeDiagnostics.log('ROUTING_REQUEST', fields: {'provider': name});
+    }
     try {
-      final response = await _client
-          .get(
-            uri,
-            headers: const {
-              'Accept': 'application/json',
-              'User-Agent': 'TajGo-Pilot/1.0.1 (routing field test)',
-            },
-          )
-          .timeout(config.timeout);
+      late http.Response response;
+      for (var attempt = 0; attempt < 2; attempt++) {
+        response = await _client
+            .get(
+              uri,
+              headers: const {
+                'Accept': 'application/json',
+                'User-Agent': 'TajGo/1.8 (contact: support@tajgo.ru)',
+              },
+            )
+            .timeout(config.timeout);
+        final retryable =
+            response.statusCode == 429 || response.statusCode >= 500;
+        if (!retryable || attempt == 1) break;
+        await Future<void>.delayed(const Duration(milliseconds: 250));
+      }
       _lastHttpStatus = response.statusCode;
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw StateError('Route provider returned ${response.statusCode}.');

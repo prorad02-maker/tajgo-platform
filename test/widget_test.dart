@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:tajgo/core/config/service_area_config.dart';
 import 'package:tajgo/core/models/courier_offer.dart';
 import 'package:tajgo/core/models/tajgo_order.dart';
 import 'package:tajgo/core/models/app_user.dart';
@@ -11,6 +12,7 @@ import 'package:tajgo/core/models/courier_application.dart';
 import 'package:tajgo/core/services/account_migration_service.dart';
 import 'package:tajgo/core/services/account_mode_service.dart';
 import 'package:tajgo/core/services/auth_service.dart';
+import 'package:tajgo/core/services/authoritative_command_service.dart';
 import 'package:tajgo/core/services/courier_application_repository.dart';
 import 'package:tajgo/core/services/courier_offer_repository.dart';
 import 'package:tajgo/core/services/courier_order_eligibility.dart';
@@ -402,48 +404,6 @@ void main() {
     expect(resolveAccountMode(afterOnboarding), ResolvedAccountMode.courier);
   });
 
-  test('approve keeps customer role and does not duplicate legacy courier', () {
-    expect(approvedCourierRoles(['customer']), ['customer', 'courier']);
-    expect(approvedCourierRoles(['customer', 'courier']), [
-      'customer',
-      'courier',
-    ]);
-    expect(
-      approvedCourierOnboardingCompleted(
-        existingValue: null,
-        courierProfileExists: false,
-      ),
-      isFalse,
-    );
-    expect(
-      approvedCourierOnboardingCompleted(
-        existingValue: null,
-        courierProfileExists: true,
-      ),
-      isTrue,
-    );
-
-    final application = CourierApplication.empty(
-      uid: 'courier-1',
-      displayName: 'Фаррух',
-      phoneNumber: '+992921234567',
-    );
-    final data = buildApprovedCourierData(
-      uid: 'courier-1',
-      application: application,
-      existing: const {
-        'activeOrderId': 'active-7',
-        'earningsToday': 55,
-        'ordersToday': 4,
-        'rating': 4.8,
-      },
-    );
-    expect(data['activeOrderId'], 'active-7');
-    expect(data['earningsToday'], 55);
-    expect(data['ordersToday'], 4);
-    expect(data['rating'], 4.8);
-  });
-
   test('reject and suspend keep customer access', () {
     AppUser account(String status) => AppUser.fromMap({
       'displayName': 'Фаррух',
@@ -463,26 +423,37 @@ void main() {
       ResolvedAccountMode.customer,
     );
     expect(account('suspended').roles, contains('customer'));
-
-    final suspension = buildSuspendedCourierPatch('server-time');
-    expect(suspension['isOnline'], isFalse);
-    expect(suspension['online'], isFalse);
-    expect(suspension.containsKey('activeOrderId'), isFalse);
   });
 
-  test('admin courier action contains immutable audit identities', () {
-    final log = buildCourierAdminLog(
-      action: 'rejectCourier',
-      targetUid: 'courier-1',
-      adminUid: 'admin-1',
-      reason: 'Нужно уточнить документ',
-      createdAt: 'server-time',
-    );
-    expect(log['targetUid'], 'courier-1');
-    expect(log['adminUid'], 'admin-1');
-    expect(log['reason'], 'Нужно уточнить документ');
-    expect(log['createdAt'], 'server-time');
-  });
+  test(
+    'courier admin client uses callable commands without authority fields',
+    () async {
+      final gateway = _RecordingCommandGateway();
+      final service = CourierAdminCommandService(
+        AuthoritativeCommandService(gateway),
+      );
+
+      await service.approve('courier-1');
+      await service.reject('courier-1', 'Нужно уточнить документ');
+      await service.suspend('courier-1', 'Нарушение правил');
+      await service.restore('courier-1');
+
+      expect(gateway.commands, [
+        'adminApproveCourier',
+        'adminRejectCourier',
+        'adminSuspendCourier',
+        'adminRestoreCourier',
+      ]);
+      for (final payload in gateway.payloads) {
+        expect(payload['courierId'], 'courier-1');
+        expect(payload['idempotencyKey'], isNotEmpty);
+        expect(payload, isNot(contains('adminUid')));
+        expect(payload, isNot(contains('role')));
+        expect(payload, isNot(contains('roles')));
+        expect(payload, isNot(contains('status')));
+      }
+    },
+  );
 
   testWidgets('intent screen has customer/courier intents but no admin', (
     tester,
@@ -511,8 +482,8 @@ void main() {
     expect(find.text('Продолжить как администратор'), findsNothing);
   });
 
-  test('неизвестный статус заказа считается ожидающим', () {
-    expect(orderStatusFromString('legacy'), OrderStatus.waiting);
+  test('неизвестный статус не разрешает действия ожидающего заказа', () {
+    expect(orderStatusFromString('legacy'), OrderStatus.unknown);
     expect(orderStatusToString(OrderStatus.pickedUp), 'pickedUp');
   });
 
@@ -727,7 +698,7 @@ void main() {
         timeout: Duration(seconds: 2),
         mode: RouteMode.bicycle,
         debugLogging: false,
-        profileOverride: 'driving',
+        profileOverride: '',
       ),
     );
     final route = provider.parseResponse({
@@ -836,7 +807,7 @@ void main() {
         timeout: Duration(seconds: 7),
         mode: RouteMode.bicycle,
         debugLogging: false,
-        profileOverride: 'driving',
+        profileOverride: '',
       ),
     );
     final uri = provider.buildRequestUri(
@@ -846,12 +817,46 @@ void main() {
     );
     expect(
       uri.path,
-      contains('/route/v1/driving/69.6222,40.2833;69.6322,40.2933'),
+      contains('/route/v1/bike/69.6222,40.2833;69.6322,40.2933'),
     );
     expect(uri.queryParameters['geometries'], 'geojson');
     expect(uri.queryParameters['steps'], 'true');
     expect(uri.queryParameters, isNot(contains('language')));
   });
+
+  test(
+    'routing mode selects bicycle, driving, and rejects unsupported capability',
+    () async {
+      final provider = RoadRouteProvider(
+        config: const RoutingConfig(
+          enabled: true,
+          providerType: RoutingProviderType.osrm,
+          baseUrl: 'https://routing.example.tj',
+          apiKey: '',
+          timeout: Duration(seconds: 7),
+          mode: RouteMode.car,
+          debugLogging: false,
+          supportedModes: {RouteMode.car},
+        ),
+      );
+      final driving = provider.buildRequestUri(
+        from: const LatLng(40.2833, 69.6222),
+        to: const LatLng(40.2933, 69.6322),
+        mode: RouteMode.car,
+      );
+      expect(driving.path, contains('/route/v1/driving/'));
+      await expectLater(
+        provider.buildRoute(
+          from: const LatLng(40.2833, 69.6222),
+          to: const LatLng(40.2933, 69.6322),
+          mode: RouteMode.bicycle,
+        ),
+        throwsUnsupportedError,
+      );
+      expect(ServiceAreaRegistry.khujand.routingProfile, 'bicycle');
+      expect(ServiceAreaRegistry.dushanbe.routingProfile, 'bicycle');
+    },
+  );
 
   test('provider disabled даёт fallback и обновляет health', () async {
     const config = RoutingConfig(
@@ -871,7 +876,15 @@ void main() {
       healthMonitor: health,
       performanceMonitor: performance,
     );
-    final route = await service.buildRoute(
+    await expectLater(
+      service.buildRoute(
+        from: const LatLng(40.2833, 69.6222),
+        to: const LatLng(40.2933, 69.6322),
+        mode: RouteMode.bicycle,
+      ),
+      throwsA(isA<RouteUnavailableException>()),
+    );
+    final route = service.directRoute(
       from: const LatLng(40.2833, 69.6222),
       to: const LatLng(40.2933, 69.6322),
       mode: RouteMode.bicycle,
@@ -1171,7 +1184,7 @@ void main() {
       find.byKey(const ValueKey('new-order-map-confirm')),
     );
 
-    expect(mapRect, const Rect.fromLTWH(0, 0, 360, 800));
+    expect(mapRect, const Rect.fromLTWH(0, 0, 360, 528));
     expect(panelRect.top, 528);
     expect(panelRect.bottom, 800);
     expect(panelRect.height, lessThanOrEqualTo(300));
@@ -1210,7 +1223,8 @@ void main() {
         findsOneWidget,
       );
       expect(find.byKey(const ValueKey('new-order-map-gps')), findsOneWidget);
-      expect(find.textContaining('Откуда: ул. Асири'), findsOneWidget);
+      expect(find.text('Откуда'), findsOneWidget);
+      expect(find.textContaining('ул. Асири'), findsOneWidget);
       expect(find.textContaining('7JM5+9C8'), findsNothing);
       expect(find.text('Использовать моё местоположение'), findsNothing);
       expect(find.text('GPS'), findsNothing);
@@ -1231,6 +1245,24 @@ void main() {
       expect(gpsRect.bottom, lessThan(panelRect.top));
     },
   );
+}
+
+class _RecordingCommandGateway implements AuthoritativeCommandGateway {
+  final List<String> commands = [];
+  final List<Map<String, dynamic>> payloads = [];
+
+  @override
+  String get region => 'test';
+
+  @override
+  Future<Map<String, dynamic>> call(
+    String command,
+    Map<String, dynamic> data,
+  ) async {
+    commands.add(command);
+    payloads.add(Map<String, dynamic>.from(data));
+    return const {};
+  }
 }
 
 class _TestRoleStore implements RolePreferenceStorage {

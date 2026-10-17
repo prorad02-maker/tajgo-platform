@@ -12,7 +12,7 @@
         "lib/firebase_options.dart": {
           "projectId": "tajgo-4fcd0",
           "configurations": {
-            "android": "1:784873463457:android:33da27eafa9432a4c91ae0",
+            "android": "1:784873463457:android:0ac2e36af2d8c1a0c91ae0",
             "ios": "1:784873463457:ios:42381eb986ce1b77c91ae0",
             "macos": "1:784873463457:ios:42381eb986ce1b77c91ae0",
             "web": "1:784873463457:web:ee2ac3d85f6fe22ac91ae0",
@@ -23,7 +23,77 @@
     }
   },
   "firestore": {
-    "rules": "firestore.rules",
+    "rules": "firestore.compat.rules",
     "indexes": "firestore.indexes.json"
+  },
+  "functions": [
+    {
+      "source": "functions",
+      "runtime": "nodejs22",
+      "predeploy": [
+        "npm --prefix \"$RESOURCE_DIR\" run lint",
+        "npm --prefix \"$RESOURCE_DIR\" run build",
+        "npm --prefix \"$RESOURCE_DIR\" test"
+      ]
+    },
+    {
+      "source": "notification-functions",
+      "codebase": "notifications",
+      "runtime": "nodejs22",
+      "predeploy": [
+        "node --check \"$RESOURCE_DIR/index.js\"",
+        "node --check \"$RESOURCE_DIR/notifications.js\""
+      ]
+    },
+    {
+      "source": "legacy-order-functions",
+      "codebase": "order-commands",
+      "runtime": "nodejs22",
+      "predeploy": [
+        "node --check \"$RESOURCE_DIR/index.js\"",
+        "node --check \"$RESOURCE_DIR/order_commands.js\""
+      ]
+    }
+  ],
+  "hosting": {
+    "public": "public",
+    "cleanUrls": true,
+    "trailingSlash": false,
+    "predeploy": [
+      "node scripts/version_website_assets.mjs",
+      "node scripts/check_website.mjs"
+    ],
+    "headers": [
+      {
+        "regex": "^/([^.]*|.*\\.(html|css|js))$",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache, max-age=0, must-revalidate"
+          }
+        ]
+      }
+    ],
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ]
+  },
+  "emulators": {
+    "auth": {
+      "port": 9099
+    },
+    "functions": {
+      "port": 5001
+    },
+    "firestore": {
+      "port": 8080
+    },
+    "ui": {
+      "enabled": true,
+      "port": 4000
+    },
+    "singleProjectMode": true
   }
 }

@@ -138,6 +138,32 @@ class AuthService {
     return user;
   }
 
+  /// Повторная авторизация текущего пользователя SMS-кодом.
+  ///
+  /// Требуется перед необратимыми действиями (удаление аккаунта): обновляет
+  /// «recent login» и подтверждает владение номером.
+  Future<void> reauthenticateWithSmsCode({
+    required String verificationId,
+    required String smsCode,
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null) {
+      throw const PhoneAuthFailure(
+        code: 'missing-user',
+        message: 'Сессия истекла. Войдите заново.',
+      );
+    }
+    try {
+      final credential = PhoneAuthProvider.credential(
+        verificationId: verificationId,
+        smsCode: smsCode,
+      );
+      await user.reauthenticateWithCredential(credential);
+    } on FirebaseAuthException catch (error) {
+      throw PhoneAuthFailure.fromFirebase(error);
+    }
+  }
+
   Future<User> signInToExistingAccount(PhoneAuthCredential credential) async {
     try {
       final result = await _auth.signInWithCredential(credential);
@@ -188,7 +214,7 @@ class PhoneAuthFailure implements Exception {
   factory PhoneAuthFailure.fromFirebase(FirebaseAuthException error) {
     final message = switch (error.code) {
       'invalid-phone-number' =>
-        'Проверьте номер. Нужен формат +992 XX XXX XX XX.',
+        'Проверьте полный номер телефона с кодом страны.',
       'invalid-verification-code' =>
         'Неверный код. Проверьте SMS и попробуйте ещё раз.',
       'session-expired' => 'Срок действия кода истёк. Запросите новый.',

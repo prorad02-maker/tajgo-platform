@@ -1,3 +1,4 @@
+import '../../shared/widgets/tajgo_map_attribution.dart';
 import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -6,9 +7,12 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../core/constants/tajgo_colors.dart';
+import '../../core/config/map_provider_config.dart';
+import '../../core/design/tajgo_money.dart';
 import '../../core/models/marketplace_cart.dart';
 import '../../core/models/marketplace_partner.dart';
 import '../../core/models/marketplace_product.dart';
+import '../../core/services/authoritative_command_service.dart';
 import '../../shared/widgets/tajgo_scope.dart';
 import '../customer/order_tracking_screen.dart';
 import '../map/models/place_suggestion.dart';
@@ -44,6 +48,7 @@ class _MarketplaceCheckoutScreenState extends State<MarketplaceCheckoutScreen> {
   final _comment = TextEditingController();
   MarketplaceDeliverySelection? _delivery;
   bool _busy = false;
+  String? _idempotencyKey;
 
   @override
   void dispose() {
@@ -62,6 +67,7 @@ class _MarketplaceCheckoutScreenState extends State<MarketplaceCheckoutScreen> {
   }
 
   Future<void> _submit(MarketplaceCart cart) async {
+    if (_busy) return;
     final partner = cart.partner;
     final delivery = _delivery;
     if (partner == null || cart.isEmpty) return;
@@ -80,7 +86,7 @@ class _MarketplaceCheckoutScreenState extends State<MarketplaceCheckoutScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Добавьте товаров ещё на ${quote.missingForMinimum} TJS.',
+            'Добавьте товаров ещё на ${TajGoMoney.format(quote.missingForMinimum)}.',
           ),
         ),
       );
@@ -89,6 +95,7 @@ class _MarketplaceCheckoutScreenState extends State<MarketplaceCheckoutScreen> {
     setState(() => _busy = true);
     try {
       final scope = TajGoScope.of(context);
+      _idempotencyKey ??= TajGoIdempotencyKey.create('catalog-checkout');
       final uid = scope.authService.currentUser!.uid;
       final user = await scope.userRepository.getUser(uid);
       if (!mounted) return;
@@ -102,7 +109,9 @@ class _MarketplaceCheckoutScreenState extends State<MarketplaceCheckoutScreen> {
         distanceKm: delivery.distanceKm,
         etaMinutes: delivery.etaMinutes,
         comment: _comment.text,
+        idempotencyKey: _idempotencyKey,
       );
+      _idempotencyKey = null;
       cart.clear();
       if (!mounted) return;
       Navigator.pushAndRemoveUntil(
@@ -112,11 +121,27 @@ class _MarketplaceCheckoutScreenState extends State<MarketplaceCheckoutScreen> {
         ),
         (route) => route.isFirst,
       );
-    } catch (error) {
+    } on TajGoCommandException catch (error) {
+      if (error.isPriceChanged) {
+        cart.applyServerPrices(error.currentPrices);
+      } else if (!error.retryable) {
+        _idempotencyKey = null;
+      }
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('$error')));
+        ).showSnackBar(SnackBar(content: Text(error.message)));
+      }
+    } catch (_) {
+      _idempotencyKey = null;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Не удалось оформить заказ. Проверьте связь и повторите.',
+            ),
+          ),
+        );
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -211,7 +236,7 @@ class _MarketplaceCheckoutScreenState extends State<MarketplaceCheckoutScreen> {
                           ? 'Пример · публикация через админку'
                           : _busy
                           ? 'Оформляем…'
-                          : 'Оформить · ${cart.total} TJS',
+                          : 'Оформить · ${TajGoMoney.format(cart.total)}',
                     ),
                   ),
                 ),
@@ -237,7 +262,7 @@ class _CartLineTile extends StatelessWidget {
       ),
       title: Text(line.product.name),
       subtitle: Text(
-        '${line.product.price} TJS × ${_quantity(line.quantity)} ${marketplaceUnitLabel(line.product.unit)}',
+        '${TajGoMoney.format(line.product.price)} × ${_quantity(line.quantity)} ${marketplaceUnitLabel(line.product.unit)}',
       ),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
@@ -286,7 +311,7 @@ class _TotalsCard extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.only(top: 8),
                 child: Text(
-                  'Добавьте товаров ещё на ${quote.missingForMinimum} TJS.',
+                  'Добавьте товаров ещё на ${TajGoMoney.format(quote.missingForMinimum)}.',
                   style: const TextStyle(
                     color: TajGoColors.warning,
                     fontWeight: FontWeight.w800,
@@ -303,7 +328,7 @@ class _TotalsCard extends StatelessWidget {
     children: [
       Expanded(child: Text(label)),
       Text(
-        '$value TJS',
+        TajGoMoney.format(value),
         style: TextStyle(
           fontWeight: strong ? FontWeight.w900 : FontWeight.w700,
         ),
@@ -497,8 +522,9 @@ class _MarketplaceDeliveryPointScreenState
             ),
             children: [
               TileLayer(
-                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'tj.tajgo.app',
+                urlTemplate: MapProviderConfig.current.tileUrlTemplate,
+                userAgentPackageName:
+                    MapProviderConfig.current.userAgentPackageName,
                 maxZoom: 19,
               ),
               if (_route != null)
@@ -533,11 +559,7 @@ class _MarketplaceDeliveryPointScreenState
                     ),
                 ],
               ),
-              RichAttributionWidget(
-                attributions: const [
-                  TextSourceAttribution('OpenStreetMap contributors'),
-                ],
-              ),
+              const TajGoMapAttribution(),
             ],
           ),
         ),

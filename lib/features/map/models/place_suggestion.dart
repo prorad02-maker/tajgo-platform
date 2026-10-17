@@ -24,6 +24,7 @@ class PlaceSuggestion {
     this.isPartner = false,
     this.isPinned = false,
     this.tags = const [],
+    this.cityId,
   });
 
   final String id;
@@ -48,8 +49,26 @@ class PlaceSuggestion {
   final bool isPartner;
   final bool isPinned;
   final List<String> tags;
+  final String? cityId;
 
   LatLng get point => LatLng(lat, lng);
+
+  /// Preview records must stay out of ordering, including persisted favorites.
+  bool get isPreview =>
+      id.toLowerCase().startsWith('demo_') ||
+      (partnerId?.toLowerCase().startsWith('demo_') ?? false) ||
+      tags.any((tag) => tag.toLowerCase() == 'demo') ||
+      title.toLowerCase().startsWith('демо:') ||
+      address.toLowerCase().startsWith('демо-точка');
+
+  bool get hasValidCoordinates =>
+      lat.isFinite &&
+      lng.isFinite &&
+      lat >= -90 &&
+      lat <= 90 &&
+      lng >= -180 &&
+      lng <= 180 &&
+      (lat != 0 || lng != 0);
 
   PlaceSuggestion copyWith({
     double? distanceMetersFromUser,
@@ -58,6 +77,7 @@ class PlaceSuggestion {
     DateTime? usedAt,
     String? recentType,
     bool? isPinned,
+    String? cityId,
   }) => PlaceSuggestion(
     id: id,
     title: title,
@@ -82,6 +102,7 @@ class PlaceSuggestion {
     isPartner: isPartner,
     isPinned: isPinned ?? this.isPinned,
     tags: tags,
+    cityId: cityId ?? this.cityId,
   );
 
   Map<String, dynamic> toJson({String? type, DateTime? usedAt}) {
@@ -104,6 +125,7 @@ class PlaceSuggestion {
       'isPartner': isPartner,
       'pinned': isPinned,
       'tags': tags,
+      'cityId': cityId,
     };
     if (type != null) json['type'] = type;
     if (usedAt != null) json['usedAt'] = usedAt.toIso8601String();
@@ -139,5 +161,6 @@ class PlaceSuggestion {
     tags:
         (json['tags'] as List<dynamic>?)?.whereType<String>().toList() ??
         const [],
+    cityId: json['cityId'] as String?,
   );
 }

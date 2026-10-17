@@ -6,991 +6,417 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function owns(uid) {
+    function owner(uid) {
       return signedIn() && request.auth.uid == uid;
     }
 
-    function isCourier() {
-      return signedIn()
-        && exists(/databases/$(database)/documents/couriers/$(request.auth.uid))
-        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data
-          .get('courierStatus', 'none') == 'approved'
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data
-          .get('courierOnboardingCompleted', false) == true
-        && 'courier' in get(
-          /databases/$(database)/documents/users/$(request.auth.uid)
-        ).data.get('roles', []);
+    function userData(uid) {
+      return get(/databases/$(database)/documents/users/$(uid)).data;
     }
 
     function isAdmin() {
       return signedIn()
-        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
-          == 'admin';
+        && (
+          request.auth.token.admin == true
+          || userData(request.auth.uid).role == 'admin'
+        );
     }
 
-    function authPhone() {
-      return request.auth.token.get('phone_number', null);
+    function isApprovedCourier() {
+      let user = userData(request.auth.uid);
+      return signedIn()
+        && user.role == 'courier'
+        && user.courierStatus == 'approved'
+        && user.roles is list
+        && user.roles.hasAny(['courier']);
     }
 
-    function phoneMatchesAuth(data) {
-      return data.get('phoneNumber', null) == null
-        || data.get('phoneNumber', null) == authPhone();
+    function isWaitingStatus(status) {
+      return status in ['draft', 'waiting', 'waitingOffers'];
+    }
+
+    function validLocation(location) {
+      return location is latlng
+        && location.latitude >= -90
+        && location.latitude <= 90
+        && location.longitude >= -180
+        && location.longitude <= 180;
+    }
+
+    function safeOwnUserUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+        'displayName',
+        'name',
+        'photoUrl',
+        'city',
+        'language',
+        'updatedAt'
+      ])
+      && request.resource.data.uid == request.auth.uid
+      && request.resource.data.role == resource.data.role
+      && request.resource.data.roles == resource.data.roles
+      && request.resource.data.courierStatus == resource.data.courierStatus
+      && request.resource.data.updatedAt == request.time;
+    }
+
+    function safeCourierApplicationUserSync(uid) {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      let nextStatus = request.resource.data.courierStatus;
+      let nextApplication = getAfter(
+        /databases/$(database)/documents/courier_applications/$(uid)
+      ).data;
+      return owner(uid)
+        && changed.hasOnly([
+          'courierStatus',
+          'targetRole',
+          'lastMode',
+          'updatedAt'
+        ])
+        && nextStatus in ['draft', 'pending']
+        && request.resource.data.targetRole == 'courier'
+        && request.resource.data.lastMode == 'customer'
+        && nextApplication.status == nextStatus
+        && request.resource.data.updatedAt == request.time;
     }
 
     match /users/{uid} {
-      function accountFieldsAreWellFormed(data) {
-        let roles = data.get('roles', ['customer']);
-        let status = data.get('courierStatus', 'none');
-        let mode = data.get('lastMode', 'customer');
-        let selectedRole = data.get('selectedRole', mode);
-        return roles is list
-          && roles.hasOnly(['customer', 'courier'])
-          && 'customer' in roles
-          && status in [
-            'none', 'draft', 'pending', 'approved', 'rejected', 'suspended'
-          ]
-          && mode in ['customer', 'courier']
-          && selectedRole in ['customer', 'courier']
-          && data.get('onboardingCompleted', false) is bool
-          && data.get('phoneVerified', false) == (authPhone() != null)
-          && data.get('profileComplete', false) is bool
-          && data.get('courierOnboardingCompleted', false) is bool
-          && (!data.get('courierOnboardingCompleted', false)
-            || (status == 'approved' && 'courier' in roles));
-      }
-
-      function hasLegacyCourierProof(uid) {
-        return resource.data.get('role', 'customer') == 'courier'
-          || exists(/databases/$(database)/documents/couriers/$(uid));
-      }
-
-      function ownerRolesAreValid(uid) {
-        let before = resource.data.get('roles', ['customer']);
-        let after = request.resource.data.get('roles', ['customer']);
-        return after == before
-          || (hasLegacyCourierProof(uid)
-            && after.hasOnly(['customer', 'courier'])
-            && 'customer' in after
-            && 'courier' in after);
-      }
-
-      function ownerCourierStatusIsValid(uid) {
-        let before = resource.data.get('courierStatus', 'none');
-        let after = request.resource.data.get('courierStatus', 'none');
-        return after == before
-          || (before == 'none' && after == 'draft')
-          || (before == 'draft' && after == 'pending')
-          || (before == 'rejected' && after in ['draft', 'pending'])
-          || (hasLegacyCourierProof(uid) && after == 'approved');
-      }
-
-      function ownerModeAndLegacyRoleAreValid() {
-        let mode = request.resource.data.get('lastMode', 'customer');
-        let status = request.resource.data.get('courierStatus', 'none');
-        let roles = request.resource.data.get('roles', ['customer']);
-        let beforeRole = resource.data.get('role', 'customer');
-        let afterRole = request.resource.data.get('role', 'customer');
-        let courierModeAllowed = status == 'approved' && 'courier' in roles;
-        return (mode == 'customer' || courierModeAllowed)
-          && (beforeRole == 'admin'
-            ? afterRole == 'admin'
-            : (afterRole == 'customer'
-              || (afterRole == 'courier' && courierModeAllowed)));
-      }
-
-      allow get: if owns(uid) || isAdmin();
+      allow get: if owner(uid) || isAdmin();
       allow list: if isAdmin();
+      allow create: if false;
+      allow update: if (owner(uid) && safeOwnUserUpdate())
+        || safeCourierApplicationUserSync(uid);
+      allow delete: if false;
 
-      allow create: if owns(uid)
-        && request.resource.data.uid == uid
-        && request.resource.data.role == 'customer'
-        && request.resource.data.get('roles', ['customer']).hasOnly([
-          'customer'
-        ])
-        && request.resource.data.get('lastMode', 'customer') == 'customer'
-        && request.resource.data.get('courierStatus', 'none') in [
-          'none', 'draft'
-        ]
-        && accountFieldsAreWellFormed(request.resource.data)
-        && phoneMatchesAuth(request.resource.data)
-        && request.resource.data.createdAt == request.time
-        && request.resource.data.updatedAt == request.time;
+      // Saved addresses are personal, non-critical data owned by the user.
+      // Order creation still validates the actual coordinates server-side.
+      match /addresses/{addressId} {
+        allow read, write: if owner(uid);
+      }
 
-      allow update: if (owns(uid)
-        && request.resource.data.uid == resource.data.uid
-        && request.resource.data.createdAt == resource.data.createdAt
-        && phoneMatchesAuth(request.resource.data)
-        && accountFieldsAreWellFormed(request.resource.data)
-        && ownerRolesAreValid(uid)
-        && ownerCourierStatusIsValid(uid)
-        && ownerModeAndLegacyRoleAreValid()
-        && request.resource.data.updatedAt == request.time
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'phoneNumber',
+      // FCM device tokens: owner writes their own; backend senders read them.
+      match /notification_tokens/{tokenId} {
+        allow read, write: if owner(uid);
+      }
+    }
+
+    function safeOwnerApplicationCreate(uid) {
+      let next = request.resource.data;
+      return owner(uid)
+        && next.uid == uid
+        && next.status in ['draft', 'pending']
+        && next.keys().hasOnly([
+          'uid',
           'displayName',
           'name',
-          'photoUrl',
-          'roles',
-          'lastMode',
-          'courierStatus',
-          'phoneVerified',
-          'profileComplete',
-          'courierOnboardingCompleted',
-          'onboardingCompleted',
-          'selectedRole',
-          'roleSelectedAt',
-          'targetRole',
-          'role',
+          'phoneNumber',
+          'status',
+          'currentStep',
+          'birthDate',
+          'profilePhotoUrl',
+          'transport',
+          'documentType',
+          'documentNumber',
+          'documentPhotoUrl',
+          'transportPhotoUrl',
           'city',
-          'language',
+          'workDistrict',
+          'availability',
+          'termsAccepted',
+          'dataConsent',
+          'storageEnabled',
+          'verificationMethod',
+          'submittedAt',
+          'createdAt',
           'updatedAt'
-        ])) || (isAdmin()
-          && request.resource.data.uid == resource.data.uid
-          && request.resource.data.createdAt == resource.data.createdAt
-          && request.resource.data.updatedAt == request.time);
+        ])
+        && next.createdAt == request.time
+        && next.updatedAt == request.time;
+    }
 
-      allow delete: if false;
+    function safeOwnerApplicationUpdate(uid) {
+      let next = request.resource.data;
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return owner(uid)
+        && next.uid == uid
+        && resource.data.status in ['draft', 'rejected']
+        && next.status in ['draft', 'pending']
+        && changed.hasOnly([
+          'displayName',
+          'name',
+          'phoneNumber',
+          'status',
+          'currentStep',
+          'birthDate',
+          'profilePhotoUrl',
+          'transport',
+          'documentType',
+          'documentNumber',
+          'documentPhotoUrl',
+          'transportPhotoUrl',
+          'city',
+          'workDistrict',
+          'availability',
+          'termsAccepted',
+          'dataConsent',
+          'storageEnabled',
+          'verificationMethod',
+          'submittedAt',
+          'updatedAt'
+        ])
+        && next.updatedAt == request.time;
     }
 
     match /courier_applications/{uid} {
-      function applicationDataIsValid(data) {
-        return data.uid == uid
-          && data.get('status', 'draft') in [
-            'draft', 'pending', 'approved', 'rejected', 'suspended'
-          ]
-          && data.get('currentStep', 0) is int
-          && data.get('currentStep', 0) >= 0
-          && data.get('currentStep', 0) <= 4
-          && data.get('transport', 'bicycle') in [
-            'bicycle', 'electric_bike', 'scooter', 'car'
-          ]
-          && data.get('termsAccepted', false) is bool
-          && data.get('dataConsent', false) is bool
-          && phoneMatchesAuth(data);
-      }
-
-      function ownerDraftUpdateIsValid() {
-        let before = resource.data.status;
-        let after = request.resource.data.status;
-        return owns(uid)
-          && before in ['draft', 'rejected']
-          && after in ['draft', 'pending']
-          && applicationDataIsValid(request.resource.data)
-          && request.resource.data.createdAt == resource.data.createdAt
-          && request.resource.data.updatedAt == request.time
-          && (after != 'pending'
-            || request.resource.data.submittedAt == request.time)
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            'displayName',
-            'name',
-            'phoneNumber',
-            'status',
-            'currentStep',
-            'birthDate',
-            'profilePhotoUrl',
-            'transport',
-            'documentType',
-            'documentNumber',
-            'documentPhotoUrl',
-            'transportPhotoUrl',
-            'city',
-            'workDistrict',
-            'availability',
-            'termsAccepted',
-            'dataConsent',
-            'storageEnabled',
-            'verificationMethod',
-            'submittedAt',
-            'updatedAt'
-          ]);
-      }
-
-      allow get: if owns(uid) || isAdmin();
+      allow get: if owner(uid) || isAdmin();
       allow list: if isAdmin();
-      allow create: if isAdmin() || (owns(uid)
-        && request.resource.data.status == 'draft'
-        && applicationDataIsValid(request.resource.data)
-        && request.resource.data.createdAt == request.time
-        && request.resource.data.updatedAt == request.time);
-      allow update: if ownerDraftUpdateIsValid() || isAdmin();
+      allow create: if safeOwnerApplicationCreate(uid);
+      allow update: if safeOwnerApplicationUpdate(uid);
       allow delete: if false;
+    }
+
+    function safePresenceUpdate() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return changed.hasOnly([
+        'isOnline',
+        'online',
+        'location',
+        'locationUpdatedAt',
+        'locationAccuracy',
+        'heading',
+        'speed',
+        'updatedAt'
+      ])
+      && request.resource.data.isOnline is bool
+      && request.resource.data.online is bool
+      && request.resource.data.isOnline == request.resource.data.online
+      && (
+        !changed.hasAny(['location'])
+        || validLocation(request.resource.data.location)
+      )
+      && (
+        !changed.hasAny(['locationAccuracy'])
+        || (
+          request.resource.data.locationAccuracy is number
+          && request.resource.data.locationAccuracy >= 0
+          && request.resource.data.locationAccuracy <= 200
+        )
+      )
+      && (
+        !changed.hasAny(['heading'])
+        || (
+          request.resource.data.heading is number
+          && request.resource.data.heading >= 0
+          && request.resource.data.heading <= 360
+        )
+      )
+      && (
+        !changed.hasAny(['speed'])
+        || (
+          request.resource.data.speed is number
+          && request.resource.data.speed >= 0
+          && request.resource.data.speed <= 80
+        )
+      )
+      && (
+        !changed.hasAny(['locationUpdatedAt'])
+        || request.resource.data.locationUpdatedAt == request.time
+      )
+      && request.resource.data.updatedAt == request.time;
     }
 
     match /couriers/{uid} {
-      function baseCourierDataIsValid() {
-        return request.resource.data.uid == uid
-          && phoneMatchesAuth(request.resource.data)
-          && request.resource.data.get('isOnline', false)
-            == request.resource.data.get('online', false);
-      }
-
-      function ownerProfileUpdateIsValid() {
-        return owns(uid)
-          && isCourier()
-          && baseCourierDataIsValid()
-          && request.resource.data.updatedAt == request.time
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            'phoneNumber',
-            'displayName',
-            'name',
-            'city',
-            'isOnline',
-            'online',
-            'transport',
-            'location',
-            'locationUpdatedAt',
-            'heading',
-            'speed',
-            'locationAccuracy',
-            'updatedAt'
-          ]);
-      }
-
-      function ownerAcceptUpdateIsValid() {
-        let orderId = request.resource.data.get('activeOrderId', null);
-        let orderAfter = getAfter(
-          /databases/$(database)/documents/orders/$(orderId)
-        );
-        return owns(uid)
-          && resource.data.get('activeOrderId', null) == null
-          && orderId is string
-          && orderAfter.data.courierId == uid
-          && orderAfter.data.status == 'accepted'
-          && request.resource.data.updatedAt == request.time
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            'activeOrderId',
-            'isBusy',
-            'updatedAt'
-          ]);
-      }
-
-      function completionStatsUpdateIsValid() {
-        let orderId = resource.data.get('activeOrderId', null);
-        let orderAfter = getAfter(
-          /databases/$(database)/documents/orders/$(orderId)
-        );
-        return orderId is string
-          && orderAfter.data.courierId == uid
-          && orderAfter.data.status == 'completed'
-          && request.resource.data.get('activeOrderId', null) == null
-          && request.resource.data.get('isBusy', false) == false
-          && request.resource.data.earningsToday
-            == resource.data.earningsToday + orderAfter.data.price
-          && request.resource.data.ordersToday == resource.data.ordersToday + 1
-          && request.resource.data.updatedAt == request.time
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            'activeOrderId',
-            'isBusy',
-            'earningsToday',
-            'ordersToday',
-            'updatedAt'
-          ]);
-      }
-
-      function assignedCustomerCompletesOrder() {
-        let orderId = resource.data.get('activeOrderId', null);
-        let orderAfter = getAfter(
-          /databases/$(database)/documents/orders/$(orderId)
-        );
-        return signedIn()
-          && orderId is string
-          && orderAfter.data.customerId == request.auth.uid
-          && completionStatsUpdateIsValid();
-      }
-
-      function assignedCustomerSelectsOffer() {
-        let orderId = request.resource.data.get('activeOrderId', null);
-        let orderAfter = getAfter(
-          /databases/$(database)/documents/orders/$(orderId)
-        );
-        return signedIn()
-          && resource.data.get('activeOrderId', null) == null
-          && resource.data.get('isBusy', false) == false
-          && orderId is string
-          && orderAfter.data.customerId == request.auth.uid
-          && orderAfter.data.courierId == uid
-          && orderAfter.data.status == 'accepted'
-          && request.resource.data.get('isBusy', false) == true
-          && request.resource.data.updatedAt == request.time
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            'activeOrderId',
-            'isBusy',
-            'updatedAt'
-          ]);
-      }
-
-      allow get: if owns(uid) || isAdmin();
+      allow get: if owner(uid) || isAdmin();
       allow list: if isAdmin();
-
-      allow create: if isAdmin() || (owns(uid)
-        && isCourier()
-        && baseCourierDataIsValid()
-        && request.resource.data.rating == 5
-        && request.resource.data.score == 100
-        && request.resource.data.earningsToday == 0
-        && request.resource.data.ordersToday == 0
-        && request.resource.data.get('activeOrderId', null) == null
-        && request.resource.data.updatedAt == request.time);
-
-      allow update: if ownerProfileUpdateIsValid()
-        || ownerAcceptUpdateIsValid()
-        || (owns(uid) && completionStatsUpdateIsValid())
-        || assignedCustomerCompletesOrder()
-        || assignedCustomerSelectsOffer()
-        || isAdmin();
-
+      allow create: if false;
+      allow update: if (
+          owner(uid)
+          && isApprovedCourier()
+          && safePresenceUpdate()
+        );
       allow delete: if false;
     }
 
-    // Public projection used by the live map and customer tracking. Sensitive
-    // courier fields (phone, activeOrderId and earnings) never live here.
+    function validPublicCourierShape() {
+      return request.resource.data.keys().hasOnly([
+        'uid',
+        'displayName',
+        'name',
+        'isOnline',
+        'online',
+        'rating',
+        'transport',
+        'location',
+        'locationUpdatedAt',
+        'locationAccuracy',
+        'heading',
+        'speed',
+        'updatedAt'
+      ]);
+    }
+
+    function safePublicCourierRead() {
+      return resource.data.keys().hasOnly([
+        'uid',
+        'displayName',
+        'name',
+        'isOnline',
+        'online',
+        'rating',
+        'transport',
+        'location',
+        'locationUpdatedAt',
+        'locationAccuracy',
+        'heading',
+        'speed',
+        'updatedAt'
+      ]);
+    }
+
     match /courier_public/{uid} {
-      function assignedCustomerCanRead() {
-        let privateCourier = get(
-          /databases/$(database)/documents/couriers/$(uid)
+      allow read: if signedIn() && safePublicCourierRead();
+      allow create: if false;
+      allow update: if (
+          owner(uid)
+          && isApprovedCourier()
+          && validPublicCourierShape()
+          && safePresenceUpdate()
         );
-        let orderId = privateCourier.data.get('activeOrderId', null);
-        return signedIn()
-          && orderId is string
-          && exists(/databases/$(database)/documents/orders/$(orderId))
-          && get(/databases/$(database)/documents/orders/$(orderId)).data.customerId
-            == request.auth.uid;
-      }
-
-      function publicDataMatchesPrivate() {
-        let privateAfter = getAfter(
-          /databases/$(database)/documents/couriers/$(uid)
-        );
-        return request.resource.data.uid == uid
-          && request.resource.data.displayName == privateAfter.data.displayName
-          && request.resource.data.name == privateAfter.data.name
-          && request.resource.data.isOnline == privateAfter.data.isOnline
-          && request.resource.data.online == privateAfter.data.online
-          && request.resource.data.rating == privateAfter.data.rating
-          && request.resource.data.transport == privateAfter.data.transport
-          && request.resource.data.get('location', null)
-            == privateAfter.data.get('location', null)
-          && request.resource.data.get('locationUpdatedAt', null)
-            == privateAfter.data.get('locationUpdatedAt', null)
-          && request.resource.data.get('heading', null)
-            == privateAfter.data.get('heading', null)
-          && request.resource.data.get('speed', null)
-            == privateAfter.data.get('speed', null)
-          && request.resource.data.get('locationAccuracy', null)
-            == privateAfter.data.get('locationAccuracy', null)
-          && request.resource.data.updatedAt == request.time
-          && request.resource.data.keys().hasOnly([
-            'uid',
-            'displayName',
-            'name',
-            'isOnline',
-            'online',
-            'rating',
-            'transport',
-            'location',
-            'locationUpdatedAt',
-            'heading',
-            'speed',
-            'locationAccuracy',
-            'updatedAt'
-          ]);
-      }
-
-      allow get: if signedIn()
-        && (owns(uid)
-          || isAdmin()
-          || resource.data.get('isOnline', false) == true
-          || assignedCustomerCanRead());
-      allow list: if isAdmin()
-        || (signedIn()
-          && resource.data.get('isOnline', false) == true
-          && request.query.limit != null
-          && request.query.limit <= 50);
-
-      allow create, update: if (owns(uid)
-          && isCourier()
-          && publicDataMatchesPrivate())
-        || isAdmin();
       allow delete: if false;
+    }
+
+    function orderOwner() {
+      return signedIn() && resource.data.customerId == request.auth.uid;
+    }
+
+    function assignedCourier() {
+      return isApprovedCourier()
+        && resource.data.get('confirmationCode', null) == null
+        && (
+          resource.data.courierId == request.auth.uid
+          || resource.data.selectedCourierId == request.auth.uid
+        );
+    }
+
+    function visibleWaitingOrder() {
+      return isApprovedCourier()
+        && isWaitingStatus(resource.data.status)
+        && resource.data.get('confirmationCode', null) == null
+        && resource.data.get('isTestOrder', false) != true;
     }
 
     match /orders/{orderId} {
-      function immutableOrderData() {
-        return request.resource.data.customerId == resource.data.customerId
-          && request.resource.data.customerName == resource.data.customerName
-          && request.resource.data.type == resource.data.type
-          && request.resource.data.city == resource.data.city
-          && request.resource.data.fromText == resource.data.fromText
-          && request.resource.data.toText == resource.data.toText
-          && request.resource.data.currency == resource.data.currency
-          && request.resource.data.get('fromLocation', null)
-            == resource.data.get('fromLocation', null)
-          && request.resource.data.get('toLocation', null)
-            == resource.data.get('toLocation', null)
-          && request.resource.data.get('distanceKm', null)
-            == resource.data.get('distanceKm', null)
-          && request.resource.data.get('etaMinutes', null)
-            == resource.data.get('etaMinutes', null)
-          && request.resource.data.get('confirmationCode', null)
-            == resource.data.get('confirmationCode', null)
-          && request.resource.data.get('comment', null)
-            == resource.data.get('comment', null)
-          && request.resource.data.get('orderType', 'customDelivery')
-            == resource.data.get('orderType', 'customDelivery')
-          && request.resource.data.get('suggestedPrice', null)
-            == resource.data.get('suggestedPrice', null)
-          && request.resource.data.get('clientPrice', null)
-            == resource.data.get('clientPrice', null)
-          && request.resource.data.get('priceNegotiable', true)
-            == resource.data.get('priceNegotiable', true)
-          && request.resource.data.get('pricingVersion', null)
-            == resource.data.get('pricingVersion', null)
-          && request.resource.data.get('partnerId', null)
-            == resource.data.get('partnerId', null)
-          && request.resource.data.get('partnerName', null)
-            == resource.data.get('partnerName', null)
-          && request.resource.data.get('items', [])
-            == resource.data.get('items', [])
-          && request.resource.data.get('subtotal', null)
-            == resource.data.get('subtotal', null)
-          && request.resource.data.get('deliveryFee', null)
-            == resource.data.get('deliveryFee', null)
-          && request.resource.data.get('total', null)
-            == resource.data.get('total', null)
-          && request.resource.data.get('isTestOrder', false)
-            == resource.data.get('isTestOrder', false)
-          && request.resource.data.createdAt == resource.data.createdAt;
-      }
+      allow get: if orderOwner()
+        || assignedCourier()
+        || visibleWaitingOrder()
+        || isAdmin();
+      allow list: if orderOwner()
+        || assignedCourier()
+        || visibleWaitingOrder()
+        || isAdmin();
 
-      function orderTypeDataIsValid(data) {
-        let type = data.get('orderType', 'customDelivery');
-        return (type == 'customDelivery'
-            && data.get('priceNegotiable', true) == true)
-          || (type == 'catalogOrder'
-            && data.get('priceNegotiable', true) == false
-            && data.get('partnerId', null) is string
-            && data.get('partnerName', null) is string
-            && data.get('items', []) is list
-            && data.get('items', []).size() > 0
-            && data.get('subtotal', null) is number
-            && data.get('subtotal', 0) >= 0
-            && data.get('deliveryFee', null) is number
-            && data.get('deliveryFee', 0) >= 10
-            && data.get('total', null) is number
-            && data.total == data.subtotal + data.deliveryFee
-            && data.price == data.deliveryFee
-            && catalogPartnerDataMatches(data)
-            && exists(
-              /databases/$(database)/documents/partners/$(data.partnerId)
-            )
-            && get(
-              /databases/$(database)/documents/partners/$(data.partnerId)
-            ).data.get('isActive', false) == true
-            && get(
-              /databases/$(database)/documents/partners/$(data.partnerId)
-            ).data.get('isOpen', false) == true);
-      }
+      // Authoritative Functions use Admin SDK and bypass Rules. No mobile
+      // client may create, assign, price, transition or complete an order.
+      allow create, update, delete: if false;
 
-      function catalogPartnerDataMatches(data) {
-        let partner = get(
-          /databases/$(database)/documents/partners/$(data.partnerId)
-        ).data;
-        let expectedDeliveryFee = partner.deliveryFee < 10
-          ? 10
-          : partner.deliveryFee;
-        return data.partnerName == partner.name
-          && data.type == partner.category
-          && data.fromText == partner.address
-          && data.fromLocation == partner.location
-          && data.subtotal >= partner.minimumOrder
-          && data.deliveryFee == expectedDeliveryFee
-          && data.items.size() <= 50;
-      }
-
-      function customerCancels() {
-        return resource.data.customerId == request.auth.uid
-          && resource.data.status in ['waiting', 'waitingOffers']
-          && request.resource.data.status == 'cancelled'
-          && request.resource.data.updatedAt == request.time
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            'status',
-            'updatedAt'
-          ]);
-      }
-
-      function customerCompletes() {
-        let courierId = resource.data.get('courierId', null);
-        let courierBefore = get(
-          /databases/$(database)/documents/couriers/$(courierId)
-        );
-        let courierAfter = getAfter(
-          /databases/$(database)/documents/couriers/$(courierId)
-        );
-        return courierId is string
-          && resource.data.customerId == request.auth.uid
-          && resource.data.status == 'delivered'
-          && request.resource.data.status == 'completed'
-          && request.resource.data.completedAt == request.time
-          && request.resource.data.updatedAt == request.time
-          && courierBefore.data.get('activeOrderId', null) == orderId
-          && courierAfter.data.get('activeOrderId', null) == null
-          && courierAfter.data.get('isBusy', false) == false
-          && courierAfter.data.earningsToday
-            == courierBefore.data.earningsToday + resource.data.price
-          && courierAfter.data.ordersToday
-            == courierBefore.data.ordersToday + 1
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            'status',
-            'completedAt',
-            'updatedAt'
-          ]);
-      }
-
-      function customerDisputes() {
-        return resource.data.customerId == request.auth.uid
-          && resource.data.status == 'delivered'
-          && request.resource.data.status == 'disputed'
-          && request.resource.data.disputedAt == request.time
-          && request.resource.data.updatedAt == request.time
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            'status',
-            'disputedAt',
-            'updatedAt'
-          ]);
-      }
-
-      function courierDeclines() {
-        return isCourier()
-          && resource.data.status in ['waiting', 'waitingOffers']
-          && request.resource.data.status == resource.data.status
-          && request.auth.uid in request.resource.data.declinedBy
-          && request.resource.data.declinedBy.size()
-            <= resource.data.declinedBy.size() + 1
-          && request.resource.data.updatedAt == request.time
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            'declinedBy',
-            'updatedAt'
-          ]);
-      }
-
-      function courierAccepts() {
-        let courierAfter = getAfter(
-          /databases/$(database)/documents/couriers/$(request.auth.uid)
-        );
-        return isCourier()
-          && resource.data.status == 'waiting'
-          && request.resource.data.status == 'accepted'
-          && request.resource.data.courierId == request.auth.uid
-          && courierAfter.data.get('activeOrderId', null) == orderId
-          && courierAfter.data.get('isBusy', false) == true
-          && request.resource.data.acceptedAt == request.time
-          && request.resource.data.updatedAt == request.time
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            'status',
-            'courierId',
-            'acceptedAt',
-            'updatedAt'
-          ]);
-      }
-
-      function assignedCourierUpdates() {
-        return isCourier()
-          && resource.data.courierId == request.auth.uid
-          && request.resource.data.courierId == request.auth.uid;
-      }
-
-      function customerSelectsOffer() {
-        let courierId = request.resource.data.get('selectedCourierId', null);
-        let offerId = request.resource.data.get('selectedOfferId', null);
-        let offerAfter = getAfter(
-          /databases/$(database)/documents/orders/$(orderId)/offers/$(offerId)
-        );
-        let courierAfter = getAfter(
-          /databases/$(database)/documents/couriers/$(courierId)
-        );
-        return resource.data.customerId == request.auth.uid
-          && resource.data.status in ['waiting', 'waitingOffers']
-          && request.resource.data.status == 'accepted'
-          && courierId is string
-          && offerId is string
-          && request.resource.data.courierId == courierId
-          && offerAfter.data.courierId == courierId
-          && offerAfter.data.status == 'accepted'
-          && request.resource.data.finalPrice == offerAfter.data.proposedPrice
-          && request.resource.data.price == offerAfter.data.proposedPrice
-          && courierAfter.data.get('activeOrderId', null) == orderId
-          && courierAfter.data.get('isBusy', false) == true
-          && request.resource.data.acceptedAt == request.time
-          && request.resource.data.updatedAt == request.time
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            'status',
-            'courierId',
-            'selectedCourierId',
-            'selectedOfferId',
-            'finalPrice',
-            'price',
-            'acceptedAt',
-            'updatedAt'
-          ]);
-      }
-
-      function courierUpdatesOfferCounter() {
-        let offerAfter = getAfter(
-          /databases/$(database)/documents/orders/$(orderId)/offers/$(request.auth.uid)
-        );
-        return isCourier()
-          && resource.data.status in ['waiting', 'waitingOffers']
-          && request.resource.data.status == resource.data.status
-          && offerAfter.data.courierId == request.auth.uid
-          && offerAfter.data.status == 'pending'
-          && request.resource.data.offersCount
-            == resource.data.get('offersCount', 0) + 1
-          && request.resource.data.updatedAt == request.time
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            'offersCount',
-            'offerExpiresAt',
-            'updatedAt'
-          ]);
-      }
-
-      function courierArrives() {
-        return assignedCourierUpdates()
-          && resource.data.status == 'accepted'
-          && request.resource.data.status == 'accepted'
-          && request.resource.data.arrivedAtPickupAt == request.time
-          && request.resource.data.updatedAt == request.time
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            'arrivedAtPickupAt',
-            'updatedAt'
-          ]);
-      }
-
-      function courierPicksUp() {
-        return assignedCourierUpdates()
-          && resource.data.status == 'accepted'
-          && resource.data.get('arrivedAtPickupAt', null) != null
-          && request.resource.data.status == 'pickedUp'
-          && request.resource.data.updatedAt == request.time
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            'status',
-            'updatedAt'
-          ]);
-      }
-
-      function courierDelivers() {
-        return assignedCourierUpdates()
-          && resource.data.status == 'pickedUp'
-          && request.resource.data.status == 'delivered'
-          && request.resource.data.updatedAt == request.time
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            'status',
-            'updatedAt'
-          ]);
-      }
-
-      function courierCompletesWithCode() {
-        let courierAfter = getAfter(
-          /databases/$(database)/documents/couriers/$(request.auth.uid)
-        );
-        return assignedCourierUpdates()
-          && resource.data.status == 'pickedUp'
-          && request.resource.data.status == 'completed'
-          && request.resource.data.completedAt == request.time
-          && request.resource.data.updatedAt == request.time
-          && courierAfter.data.get('activeOrderId', null) == null
-          && courierAfter.data.earningsToday
-            == get(/databases/$(database)/documents/couriers/$(request.auth.uid)).data.earningsToday
-              + resource.data.price
-          && courierAfter.data.ordersToday
-            == get(/databases/$(database)/documents/couriers/$(request.auth.uid)).data.ordersToday
-              + 1
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            'status',
-            'completedAt',
-            'updatedAt'
-          ]);
-      }
-
-      allow create: if signedIn()
-        && request.resource.data.customerId == request.auth.uid
-        && request.resource.data.status == 'waitingOffers'
-        && request.resource.data.price is number
-        && request.resource.data.price >= 10
-        && request.resource.data.currency == 'TJS'
-        && orderTypeDataIsValid(request.resource.data)
-        && request.resource.data.get('courierId', null) == null
-        && (authPhone() != null
-          || request.resource.data.get('isTestOrder', false) == true)
-        && request.resource.data.createdAt == request.time
-        && request.resource.data.updatedAt == request.time
-        && request.resource.data.keys().hasOnly([
-          'customerId',
-          'customerName',
-          'status',
-          'type',
-          'city',
-          'fromText',
-          'toText',
-          'price',
-          'orderType',
-          'suggestedPrice',
-          'clientPrice',
-          'finalPrice',
-          'priceNegotiable',
-          'offersCount',
-          'selectedOfferId',
-          'selectedCourierId',
-          'offerExpiresAt',
-          'pricingVersion',
-          'currency',
-          'confirmationCode',
-          'fromLocation',
-          'toLocation',
-          'distanceKm',
-          'etaMinutes',
-          'partnerId',
-          'partnerName',
-          'items',
-          'subtotal',
-          'deliveryFee',
-          'total',
-          'comment',
-          'isTestOrder',
-          'declinedBy',
-          'createdAt',
-          'updatedAt'
-        ]);
-
-      allow get, list: if signedIn()
-        && (isAdmin()
-          || resource.data.customerId == request.auth.uid
-          || (isCourier() && resource.data.status in ['waiting', 'waitingOffers'])
-          || resource.data.get('courierId', null) == request.auth.uid);
-
-      allow update: if isAdmin()
-        || (signedIn()
-          && immutableOrderData()
-          && (customerCancels()
-            || customerCompletes()
-            || customerDisputes()
-            || customerSelectsOffer()
-            || courierUpdatesOfferCounter()
-            || courierDeclines()
-            || courierAccepts()
-            || courierArrives()
-            || courierPicksUp()
-            || courierDelivers()
-            || courierCompletesWithCode()));
-
-      match /offers/{offerId} {
+      match /offers/{courierId} {
         function parentOrder() {
-          return get(/databases/$(database)/documents/orders/$(orderId));
-        }
-
-        function customerOwnsParent() {
-          return signedIn() && parentOrder().data.customerId == request.auth.uid;
-        }
-
-        function courierOfferDataIsValid() {
-          let clientPrice = parentOrder().data.get(
-            'clientPrice',
-            parentOrder().data.price
-          );
-          return isCourier()
-            && offerId == request.auth.uid
-            && request.resource.data.courierId == request.auth.uid
-            && request.resource.data.originalClientPrice == clientPrice
-            && request.resource.data.proposedPrice is number
-            && (parentOrder().data.get('priceNegotiable', true) == true
-              ? request.resource.data.proposedPrice >= clientPrice
-              : request.resource.data.proposedPrice == clientPrice)
-            && request.resource.data.status in ['pending', 'withdrawn']
-            && request.resource.data.updatedAt == request.time
-            && request.resource.data.keys().hasOnly([
-              'courierId',
-              'courierName',
-              'courierRating',
-              'courierTransport',
-              'courierDistanceMeters',
-              'proposedPrice',
-              'originalClientPrice',
-              'status',
-              'createdAt',
-              'updatedAt',
-              'expiresAt',
-              'isTest'
-            ]);
+          return get(
+            /databases/$(database)/documents/orders/$(orderId)
+          ).data;
         }
 
         allow get, list: if isAdmin()
-          || customerOwnsParent()
-          || (isCourier() && resource.data.courierId == request.auth.uid);
-
-        allow create: if isAdmin() || (courierOfferDataIsValid()
-          && request.resource.data.status == 'pending'
-          && request.resource.data.createdAt == request.time
-          && parentOrder().data.status in ['waiting', 'waitingOffers']);
-
-        allow update: if isAdmin()
-          || (courierOfferDataIsValid()
-            && request.resource.data.createdAt == resource.data.createdAt
-            && parentOrder().data.status in ['waiting', 'waitingOffers'])
-          || (customerOwnsParent()
-            && request.resource.data.courierId == resource.data.courierId
-            && resource.data.status == 'pending'
-            && request.resource.data.status in ['accepted', 'rejected', 'expired']
-            && request.resource.data.updatedAt == request.time
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-              'status',
-              'updatedAt'
-            ]));
-
-        allow delete: if false;
+          || (
+            signedIn()
+            && parentOrder().customerId == request.auth.uid
+          )
+          || (
+            isApprovedCourier()
+            && courierId == request.auth.uid
+          );
+        allow create, update, delete: if false;
       }
+    }
 
-      allow delete: if false;
+    match /order_customer_codes/{orderId} {
+      allow get: if signedIn()
+        && (
+          resource.data.customerId == request.auth.uid
+          || isAdmin()
+        );
+      allow list: if false;
+      allow create, update, delete: if false;
+    }
+
+    // Hash, salt and attempt counters are backend-only, including for admin.
+    match /order_secrets/{orderId} {
+      allow read, write: if false;
+    }
+
+    // Callable idempotency results are returned by Functions, never read by
+    // mobile clients.
+    match /command_results/{commandId} {
+      allow read, write: if false;
+    }
+
+    // Account deletion requests are written only by the deleteAccountRequest
+    // Function. The owner may read their own request status; admins may review.
+    match /account_deletion_requests/{uid} {
+      allow get: if owner(uid) || isAdmin();
+      allow list: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    // Merchant applications are written only by the merchant-application
+    // Functions. Document id equals the applicant uid: the owner reads their own
+    // application; admins read and list all. No direct client writes.
+    match /merchant_applications/{uid} {
+      allow get: if owner(uid) || isAdmin();
+      allow list: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    function publishedPartner() {
+      return resource.data.isActive == true
+        && resource.data.get('isPublished', true) == true
+        && resource.data.get('isTest', false) != true
+        && resource.data.get('isPreview', false) != true;
     }
 
     match /partners/{partnerId} {
-      function partnerDataIsValid(data) {
-        return data.get('name', null) is string
-          && data.name.size() > 0
-          && data.name.size() <= 120
-          && data.get('category', null) in ['food', 'groceries', 'flowers']
-          && data.get('description', '') is string
-          && data.get('imageUrl', '') is string
-          && data.get('address', null) is string
-          && data.address.size() > 0
-          && data.address.size() <= 300
-          && data.get('location', null) is latlng
-          && data.get('minimumOrder', null) is number
-          && data.get('minimumOrder', -1) >= 0
-          && data.get('minimumOrder', 0) <= 100000
-          && data.get('deliveryFee', null) is number
-          && data.get('deliveryFee', -1) >= 0
-          && data.get('deliveryFee', 0) <= 10000
-          && data.get('rating', 5) is number
-          && data.get('rating', 5) >= 0
-          && data.get('rating', 5) <= 5
-          && data.get('preparationMinutes', 20) is int
-          && data.get('preparationMinutes', 20) >= 0
-          && data.get('preparationMinutes', 20) <= 240
-          && data.get('sortOrder', 0) is int
-          && data.get('sortOrder', 0) >= -10000
-          && data.get('sortOrder', 0) <= 10000
-          && data.get('workingHours', '') is string
-          && data.get('isOpen', null) is bool
-          && data.get('isActive', null) is bool
-          && data.get('isTest', false) is bool
-          && data.keys().hasOnly([
-            'name',
-            'category',
-            'description',
-            'imageUrl',
-            'address',
-            'location',
-            'minimumOrder',
-            'deliveryFee',
-            'rating',
-            'preparationMinutes',
-            'sortOrder',
-            'workingHours',
-            'isOpen',
-            'isActive',
-            'isTest',
-            'createdAt',
-            'updatedAt'
-          ]);
-      }
+      allow get, list: if isAdmin() || (signedIn() && publishedPartner());
+      // Catalog writes go through authoritative admin Functions only.
+      allow create, update, delete: if false;
+    }
 
-      allow get, list: if signedIn()
-        && (isAdmin() || resource.data.get('isActive', false) == true);
-      allow create: if isAdmin()
-        && partnerDataIsValid(request.resource.data)
-        && request.resource.data.createdAt == request.time
-        && request.resource.data.updatedAt == request.time;
-      allow update: if isAdmin()
-        && partnerDataIsValid(request.resource.data)
-        && request.resource.data.createdAt == resource.data.createdAt
-        && request.resource.data.updatedAt == request.time;
-      allow delete: if false;
+    function publicProduct(partnerId) {
+      let partner = get(
+        /databases/$(database)/documents/partners/$(partnerId)
+      ).data;
+      return resource.data.get('hidden', false) == false
+        && resource.data.get('isAvailable', true) == true
+        && resource.data.get('isPublished', true) == true
+        && resource.data.get('isTest', false) != true
+        && partner.isActive == true
+        && partner.get('isTest', false) != true
+        && partner.get('isPreview', false) != true;
     }
 
     match /products/{productId} {
-      function productPartnerIsActive(data) {
-        return data.get('partnerId', null) is string
-          && exists(
-            /databases/$(database)/documents/partners/$(data.partnerId)
-          )
-          && get(
-            /databases/$(database)/documents/partners/$(data.partnerId)
-          ).data.get('isActive', false) == true;
-      }
-
-      function productDataIsValid(data) {
-        return data.get('partnerId', null) is string
-          && existsAfter(
-            /databases/$(database)/documents/partners/$(data.partnerId)
-          )
-          && data.get('name', null) is string
-          && data.name.size() > 0
-          && data.name.size() <= 160
-          && data.get('description', '') is string
-          && data.get('imageUrl', '') is string
-          && data.get('price', null) is number
-          && data.get('price', -1) >= 0
-          && data.get('price', 0) <= 100000
-          && (data.get('oldPrice', null) == null
-            || (data.oldPrice is number
-              && data.oldPrice >= data.price
-              && data.oldPrice <= 100000))
-          && data.get('unit', null) in ['item', 'kg', 'portion', 'bouquet']
-          && data.get('isAvailable', null) is bool
-          && data.get('hidden', null) is bool
-          && data.get('popularity', 0) is int
-          && data.get('popularity', 0) >= 0
-          && data.get('popularity', 0) <= 1000000
-          && data.get('sortOrder', 0) is int
-          && data.get('sortOrder', 0) >= -10000
-          && data.get('sortOrder', 0) <= 10000
-          && data.get('isTest', false) is bool
-          && data.keys().hasOnly([
-            'partnerId',
-            'name',
-            'description',
-            'imageUrl',
-            'price',
-            'oldPrice',
-            'unit',
-            'isAvailable',
-            'hidden',
-            'popularity',
-            'sortOrder',
-            'isTest',
-            'createdAt',
-            'updatedAt'
-          ]);
-      }
-
-      allow get, list: if signedIn()
-        && (isAdmin()
-          || (resource.data.get('hidden', true) == false
-            && productPartnerIsActive(resource.data)));
-      allow create: if isAdmin()
-        && productDataIsValid(request.resource.data)
-        && request.resource.data.createdAt == request.time
-        && request.resource.data.updatedAt == request.time;
-      allow update: if isAdmin()
-        && productDataIsValid(request.resource.data)
-        && request.resource.data.createdAt == resource.data.createdAt
-        && request.resource.data.updatedAt == request.time;
-      allow delete: if false;
+      allow get, list: if isAdmin()
+        || (
+          signedIn()
+          && publicProduct(resource.data.partnerId)
+        );
+      // Catalog writes go through authoritative admin Functions only.
+      allow create, update, delete: if false;
     }
 
     match /admin_logs/{logId} {
-      allow create, read: if isAdmin();
+      allow read: if isAdmin();
+      allow create: if isAdmin()
+        && request.resource.data.adminId == request.auth.uid
+        && request.resource.data.createdAt == request.time;
       allow update, delete: if false;
     }
 

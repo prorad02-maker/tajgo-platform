@@ -1,16 +1,20 @@
-import 'package:flutter/foundation.dart';
+import '../../core/design/tajgo_money.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/constants/tajgo_colors.dart';
+import '../../core/models/merchant_application.dart';
 import '../../core/models/tajgo_courier.dart';
 import '../../core/models/tajgo_order.dart';
-import '../../shared/widgets/tajgo_badge.dart';
 import '../../shared/widgets/tajgo_scope.dart';
 import '../../shared/widgets/tajgo_stat_card.dart';
 import 'admin_couriers_screen.dart';
 import 'admin_courier_applications_screen.dart';
+import 'admin_merchant_applications_screen.dart';
+import 'admin_audit_logs_screen.dart';
+import 'admin_offers_screen.dart';
 import 'admin_orders_screen.dart';
 import 'admin_marketplace_screen.dart';
+import 'admin_settings_screen.dart';
 import 'dispatch_map_screen.dart';
 import 'widgets/admin_access_gate.dart';
 
@@ -69,49 +73,55 @@ class AdminHomeScreen extends StatelessWidget {
                           const Padding(
                             padding: EdgeInsets.only(bottom: 12),
                             child: Text(
-                              'Нет доступа к данным. Проверьте admin-role и Rules.',
+                              'Не удалось загрузить данные. Проверьте интернет и обновите экран.',
                               style: TextStyle(color: TajGoColors.error),
                             ),
                           ),
                         GridView.count(
-                          crossAxisCount: 2,
+                          crossAxisCount:
+                              MediaQuery.textScalerOf(context).scale(14) > 20
+                              ? 1
+                              : 2,
                           shrinkWrap: true,
                           physics: const NeverScrollableScrollPhysics(),
-                          childAspectRatio: 1.45,
+                          childAspectRatio:
+                              MediaQuery.textScalerOf(context).scale(14) > 20
+                              ? 2.2
+                              : 1.45,
                           mainAxisSpacing: 10,
                           crossAxisSpacing: 10,
                           children: [
                             _stat(
                               context,
-                              '📦',
+                              Icons.inventory_2_outlined,
                               loading ? '—' : '${today.length}',
                               'Заказов сегодня',
                               AdminOrderFilter.all,
                             ),
                             _stat(
                               context,
-                              '🔄',
+                              Icons.route_rounded,
                               loading ? '—' : '$active',
                               'Активные сейчас',
                               AdminOrderFilter.active,
                             ),
                             _stat(
                               context,
-                              '✅',
+                              Icons.task_alt_rounded,
                               loading ? '—' : '${completed.length}',
                               'Завершённые',
                               AdminOrderFilter.completed,
                             ),
                             _stat(
                               context,
-                              '⚠️',
+                              Icons.report_problem_outlined,
                               loading ? '—' : '$disputed',
                               'Спорные',
                               AdminOrderFilter.disputed,
                             ),
                             _stat(
                               context,
-                              '🛵',
+                              Icons.delivery_dining_rounded,
                               loading
                                   ? '—'
                                   : '${couriers.where((c) => c.online).length}',
@@ -120,8 +130,8 @@ class AdminHomeScreen extends StatelessWidget {
                             ),
                             _stat(
                               context,
-                              '💰',
-                              loading ? '—' : '$turnover TJS',
+                              Icons.payments_outlined,
+                              loading ? '—' : TajGoMoney.format(turnover),
                               'Оборот сегодня',
                               AdminOrderFilter.completed,
                             ),
@@ -151,13 +161,40 @@ class AdminHomeScreen extends StatelessWidget {
                             icon: Icons.fact_check_rounded,
                             title: 'Заявки курьеров',
                             subtitle: snapshot.hasError
-                                ? 'Нужны новые Firestore Rules'
+                                ? 'Не удалось загрузить заявки'
                                 : 'На проверке: ${snapshot.data ?? '—'}',
                             onTap: () => _open(
                               context,
                               const AdminCourierApplicationsScreen(),
                             ),
                           ),
+                        ),
+                        StreamBuilder<List<MerchantApplication>>(
+                          stream: TajGoScope.of(context)
+                              .merchantApplicationRepository
+                              .allApplicationsStream(),
+                          builder: (context, snapshot) {
+                            final pending = (snapshot.data ?? const [])
+                                .where(
+                                  (a) => const {
+                                    MerchantStatus.submitted,
+                                    MerchantStatus.underReview,
+                                    MerchantStatus.needsInfo,
+                                  }.contains(a.status),
+                                )
+                                .length;
+                            return _NavCard(
+                              icon: Icons.add_business_rounded,
+                              title: 'Заявки магазинов',
+                              subtitle: snapshot.hasError
+                                  ? 'Нужны новые Firestore Rules'
+                                  : 'В работе: ${snapshot.hasData ? pending : '—'}',
+                              onTap: () => _open(
+                                context,
+                                const AdminMerchantApplicationsScreen(),
+                              ),
+                            );
+                          },
                         ),
                         _NavCard(
                           icon: Icons.delivery_dining_rounded,
@@ -180,6 +217,39 @@ class AdminHomeScreen extends StatelessWidget {
                           onTap: () =>
                               _open(context, const DispatchMapScreen()),
                         ),
+                        _NavCard(
+                          icon: Icons.local_offer_rounded,
+                          title: 'Предложения',
+                          subtitle: 'Цены и состояния предложений курьеров',
+                          onTap: () =>
+                              _open(context, const AdminOffersScreen()),
+                        ),
+                        _NavCard(
+                          icon: Icons.report_problem_rounded,
+                          title: 'Споры',
+                          subtitle: 'Заказы, требующие решения администратора',
+                          onTap: () => _open(
+                            context,
+                            const AdminOrdersScreen(
+                              initialFilter: AdminOrderFilter.disputed,
+                            ),
+                          ),
+                        ),
+                        _NavCard(
+                          icon: Icons.history_rounded,
+                          title: 'Журнал действий',
+                          subtitle:
+                              'Аудит критических административных операций',
+                          onTap: () =>
+                              _open(context, const AdminAuditLogsScreen()),
+                        ),
+                        _NavCard(
+                          icon: Icons.settings_rounded,
+                          title: 'Настройки',
+                          subtitle: 'Безопасность и состояние backend',
+                          onTap: () =>
+                              _open(context, const AdminSettingsScreen()),
+                        ),
                       ],
                     ),
                   ),
@@ -194,7 +264,7 @@ class AdminHomeScreen extends StatelessWidget {
 
   Widget _stat(
     BuildContext context,
-    String icon,
+    IconData icon,
     String value,
     String label,
     AdminOrderFilter? filter,
@@ -203,7 +273,7 @@ class AdminHomeScreen extends StatelessWidget {
     onTap: filter == null
         ? () => _open(context, const AdminCouriersScreen())
         : () => _open(context, AdminOrdersScreen(initialFilter: filter)),
-    child: TajGoStatCard(icon: icon, value: value, label: label),
+    child: TajGoStatCard(iconData: icon, value: value, label: label),
   );
 
   void _open(BuildContext context, Widget screen) =>
@@ -225,7 +295,7 @@ class _AdminHeader extends StatelessWidget {
       ),
       decoration: const BoxDecoration(
         gradient: LinearGradient(
-          colors: [TajGoColors.darkGreen, TajGoColors.green],
+          colors: [TajGoColors.deepGreen, TajGoColors.darkGreen],
         ),
         borderRadius: BorderRadius.vertical(bottom: Radius.circular(24)),
       ),
@@ -236,7 +306,7 @@ class _AdminHeader extends StatelessWidget {
             children: [
               const Expanded(
                 child: Text(
-                  '🛠 Управление TajGo',
+                  'Управление TajGo',
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 25,
@@ -244,16 +314,11 @@ class _AdminHeader extends StatelessWidget {
                   ),
                 ),
               ),
-              TajGoBadge(
-                text: kDebugMode ? 'debug' : 'admin',
-                background: TajGoColors.lime,
-                foreground: TajGoColors.ink,
-              ),
             ],
           ),
           const SizedBox(height: 8),
           Text(
-            '📍 Худжанд · ${now.day.toString().padLeft(2, '0')}.${now.month.toString().padLeft(2, '0')}.${now.year}',
+            'Худжанд · ${now.day.toString().padLeft(2, '0')}.${now.month.toString().padLeft(2, '0')}.${now.year}',
             style: const TextStyle(
               color: Colors.white70,
               fontWeight: FontWeight.w700,

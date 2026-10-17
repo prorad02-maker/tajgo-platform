@@ -1,13 +1,17 @@
+import '../../core/design/tajgo_money.dart';
+import '../../shared/widgets/tajgo_map_attribution.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../core/constants/tajgo_colors.dart';
+import '../../core/config/map_provider_config.dart';
 import '../../core/models/app_user.dart';
 import '../../core/models/tajgo_courier.dart';
 import '../../core/models/tajgo_order.dart';
 import '../../shared/widgets/tajgo_badge.dart';
 import '../../shared/widgets/tajgo_scope.dart';
+import '../map/widgets/tajgo_road_route_layer.dart';
 import 'admin_orders_screen.dart';
 import 'widgets/admin_access_gate.dart';
 import 'widgets/tajgo_admin_action_button.dart';
@@ -155,7 +159,7 @@ class _AdminOrderDetailsBodyState extends State<_AdminOrderDetailsBody> {
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      'Цена: ${order.price} TJS · Расстояние: ${order.distanceKm?.toStringAsFixed(1) ?? '—'} км',
+                      'Цена: ${TajGoMoney.format(order.price)} · Расстояние: ${order.distanceKm?.toStringAsFixed(1) ?? '—'} км',
                       style: const TextStyle(color: TajGoColors.muted),
                     ),
                     if (order.orderType == 'catalogOrder' &&
@@ -180,13 +184,13 @@ class _AdminOrderDetailsBodyState extends State<_AdminOrderDetailsBody> {
                             for (final item in order.items)
                               Text(
                                 '${item.name} × ${item.quantity} · '
-                                '${item.lineTotal} TJS',
+                                '${TajGoMoney.format(item.lineTotal)}',
                               ),
                             const Divider(),
                             Text(
                               'Товары ${order.subtotal ?? 0} + доставка '
                               '${order.deliveryFee ?? order.price} = '
-                              '${order.total ?? 0} TJS',
+                              '${TajGoMoney.format(order.total ?? 0)}',
                               style: const TextStyle(
                                 fontWeight: FontWeight.w800,
                               ),
@@ -297,6 +301,21 @@ class _AdminOrderDetailsBodyState extends State<_AdminOrderDetailsBody> {
 
   List<Widget> _actions(TajGoOrder order, TajGoScope scope) {
     final result = <Widget>[];
+    if (order.confirmationCode != null) {
+      result.add(
+        TajGoAdminActionButton(
+          label: 'Защитить legacy-код',
+          title: 'Перенести код в защищённое хранилище?',
+          message:
+              'Открытый код будет удалён из заказа. Клиент продолжит видеть '
+              'его через защищённый документ, а курьер — только вводить.',
+          onConfirm: () => scope.adminRepository.migrateLegacyDeliveryCode(
+            orderId: order.id,
+            adminId: _adminId,
+          ),
+        ),
+      );
+    }
     if (!const {
       OrderStatus.completed,
       OrderStatus.cancelled,
@@ -358,7 +377,6 @@ class _AdminOrderDetailsBodyState extends State<_AdminOrderDetailsBody> {
       OrderStatus.accepted,
       OrderStatus.pickedUp,
       OrderStatus.delivered,
-      OrderStatus.completed,
     }.contains(order.status)) {
       result.add(
         OutlinedButton(
@@ -414,26 +432,14 @@ class _OrderMap extends StatelessWidget {
     final to = order.toLocation == null
         ? null
         : LatLng(order.toLocation!.latitude, order.toLocation!.longitude);
-    final route = from != null && to != null
-        ? TajGoScope.of(context).routeService.directRoute(from: from, to: to)
-        : null;
     Widget map(TajGoCourier? courier) => FlutterMap(
       options: MapOptions(initialCenter: from ?? to ?? center, initialZoom: 13),
       children: [
         TileLayer(
-          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-          userAgentPackageName: 'tj.tajgo.app',
+          urlTemplate: MapProviderConfig.current.tileUrlTemplate,
+          userAgentPackageName: MapProviderConfig.current.userAgentPackageName,
         ),
-        if (route != null)
-          PolylineLayer(
-            polylines: [
-              Polyline(
-                points: route.polylinePoints,
-                color: TajGoColors.green,
-                strokeWidth: 4,
-              ),
-            ],
-          ),
+        if (from != null && to != null) TajGoRoadRouteLayer(from: from, to: to),
         MarkerLayer(
           markers: [
             if (from != null)
@@ -467,6 +473,7 @@ class _OrderMap extends StatelessWidget {
               ),
           ],
         ),
+        const TajGoMapAttribution(),
       ],
     );
     if (order.courierId == null) return map(null);

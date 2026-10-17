@@ -53,7 +53,7 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions android = FirebaseOptions(
     apiKey: 'AIzaSyD5Qi01lHFXKit8X9tVz7ghxs_N4um4UxE',
-    appId: '1:784873463457:android:33da27eafa9432a4c91ae0',
+    appId: '1:784873463457:android:0ac2e36af2d8c1a0c91ae0',
     messagingSenderId: '784873463457',
     projectId: 'tajgo-4fcd0',
     databaseURL: 'https://tajgo-4fcd0-default-rtdb.firebaseio.com',
@@ -67,7 +67,7 @@ class DefaultFirebaseOptions {
     projectId: 'tajgo-4fcd0',
     databaseURL: 'https://tajgo-4fcd0-default-rtdb.firebaseio.com',
     storageBucket: 'tajgo-4fcd0.firebasestorage.app',
-    iosBundleId: 'com.example.tajgo',
+    iosBundleId: 'tj.tajgo.app',
   );
 
   static const FirebaseOptions macos = FirebaseOptions(
@@ -77,7 +77,7 @@ class DefaultFirebaseOptions {
     projectId: 'tajgo-4fcd0',
     databaseURL: 'https://tajgo-4fcd0-default-rtdb.firebaseio.com',
     storageBucket: 'tajgo-4fcd0.firebasestorage.app',
-    iosBundleId: 'com.example.tajgo',
+    iosBundleId: 'tj.tajgo.app',
   );
 
   static const FirebaseOptions windows = FirebaseOptions(

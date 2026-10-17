@@ -1,0 +1,31 @@
+{
+  "name": "tajgo-functions",
+  "private": true,
+  "version": "1.8.1",
+  "main": "lib/src/index.js",
+  "engines": {
+    "node": "22"
+  },
+  "scripts": {
+    "lint": "tsc --noEmit",
+    "build": "tsc",
+    "test": "npm run build && node --test \"lib/test/unit/**/*.test.js\"",
+    "test:functions:run": "node --test \"lib/test/integration/**/*.test.js\"",
+    "test:functions": "npm run build && firebase emulators:exec --only firestore,functions --project demo-tajgo \"npm run test:functions:run\"",
+    "test:rules": "npm run build && firebase emulators:exec --only firestore --project demo-tajgo \"node --test lib/test/rules/**/*.test.js\"",
+    "test:core": "npm run test && npm run test:rules && npm run test:functions"
+  },
+  "dependencies": {
+    "firebase-admin": "14.5.0",
+    "firebase-functions": "7.4.0"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.1",
+    "@types/node": "^20.19.43",
+    "firebase-tools": "^15.22.4",
+    "typescript": "^5.9.3"
+  },
+  "overrides": {
+    "@grpc/grpc-js": "1.14.6"
+  }
+}

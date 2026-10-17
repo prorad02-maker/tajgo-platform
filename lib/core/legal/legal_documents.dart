@@ -1,0 +1,126 @@
+/// Версионированный контент юридических документов TajGo.
+///
+/// Единый источник для экранов приложения и store-черновиков. При изменении
+/// текста повышать версию — это влияет на запись согласия пользователя
+/// (`acceptedAt`, `version`, `locale`).
+class LegalSection {
+  const LegalSection(this.heading, this.body);
+  final String heading;
+  final String body;
+}
+
+class LegalDocument {
+  const LegalDocument({
+    required this.title,
+    required this.version,
+    required this.updated,
+    required this.sections,
+    required this.publicUrl,
+  });
+
+  final String title;
+  final String version;
+  final String updated;
+  final List<LegalSection> sections;
+  final String publicUrl;
+}
+
+class LegalDocuments {
+  const LegalDocuments._();
+
+  static const String locale = 'ru';
+  static const String privacyVersion = '1.0';
+  static const String termsVersion = '1.0';
+  static const String supportEmail = 'support@tajgo.ru';
+  static const String privacyUrl = 'https://tajgo.ru/privacy';
+  static const String termsUrl = 'https://tajgo.ru/terms';
+  static const String supportUrl = 'https://tajgo.ru/support';
+  static const String accountDeletionUrl = 'https://tajgo.ru/account-deletion';
+
+  static const LegalDocument privacy = LegalDocument(
+    title: 'Политика конфиденциальности',
+    version: privacyVersion,
+    updated: 'июль 2026',
+    publicUrl: privacyUrl,
+    sections: [
+      LegalSection(
+        'Что мы собираем',
+        'Номер телефона (для входа), имя, роль (клиент/курьер), адреса и точки '
+            'доставки, геолокацию курьера во время смены, историю заказов, токен '
+            'уведомлений и технические диагностические данные.',
+      ),
+      LegalSection(
+        'Зачем мы это используем',
+        'Чтобы принимать и выполнять доставки, показывать статус заказа, '
+            'связывать клиента и курьера, обеспечивать безопасность и поддержку. '
+            'Мы не продаём ваши данные третьим лицам.',
+      ),
+      LegalSection(
+        'Геолокация',
+        'Местоположение клиента запрашивается только при выборе точки на карте. '
+            'Местоположение курьера собирается только когда он на линии, и '
+            'показывается клиенту в обезличенной публичной проекции без номера '
+            'телефона.',
+      ),
+      LegalSection(
+        'Хранение и удаление',
+        'Вы можете удалить аккаунт в приложении (Профиль → Безопасность и '
+            'данные) или через поддержку. Персональные данные обезличиваются; '
+            'обязательная операционная история сохраняется обезличенно до '
+            '24 месяцев.',
+      ),
+      LegalSection(
+        'Безопасность',
+        'Критические операции выполняются на защищённом сервере. Код получения '
+            'заказа хранится в закрытом виде и не виден курьеру. Мы применяем '
+            'проверки подлинности приложения.',
+      ),
+      LegalSection(
+        'Контакты',
+        'По вопросам конфиденциальности напишите на $supportEmail.',
+      ),
+    ],
+  );
+
+  static const LegalDocument terms = LegalDocument(
+    title: 'Условия использования',
+    version: termsVersion,
+    updated: 'июль 2026',
+    publicUrl: termsUrl,
+    sections: [
+      LegalSection(
+        'О сервисе',
+        'TajGo — платформа городской доставки в Худжанде, соединяющая клиентов, '
+            'курьеров и магазины. TajGo предоставляет технологию; фактическую '
+            'доставку выполняют независимые курьеры.',
+      ),
+      LegalSection(
+        'Аккаунт',
+        'Для использования нужен подтверждённый номер телефона. Вы отвечаете за '
+            'действия в своём аккаунте и за достоверность указанных данных.',
+      ),
+      LegalSection(
+        'Заказы и цена',
+        'Клиент может предложить свою цену за доставку; курьер принимает или '
+            'предлагает свою. Итоговая цена каталога рассчитывается сервером. '
+            'Цены указаны в сомони.',
+      ),
+      LegalSection(
+        'Правила поведения',
+        'Запрещены незаконные, опасные или запрещённые к перевозке отправления. '
+            'Мы можем ограничить доступ при нарушении правил или мошенничестве.',
+      ),
+      LegalSection(
+        'Ответственность',
+        'Сервис предоставляется «как есть» на этапе пилота. Мы стремимся к '
+            'надёжной работе, но не гарантируем бесперебойность. Спорные заказы '
+            'рассматриваются поддержкой.',
+      ),
+      LegalSection(
+        'Изменения',
+        'Мы можем обновлять условия; при существенных изменениях повышается '
+            'версия документа. Контакт: $supportEmail.',
+      ),
+    ],
+  );
+}

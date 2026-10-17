@@ -4,41 +4,47 @@ import '../models/marketplace_cart.dart';
 import '../models/marketplace_partner.dart';
 import '../models/marketplace_product.dart';
 import '../models/marketplace_sample_catalog.dart';
+import 'authoritative_command_service.dart';
 import 'marketplace_import_service.dart';
-import 'pricing.dart';
+
+bool isMarketplaceCheckoutBlocked(MarketplacePartner partner) =>
+    partner.isPreview || partner.isTest;
 
 class MarketplaceRepository {
-  MarketplaceRepository(this._db);
+  MarketplaceRepository(this._db, this._commands);
 
   final FirebaseFirestore _db;
+  final AuthoritativeCommandService _commands;
 
-  Stream<List<MarketplacePartner>> partnersStream({String? category}) async* {
+  Stream<List<MarketplacePartner>> partnersStream({
+    String? category,
+    bool allowPreview = false,
+  }) async* {
     Query<Map<String, dynamic>> query = _db
         .collection('partners')
-        .where('isActive', isEqualTo: true);
+        .where('isActive', isEqualTo: true)
+        .where('isTest', isEqualTo: false)
+        .where('isPreview', isEqualTo: false)
+        .where('isPublished', isEqualTo: true);
     if (category != null) {
       query = query.where('category', isEqualTo: category);
     }
-    try {
-      await for (final snapshot in query.snapshots()) {
-        final partners = snapshot.docs
-            .map(MarketplacePartner.fromDoc)
-            .toList(growable: false);
-        if (partners.isEmpty) {
-          yield samplePartnersForCategory(category);
-          continue;
-        }
-        partners.sort((a, b) {
-          final active = b.isOpen.toString().compareTo(a.isOpen.toString());
-          if (active != 0) return active;
-          final order = a.sortOrder.compareTo(b.sortOrder);
-          if (order != 0) return order;
-          return a.name.compareTo(b.name);
-        });
-        yield partners;
+    await for (final snapshot in query.snapshots()) {
+      final partners = snapshot.docs
+          .map(MarketplacePartner.fromDoc)
+          .toList(growable: false);
+      if (partners.isEmpty && allowPreview) {
+        yield samplePartnersForCategory(category);
+        continue;
       }
-    } catch (_) {
-      yield samplePartnersForCategory(category);
+      partners.sort((a, b) {
+        final active = b.isOpen.toString().compareTo(a.isOpen.toString());
+        if (active != 0) return active;
+        final order = a.sortOrder.compareTo(b.sortOrder);
+        if (order != 0) return order;
+        return a.name.compareTo(b.name);
+      });
+      yield partners;
     }
   }
 
@@ -61,7 +67,10 @@ class MarketplaceRepository {
     }
     Query<Map<String, dynamic>> query = _db
         .collection('products')
-        .where('partnerId', isEqualTo: partnerId);
+        .where('partnerId', isEqualTo: partnerId)
+        .where('isTest', isEqualTo: false)
+        .where('isAvailable', isEqualTo: true)
+        .where('isPublished', isEqualTo: true);
     if (!includeHidden) {
       query = query.where('hidden', isEqualTo: false);
     }
@@ -87,181 +96,128 @@ class MarketplaceRepository {
               ..sort((a, b) => a.name.compareTo(b.name)),
       );
 
+  /// Опубликованные, доступные и не скрытые товары всех партнёров — для поиска.
+  ///
+  /// Запрос по одному индексируемому полю `isPublished`; остальные условия
+  /// (не test, доступен, не скрыт) фильтруются на клиенте, чтобы не требовать
+  /// составного индекса. Ошибки передаются экрану для повторной загрузки.
+  Stream<List<MarketplaceProduct>> publishedProductsStream() => _db
+      .collection('products')
+      .where('isPublished', isEqualTo: true)
+      .snapshots()
+      .map(
+        (snapshot) => snapshot.docs
+            .map(MarketplaceProduct.fromDoc)
+            .where(
+              (product) =>
+                  !product.isTest && product.isAvailable && !product.hidden,
+            )
+            .toList(growable: false),
+      );
+
   String newPartnerId() => _db.collection('partners').doc().id;
   String newProductId() => _db.collection('products').doc().id;
+
+  /// Разовый список товаров партнёра (для сопоставления по SKU при импорте).
+  Future<List<MarketplaceProduct>> partnerProductsOnce(String partnerId) async {
+    final snapshot = await _db
+        .collection('products')
+        .where('partnerId', isEqualTo: partnerId)
+        .get();
+    return snapshot.docs
+        .map(MarketplaceProduct.fromDoc)
+        .toList(growable: false);
+  }
+
+  static Map<String, dynamic> _partnerFields(MarketplacePartner p) => {
+    'name': p.name,
+    'category': p.category,
+    'description': p.description,
+    'imageUrl': p.imageUrl,
+    'address': p.address,
+    'location': {
+      'latitude': p.location.latitude,
+      'longitude': p.location.longitude,
+    },
+    'minimumOrder': p.minimumOrder,
+    'deliveryFee': p.deliveryFee,
+    'rating': p.rating,
+    'preparationMinutes': p.preparationMinutes,
+    'sortOrder': p.sortOrder,
+    'workingHours': p.workingHours,
+    'isOpen': p.isOpen,
+    'isActive': p.isActive,
+    'isPublished': !p.isPreview,
+  };
+
+  static Map<String, dynamic> _productFields(MarketplaceProduct p) => {
+    'partnerId': p.partnerId,
+    'name': p.name,
+    'description': p.description,
+    'imageUrl': p.imageUrl,
+    'price': p.price,
+    if (p.oldPrice != null) 'oldPrice': p.oldPrice,
+    'unit': p.unit,
+    if (p.sku.isNotEmpty) 'sku': p.sku,
+    'isAvailable': p.isAvailable,
+    'hidden': p.hidden,
+    'popularity': p.popularity,
+    'sortOrder': p.sortOrder,
+  };
 
   Future<void> savePartner({
     required MarketplacePartner partner,
     required String adminId,
-  }) => _saveAdminDocument(
-    collection: 'partners',
-    id: partner.id,
-    data: partner.toWriteMap(),
-    adminId: adminId,
-    action: 'marketplace.partner.save',
-  );
+  }) => _commands.call('adminSavePartner', {
+    if (partner.id.isNotEmpty) 'partnerId': partner.id,
+    ..._partnerFields(partner),
+  });
 
   Future<void> saveProduct({
     required MarketplaceProduct product,
     required String adminId,
-  }) => _saveAdminDocument(
-    collection: 'products',
-    id: product.id,
-    data: product.toWriteMap(),
-    adminId: adminId,
-    action: 'marketplace.product.save',
-  );
-
-  Future<void> publishSampleCatalog({
-    required String adminId,
-  }) => _db.runTransaction((transaction) async {
-    final partners = marketplaceSamplePartners
-        .map((partner) => partner.copyWith(isPreview: false))
-        .toList(growable: false);
-    final partnerRefs = {
-      for (final partner in partners)
-        partner.id: _db.collection('partners').doc(partner.id),
-    };
-    final productRefs = {
-      for (final product in marketplaceSampleProducts)
-        product.id: _db.collection('products').doc(product.id),
-    };
-    final existingPartners = <String, Map<String, dynamic>?>{};
-    final existingProducts = <String, Map<String, dynamic>?>{};
-    for (final entry in partnerRefs.entries) {
-      existingPartners[entry.key] = (await transaction.get(entry.value)).data();
-    }
-    for (final entry in productRefs.entries) {
-      existingProducts[entry.key] = (await transaction.get(entry.value)).data();
-    }
-    for (final partner in partners) {
-      transaction.set(partnerRefs[partner.id]!, {
-        ...partner.toWriteMap(),
-        'createdAt':
-            existingPartners[partner.id]?['createdAt'] ??
-            FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-    }
-    for (final product in marketplaceSampleProducts) {
-      transaction.set(productRefs[product.id]!, {
-        ...product.toWriteMap(),
-        'createdAt':
-            existingProducts[product.id]?['createdAt'] ??
-            FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-    }
-    transaction.set(_db.collection('admin_logs').doc(), {
-      'adminId': adminId,
-      'action': 'marketplace.samples.publish',
-      'entityType': 'marketplace',
-      'entityId': 'sample-catalog',
-      'before': {
-        'existingPartners': existingPartners.values
-            .whereType<Map<String, dynamic>>()
-            .length,
-        'existingProducts': existingProducts.values
-            .whereType<Map<String, dynamic>>()
-            .length,
-      },
-      'after': {
-        'partners': partners.length,
-        'products': marketplaceSampleProducts.length,
-      },
-      'createdAt': FieldValue.serverTimestamp(),
-    });
+  }) => _commands.call('adminSaveProduct', {
+    if (product.id.isNotEmpty) 'productId': product.id,
+    ..._productFields(product),
   });
+
+  Future<void> publishSampleCatalog({required String adminId}) async {
+    for (final partner in marketplaceSamplePartners) {
+      final published = partner.copyWith(isPreview: false);
+      final products = marketplaceSampleProducts
+          .where((product) => product.partnerId == partner.id)
+          .toList(growable: false);
+      await importCatalog(
+        catalog: MarketplaceCatalogImport(
+          partner: published,
+          products: products,
+          warnings: const [],
+        ),
+        adminId: adminId,
+      );
+    }
+  }
 
   Future<MarketplaceImportResult> importCatalog({
     required MarketplaceCatalogImport catalog,
     required String adminId,
-  }) => _db.runTransaction((transaction) async {
+  }) async {
     final partner = catalog.partner.copyWith(isPreview: false);
-    final partnerRef = _db.collection('partners').doc(partner.id);
-    final productRefs = {
-      for (final product in catalog.products)
-        product.id: _db.collection('products').doc(product.id),
-    };
-    final partnerBefore = (await transaction.get(partnerRef)).data();
-    final productsBefore = <String, Map<String, dynamic>?>{};
-    for (final entry in productRefs.entries) {
-      final data = (await transaction.get(entry.value)).data();
-      if (data != null && data['partnerId'] != partner.id) {
-        throw StateError(
-          'Товар ${entry.key} уже принадлежит другому партнёру.',
-        );
-      }
-      productsBefore[entry.key] = data;
-    }
-    transaction.set(partnerRef, {
-      ...partner.toWriteMap(),
-      'createdAt': partnerBefore?['createdAt'] ?? FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
-    for (final product in catalog.products) {
-      transaction.set(productRefs[product.id]!, {
-        ...product.toWriteMap(),
-        'createdAt':
-            productsBefore[product.id]?['createdAt'] ??
-            FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-    }
-    transaction.set(_db.collection('admin_logs').doc(), {
-      'adminId': adminId,
-      'action': 'marketplace.catalog.import',
-      'entityType': 'marketplace',
-      'entityId': partner.id,
-      'before': {
-        'partnerExists': partnerBefore != null,
-        'existingProducts': productsBefore.values
-            .whereType<Map<String, dynamic>>()
-            .length,
-      },
-      'after': {
-        'partnerId': partner.id,
-        'productIds': catalog.products.map((product) => product.id).toList(),
-        'warnings': catalog.warnings,
-      },
-      'createdAt': FieldValue.serverTimestamp(),
+    await _commands.call('adminImportCatalog', {
+      'idempotencyKey': TajGoIdempotencyKey.create(
+        'catalog-import-${partner.id}',
+      ),
+      'partner': {'id': partner.id, ..._partnerFields(partner)},
+      'products': catalog.products
+          .map((p) => {'id': p.id, ..._productFields(p)})
+          .toList(growable: false),
     });
     return MarketplaceImportResult(
-      partnerCreated: partnerBefore == null,
-      productsCreated: productsBefore.values
-          .where((data) => data == null)
-          .length,
-      productsUpdated: productsBefore.values
-          .whereType<Map<String, dynamic>>()
-          .length,
+      partnerCreated: true,
+      productsCreated: catalog.products.length,
+      productsUpdated: 0,
     );
-  });
-
-  Future<void> _saveAdminDocument({
-    required String collection,
-    required String id,
-    required Map<String, dynamic> data,
-    required String adminId,
-    required String action,
-  }) => _db.runTransaction((transaction) async {
-    final ref = _db.collection(collection).doc(id);
-    final existing = await transaction.get(ref);
-    transaction.set(ref, {
-      ...data,
-      'createdAt':
-          existing.data()?['createdAt'] ?? FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
-    transaction.set(_db.collection('admin_logs').doc(), {
-      'adminId': adminId,
-      'action': action,
-      'entityType': collection,
-      'entityId': id,
-      'before': existing.data(),
-      'after': data,
-      'createdAt': FieldValue.serverTimestamp(),
-    });
-  });
+  }
 
   Future<String> createCatalogOrder({
     required String customerId,
@@ -273,96 +229,51 @@ class MarketplaceRepository {
     required num distanceKm,
     required int etaMinutes,
     String? comment,
-  }) => _db.runTransaction((transaction) async {
+    String? idempotencyKey,
+  }) async {
+    if (isMarketplaceCheckoutBlocked(partner)) {
+      throw const TajGoCommandException(
+        code: 'failed-precondition',
+        message: 'Тестовый каталог нельзя оформить.',
+        reason: 'preview-blocked',
+      );
+    }
     if (cartLines.isEmpty) throw StateError('Корзина пока пуста.');
-    final partnerRef = _db.collection('partners').doc(partner.id);
-    final partnerDoc = await transaction.get(partnerRef);
-    final freshPartner = partnerDoc.exists
-        ? MarketplacePartner.fromMap(partner.id, partnerDoc.data()!)
-        : null;
-    if (freshPartner == null || !freshPartner.isActive) {
-      throw StateError('Партнёр сейчас недоступен.');
-    }
-    if (!freshPartner.isOpen) {
-      throw StateError('Партнёр сейчас закрыт.');
-    }
-
-    final items = <Map<String, dynamic>>[];
-    num subtotal = 0;
-    for (final line in cartLines) {
-      final productDoc = await transaction.get(
-        _db.collection('products').doc(line.product.id),
-      );
-      if (!productDoc.exists) throw StateError('Один из товаров не найден.');
-      final product = MarketplaceProduct.fromMap(
-        productDoc.id,
-        productDoc.data()!,
-      );
-      if (product.partnerId != partner.id ||
-          product.hidden ||
-          !product.isAvailable) {
-        throw StateError('Некоторые товары закончились. Обновите корзину.');
-      }
-      if (product.price != line.product.price) {
-        throw StateError('Цена товара изменилась. Обновите корзину.');
-      }
-      if (line.quantity <= 0) throw StateError('Количество товара неверно.');
-      final lineTotal = product.price * line.quantity;
-      subtotal += lineTotal;
-      items.add({
-        'productId': product.id,
-        'name': product.name,
-        'unit': product.unit,
-        'unitPrice': product.price,
-        'quantity': line.quantity,
-        'lineTotal': lineTotal,
-      });
-    }
-    if (subtotal < freshPartner.minimumOrder) {
-      final missing = freshPartner.minimumOrder - subtotal;
-      throw StateError('Добавьте товаров ещё на $missing TJS.');
-    }
-
-    final deliveryFee = freshPartner.deliveryFee < minimumPrice
-        ? minimumPrice
-        : freshPartner.deliveryFee;
-    final ref = _db.collection('orders').doc();
-    transaction.set(ref, {
-      'customerId': customerId,
-      'customerName': customerName,
-      'status': 'waitingOffers',
-      'orderType': 'catalogOrder',
-      'type': freshPartner.category,
-      'city': 'Худжанд',
-      'fromText': freshPartner.address,
-      'toText': deliveryAddress.trim(),
-      'fromLocation': freshPartner.location,
-      'toLocation': deliveryLocation,
-      'partnerId': freshPartner.id,
-      'partnerName': freshPartner.name,
-      'items': items,
-      'subtotal': subtotal,
-      'deliveryFee': deliveryFee,
-      'total': subtotal + deliveryFee,
-      'price': deliveryFee,
-      'suggestedPrice': deliveryFee,
-      'clientPrice': deliveryFee,
-      'priceNegotiable': false,
-      'offersCount': 0,
-      'pricingVersion': 'marketplace-v1',
-      'currency': 'TJS',
-      'confirmationCode': generateConfirmationCode(),
-      'distanceKm': distanceKm,
-      'etaMinutes': etaMinutes,
+    final result = await _commands.call('createCatalogOrder', {
+      'idempotencyKey':
+          idempotencyKey ??
+          TajGoIdempotencyKey.create('catalog-order-$customerId'),
+      'partnerId': partner.id,
+      'items': cartLines
+          .map(
+            (line) => {
+              'productId': line.product.id,
+              'quantity': line.quantity,
+              'knownUnitPrice': line.product.price,
+            },
+          )
+          .toList(growable: false),
+      'deliveryLocation': {
+        'latitude': deliveryLocation.latitude,
+        'longitude': deliveryLocation.longitude,
+      },
+      'deliveryAddress': deliveryAddress.trim(),
       if (comment != null && comment.trim().isNotEmpty)
         'comment': comment.trim(),
-      if (freshPartner.isTest) 'isTestOrder': true,
-      'declinedBy': <String>[],
-      'createdAt': FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
+      // UI hints are deliberately non-authoritative. The backend recalculates.
+      'clientDistanceKm': distanceKm,
+      'clientEtaMinutes': etaMinutes,
     });
-    return ref.id;
-  });
+    final orderId = result['orderId'] as String?;
+    if (orderId == null || orderId.isEmpty) {
+      throw const TajGoCommandException(
+        code: 'aborted',
+        message: 'TajGo не вернул номер заказа. Повторите запрос.',
+        retryable: true,
+      );
+    }
+    return orderId;
+  }
 }
 
 class MarketplaceImportResult {

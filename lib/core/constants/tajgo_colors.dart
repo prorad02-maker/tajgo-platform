@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 class TajGoColors {
   static const green = Color(0xFF16A34A);
   static const darkGreen = Color(0xFF15803D);
+  static const deepGreen = Color(0xFF0E5730);
   static const lime = Color(0xFF84CC16);
   static const mint = Color(0xFFDCFCE7);
   static const background = Color(0xFFF4F9F3);

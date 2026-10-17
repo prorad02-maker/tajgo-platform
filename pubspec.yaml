@@ -1,5 +1,5 @@
 name: tajgo
-description: "A new Flutter project."
+description: "TajGo — городская платформа заказов и доставки."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.5.0+30
+version: 1.8.5+37
 
 environment:
   sdk: ^3.12.2
@@ -28,6 +28,7 @@ environment:
 # the latest version available on pub.dev. To see which dependencies have newer
 # versions available, run `flutter pub outdated`.
 dependencies:
+  crypto: ^3.0.7
   flutter:
     sdk: flutter
 
@@ -37,6 +38,7 @@ dependencies:
   firebase_core: ^4.11.0
   firebase_auth: ^6.5.4
   cloud_firestore: ^6.6.0
+  cloud_functions: ^6.3.5
   flutter_map: ^8.3.1
   latlong2: ^0.10.1
   geolocator: ^14.0.3
@@ -45,8 +47,27 @@ dependencies:
   http: ^1.2.2
   shared_preferences: ^2.5.3
   url_launcher: ^6.3.2
+  firebase_messaging: ^16.4.3
+  firebase_crashlytics: ^5.2.6
+  firebase_app_check: ^0.4.5+2
+  # file_selector (flutter.dev, federated) for price import / attachments.
+  # Chosen over file_picker: its Windows impl is a separate federated package
+  # that is NOT compiled into Android/iOS kernels, so the win32 desktop-only
+  # version conflict cannot break mobile builds.
+  file_selector: ^1.0.0
+  csv: ^8.0.0
+  excel: ^4.0.6
+
+# TajGo targets Android/iOS only. package_info_plus (pulled transitively via
+# geolocator's Linux impl) requires win32 ^6, while some desktop federated
+# plugins still pin win32 ^5.9. Force win32 ^6 to unblock version solving;
+# no Windows/Linux desktop implementation is compiled for mobile artifacts.
+dependency_overrides:
+  win32: ^6.0.0
 
 dev_dependencies:
+  integration_test:
+    sdk: flutter
   flutter_test:
     sdk: flutter
 

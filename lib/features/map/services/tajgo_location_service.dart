@@ -4,8 +4,17 @@ import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../models/tajgo_map_location.dart';
+import '../models/map_session_state.dart';
 
-enum TajGoLocationIssue { serviceDisabled, denied, deniedForever, unavailable }
+enum TajGoLocationIssue {
+  serviceDisabled,
+  denied,
+  deniedForever,
+  timeout,
+  poorAccuracy,
+  stale,
+  unavailable,
+}
 
 class TajGoLocationException implements Exception {
   const TajGoLocationException(this.issue, this.message);
@@ -24,6 +33,8 @@ class TajGoLocationException implements Exception {
 class TajGoLocationService {
   StreamController<Position>? _positionController;
   StreamSubscription<Position>? _nativePositionSubscription;
+  Future<void> _nativeLifecycle = Future<void>.value();
+  int _nativeLifecycleGeneration = 0;
 
   Future<Position> determineCurrentPosition() async {
     final enabled = await Geolocator.isLocationServiceEnabled();
@@ -66,6 +77,8 @@ class TajGoLocationService {
           permission != LocationPermission.whileInUse) {
         return null;
       }
+      final lastKnown = await Geolocator.getLastKnownPosition();
+      if (lastKnown != null) return lastKnown;
       return await _readCurrentPosition();
     } catch (_) {
       // Пассивная проверка не должна мешать открытию карты. Полная ошибка с
@@ -76,16 +89,42 @@ class TajGoLocationService {
 
   Future<Position> _readCurrentPosition() async {
     try {
-      return await Geolocator.getCurrentPosition(
+      final position = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high,
           timeLimit: Duration(seconds: 15),
         ),
       );
+      final quality = qualityOf(position);
+      if (quality.state == LocationAvailability.stale) {
+        throw const TajGoLocationException(
+          TajGoLocationIssue.stale,
+          'Геопозиция устарела. Попробуйте ещё раз или выберите точку вручную.',
+        );
+      }
+      if (quality.state == LocationAvailability.poorAccuracy) {
+        throw const TajGoLocationException(
+          TajGoLocationIssue.poorAccuracy,
+          'GPS пока неточен. Перейдите на открытое место или выберите точку вручную.',
+        );
+      }
+      return position;
+    } on TimeoutException {
+      throw const TajGoLocationException(
+        TajGoLocationIssue.timeout,
+        'GPS не ответил вовремя. Повторите или выберите точку вручную.',
+      );
     } catch (error) {
       throw userFacingException(error);
     }
   }
+
+  LocationFixQuality qualityOf(Position position, {DateTime? now}) =>
+      LocationFixQuality.evaluate(
+        timestamp: position.timestamp,
+        accuracyMeters: position.accuracy,
+        now: now ?? DateTime.now().toUtc(),
+      );
 
   TajGoLocationException userFacingException(Object error) {
     if (error is TajGoLocationException) {
@@ -153,26 +192,35 @@ class TajGoLocationService {
   }
 
   void _startNativePositionStream(StreamController<Position> controller) {
-    if (_nativePositionSubscription != null) {
-      return;
-    }
-    _nativePositionSubscription =
-        Geolocator.getPositionStream(
-          locationSettings: const LocationSettings(
-            accuracy: LocationAccuracy.bestForNavigation,
-            distanceFilter: 5,
-          ),
-        ).listen(
-          controller.add,
-          onError: (Object error) =>
-              controller.addError(userFacingException(error)),
-        );
+    final generation = ++_nativeLifecycleGeneration;
+    _nativeLifecycle = _nativeLifecycle.then((_) async {
+      if (generation != _nativeLifecycleGeneration ||
+          !controller.hasListener ||
+          _nativePositionSubscription != null) {
+        return;
+      }
+      _nativePositionSubscription =
+          Geolocator.getPositionStream(
+            locationSettings: const LocationSettings(
+              accuracy: LocationAccuracy.bestForNavigation,
+              distanceFilter: 5,
+            ),
+          ).listen(
+            controller.add,
+            onError: (Object error) =>
+                controller.addError(userFacingException(error)),
+          );
+    });
   }
 
   Future<void> _stopNativePositionStream() async {
-    final subscription = _nativePositionSubscription;
-    _nativePositionSubscription = null;
-    await subscription?.cancel();
+    _nativeLifecycleGeneration++;
+    _nativeLifecycle = _nativeLifecycle.then((_) async {
+      final subscription = _nativePositionSubscription;
+      _nativePositionSubscription = null;
+      await subscription?.cancel();
+    });
+    await _nativeLifecycle;
   }
 
   TajGoMapLocation _fallback(double latitude, double longitude) {

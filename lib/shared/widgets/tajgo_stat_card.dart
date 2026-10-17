@@ -5,12 +5,14 @@ import '../../core/constants/tajgo_colors.dart';
 class TajGoStatCard extends StatelessWidget {
   const TajGoStatCard({
     super.key,
-    required this.icon,
+    this.icon = '',
+    this.iconData,
     required this.value,
     required this.label,
   });
 
   final String icon;
+  final IconData? iconData;
   final String value;
   final String label;
 
@@ -22,7 +24,10 @@ class TajGoStatCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(icon, style: const TextStyle(fontSize: 19, height: 1)),
+          if (iconData != null)
+            Icon(iconData, size: 24, color: TajGoColors.darkGreen)
+          else
+            Text(icon, style: const TextStyle(fontSize: 19, height: 1)),
           const SizedBox(height: 4),
           Expanded(
             child: Align(

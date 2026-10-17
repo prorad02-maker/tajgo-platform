@@ -1,6 +1,20 @@
 # tajgo
 
-A new Flutter project.
+Flutter-приложение курьерской доставки, Firebase backend и сайт tajgo.ru.
+
+Текущая версия: **1.8.0+32**, Android package: `tj.tajgo.app`.
+Фактические результаты проверок, блокеры и инструкции загрузки приложения и сайта: [RELEASE_READY.md](RELEASE_READY.md).
+
+```powershell
+# Flutter + backend + emulator checks (JDK 21+)
+./scripts/run_v1_8_core_tests.ps1
+# Website links and resources
+node scripts/check_website.mjs
+# ZIP for ordinary static hosting
+./scripts/package_website.ps1
+# APK + AAB after upload key setup (RELEASE_SIGNING_SETUP.md)
+./scripts/build_android_release.ps1
+```
 
 ## Getting Started
 

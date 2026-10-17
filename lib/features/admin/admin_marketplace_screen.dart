@@ -1,9 +1,12 @@
+import '../../core/design/tajgo_money.dart';
+import '../../shared/widgets/tajgo_map_attribution.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../core/constants/tajgo_colors.dart';
+import '../../core/config/map_provider_config.dart';
 import '../../core/models/marketplace_partner.dart';
 import '../../core/models/marketplace_product.dart';
 import '../../shared/widgets/tajgo_scope.dart';
@@ -86,7 +89,7 @@ class _PartnersTab extends StatelessWidget {
                 subtitle: Text(
                   '${marketplaceCategoryLabel(partner.category)} · '
                   '${partner.isOpen ? 'открыт' : 'закрыт'} · '
-                  '${partner.deliveryFee} TJS доставка',
+                  '${TajGoMoney.format(partner.deliveryFee)} доставка',
                 ),
                 trailing: IconButton(
                   tooltip: 'Изменить',
@@ -198,7 +201,7 @@ class AdminPartnerAssortmentScreen extends StatelessWidget {
                         style: const TextStyle(fontWeight: FontWeight.w900),
                       ),
                       subtitle: Text(
-                        '${product.price} TJS / '
+                        '${TajGoMoney.format(product.price)} / '
                         '${marketplaceUnitLabel(product.unit)}'
                         '${product.hidden ? ' · скрыт' : ''}'
                         '${!product.isAvailable ? ' · нет в наличии' : ''}',
@@ -256,7 +259,7 @@ class _ProductsTab extends StatelessWidget {
                   style: const TextStyle(fontWeight: FontWeight.w900),
                 ),
                 subtitle: Text(
-                  '${product.price} TJS / ${marketplaceUnitLabel(product.unit)}'
+                  '${TajGoMoney.format(product.price)} / ${marketplaceUnitLabel(product.unit)}'
                   '${product.hidden ? ' · скрыт' : ''}'
                   '${!product.isAvailable ? ' · нет в наличии' : ''}',
                 ),
@@ -790,7 +793,7 @@ class _ProductEditorDialogState extends State<_ProductEditorDialog> {
                   Expanded(
                     child: _numberField(
                       _price,
-                      'Цена, TJS',
+                      'Цена, сомони',
                       min: 0.01,
                       max: 100000,
                     ),
@@ -1013,15 +1016,12 @@ class _AdminPartnerLocationScreenState
           ),
           children: [
             TileLayer(
-              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-              userAgentPackageName: 'tj.tajgo.app',
+              urlTemplate: MapProviderConfig.current.tileUrlTemplate,
+              userAgentPackageName:
+                  MapProviderConfig.current.userAgentPackageName,
               maxZoom: 19,
             ),
-            RichAttributionWidget(
-              attributions: const [
-                TextSourceAttribution('OpenStreetMap contributors'),
-              ],
-            ),
+            const TajGoMapAttribution(),
           ],
         ),
         const IgnorePointer(

@@ -1,23 +1,35 @@
-import 'package:flutter/foundation.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../../../core/services/safe_diagnostics.dart';
 import '../models/tajgo_route.dart';
 import 'direct_route_provider.dart';
 import 'map_performance_monitor.dart';
 import 'road_route_provider.dart';
+import 'route_provider.dart';
 import 'route_cache.dart';
 import 'route_sanity_service.dart';
 import 'routing_health_monitor.dart';
 
+class RouteUnavailableException implements Exception {
+  const RouteUnavailableException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
 class RouteService {
   RouteService({
     RoadRouteProvider? roadProvider,
+    RouteProvider? serverProvider,
     DirectRouteProvider? directProvider,
     RouteCache? cache,
     RouteSanityService? sanityService,
     RoutingHealthMonitor? healthMonitor,
     MapPerformanceMonitor? performanceMonitor,
-  }) : _road = roadProvider ?? RoadRouteProvider(),
+  }) : _server = serverProvider,
+       _road = roadProvider ?? RoadRouteProvider(),
        _direct = directProvider ?? const DirectRouteProvider(),
        _cache = cache ?? RouteCache(),
        _sanity =
@@ -31,6 +43,7 @@ class RouteService {
            RoutingHealthMonitor((roadProvider ?? RoadRouteProvider()).config);
 
   final RoadRouteProvider _road;
+  final RouteProvider? _server;
   final DirectRouteProvider _direct;
   final RouteCache _cache;
   final RouteSanityService _sanity;
@@ -65,8 +78,11 @@ class RouteService {
           to: to,
           mode: mode,
         );
-        if (checked.usedFallback) {
-          _cache.put(from, to, mode, checked.route);
+        if (checked.usedFallback ||
+            checked.route.routeQuality != RouteQuality.road) {
+          return Future.error(
+            const RouteUnavailableException('Дорожный маршрут недоступен.'),
+          );
         }
         health.recordCacheHit(checked.route);
         _debugRoute(
@@ -86,7 +102,14 @@ class RouteService {
     if (running != null && !forceRefresh) return running;
     final request = _build(from: from, to: to, mode: mode);
     _inFlight[key] = request;
-    request.whenComplete(() => _inFlight.remove(key));
+    request.then<void>(
+      (_) {
+        _inFlight.remove(key);
+      },
+      onError: (Object _, StackTrace _) {
+        _inFlight.remove(key);
+      },
+    );
     return request;
   }
 
@@ -97,11 +120,11 @@ class RouteService {
   }) async {
     final stopwatch = Stopwatch()..start();
     late RouteSanityResult checked;
-    var routeSource = 'direct';
+    var routeSource = 'unavailable';
 
-    if (_road.configured) {
+    if (_server != null || _road.configured) {
       try {
-        final candidate = await _road.buildRoute(
+        final candidate = await (_server ?? _road).buildRoute(
           from: from,
           to: to,
           mode: mode,
@@ -122,6 +145,9 @@ class RouteService {
             parseSuccess: _road.lastParseSuccess,
             route: checked.route,
           );
+          throw RouteUnavailableException(
+            checked.reason ?? 'Провайдер вернул некорректный маршрут.',
+          );
         } else {
           health.recordSuccess(
             checked.route,
@@ -132,32 +158,41 @@ class RouteService {
           );
         }
       } catch (error) {
-        checked = _sanity.sanitize(
+        if (error is RouteUnavailableException) {
+          stopwatch.stop();
+          performance.recordRoute(stopwatch.elapsed);
+          rethrow;
+        }
+        final fallback = _sanity.sanitize(
           candidate: null,
           from: from,
           to: to,
           mode: mode,
           missingReason: error.toString(),
         );
-        routeSource = 'provider_error_fallback';
+        routeSource = 'provider_error';
         health.recordFallback(
           error.toString(),
           stopwatch.elapsed,
           requestUrl: _road.lastRequestUrl,
           httpStatus: _road.lastHttpStatus,
           parseSuccess: _road.lastParseSuccess,
-          route: checked.route,
+          route: fallback.route,
+        );
+        stopwatch.stop();
+        performance.recordRoute(stopwatch.elapsed);
+        throw const RouteUnavailableException(
+          'Не удалось построить дорожный маршрут. Проверьте связь и повторите.',
         );
       }
     } else {
-      checked = _sanity.sanitize(
-        candidate: null,
-        from: from,
-        to: to,
-        mode: mode,
-        missingReason: 'Road route endpoint is disabled.',
+      final fallback = _direct.buildSync(from: from, to: to, mode: mode);
+      health.recordDisabledFallback(fallback);
+      stopwatch.stop();
+      performance.recordRoute(stopwatch.elapsed);
+      throw const RouteUnavailableException(
+        'Дорожный маршрут пока недоступен. Настройте pilot provider или повторите позже.',
       );
-      health.recordDisabledFallback(checked.route);
     }
 
     stopwatch.stop();
@@ -182,18 +217,22 @@ class RouteService {
     required String routeSource,
     required String cache,
   }) {
-    if (!kDebugMode) return;
     final route = result.route;
-    debugPrint(
-      '[TajGoRoute] from=${from.latitude},${from.longitude} '
-      'to=${to.latitude},${to.longitude} '
-      'directDistanceMeters=${result.directDistanceMeters.toStringAsFixed(1)} '
-      'providerDistanceMeters=${result.providerDistanceMeters?.toStringAsFixed(1)} '
-      'selectedDistanceMeters=${(route.distanceKm * 1000).toStringAsFixed(1)} '
-      'quality=${route.routeQuality.name} providerName=$providerName '
-      'selectedProvider=${route.providerName} '
-      'points=${route.points.length} source=$routeSource cache=$cache '
-      'fallbackReason=${result.reason ?? '-'}',
+    SafeDiagnostics.log(
+      'TAJGO_ROUTE',
+      fields: {
+        'directDistanceMeters': result.directDistanceMeters.toStringAsFixed(1),
+        'providerDistanceMeters': result.providerDistanceMeters
+            ?.toStringAsFixed(1),
+        'selectedDistanceMeters': (route.distanceKm * 1000).toStringAsFixed(1),
+        'quality': route.routeQuality.name,
+        'providerName': providerName,
+        'selectedProvider': route.providerName,
+        'points': route.points.length,
+        'source': routeSource,
+        'cache': cache,
+        'fallback': result.reason == null ? 'none' : 'present',
+      },
     );
   }
 }

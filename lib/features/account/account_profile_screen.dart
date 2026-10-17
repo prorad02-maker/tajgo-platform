@@ -4,12 +4,21 @@ import 'package:flutter/material.dart';
 import '../../core/constants/tajgo_colors.dart';
 import '../../core/models/app_user.dart';
 import '../../shared/widgets/tajgo_scope.dart';
+import '../../shared/widgets/tajgo_state_view.dart';
 import '../courier/courier_application_status_screen.dart';
 import '../courier/courier_home_screen.dart';
 import '../courier/courier_onboarding_screen.dart';
 import '../customer/customer_home_screen.dart';
+import '../../core/legal/legal_documents.dart';
+import '../legal/legal_document_screen.dart';
+import '../legal/support_screen.dart';
+import '../diagnostics/diagnostics_screen.dart';
+import '../merchant/merchant_application_screen.dart';
 import '../startup/intent_selection_screen.dart';
+import 'addresses/saved_addresses_screen.dart';
+import 'security_data_screen.dart';
 import 'settings_screen.dart';
+import 'order_history_screen.dart';
 
 class CustomerProfileScreen extends StatelessWidget {
   const CustomerProfileScreen({super.key});
@@ -25,22 +34,67 @@ class CourierProfileScreen extends StatelessWidget {
       const AccountProfileScreen(currentMode: AppUserRole.courier);
 }
 
-class AccountProfileScreen extends StatelessWidget {
+class AccountProfileScreen extends StatefulWidget {
   const AccountProfileScreen({super.key, required this.currentMode});
   final String currentMode;
 
   @override
-  Widget build(BuildContext context) {
+  State<AccountProfileScreen> createState() => _AccountProfileScreenState();
+}
+
+class _AccountProfileScreenState extends State<AccountProfileScreen> {
+  Stream<AppUser?>? _profile;
+  String? _uid;
+  String get currentMode => widget.currentMode;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
     final scope = TajGoScope.of(context);
-    final firebaseUser = scope.authService.currentUser!;
+    final uid = scope.authService.currentUser?.uid;
+    if (uid != _uid || _profile == null) {
+      _uid = uid;
+      _profile = uid == null
+          ? Stream.value(null)
+          : scope.userRepository.userStream(uid);
+    }
+  }
+
+  void _reload() => setState(() {
+    final scope = TajGoScope.of(context);
+    _profile = _uid == null
+        ? Stream.value(null)
+        : scope.userRepository.userStream(_uid!);
+  });
+
+  @override
+  Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Профиль')),
-      body: FutureBuilder<AppUser?>(
-        future: scope.userRepository.getUser(firebaseUser.uid),
+      body: StreamBuilder<AppUser?>(
+        stream: _profile,
         builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return TajGoStateView(
+              icon: Icons.cloud_off_rounded,
+              title: 'Не удалось загрузить профиль',
+              message: 'Проверьте интернет и попробуйте ещё раз.',
+              onRetry: _reload,
+              actionLabel: 'Повторить',
+            );
+          }
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
           final user = snapshot.data;
           if (user == null) {
-            return const Center(child: CircularProgressIndicator());
+            return TajGoStateView(
+              icon: Icons.person_outline_rounded,
+              title: 'Профиль пока недоступен',
+              message: 'Попробуйте загрузить его ещё раз.',
+              onRetry: _reload,
+              actionLabel: 'Повторить',
+            );
           }
           return ListView(
             padding: const EdgeInsets.all(16),
@@ -69,7 +123,7 @@ class AccountProfileScreen extends StatelessWidget {
                 ),
               ),
               Text(
-                user.phoneNumber ?? 'Тестовый вход · номер не подтверждён',
+                user.phoneNumber ?? 'Номер не указан',
                 textAlign: TextAlign.center,
                 style: const TextStyle(color: TajGoColors.muted),
               ),
@@ -88,13 +142,36 @@ class AccountProfileScreen extends StatelessWidget {
               _Tile(
                 icon: Icons.history_rounded,
                 title: 'История заказов',
-                onTap: () => _soon(context),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) =>
+                        OrderHistoryScreen(currentMode: currentMode),
+                  ),
+                ),
               ),
               _Tile(
                 icon: Icons.favorite_rounded,
                 title: 'Избранные адреса',
-                onTap: () => _soon(context),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => const SavedAddressesScreen(),
+                  ),
+                ),
               ),
+              if (currentMode == AppUserRole.customer &&
+                  TajGoScope.of(context).featureFlags.merchantApplications)
+                _Tile(
+                  icon: Icons.storefront_rounded,
+                  title: 'Подключить свой магазин',
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) => const MerchantApplicationScreen(),
+                    ),
+                  ),
+                ),
               if (currentMode == AppUserRole.courier)
                 _Tile(
                   icon: Icons.school_outlined,
@@ -118,14 +195,59 @@ class AccountProfileScreen extends StatelessWidget {
               ),
               _Tile(
                 icon: Icons.help_outline_rounded,
-                title: 'Помощь',
-                onTap: () => _soon(context),
+                title: 'Поддержка',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => const SupportScreen(),
+                  ),
+                ),
               ),
               _Tile(
                 icon: Icons.privacy_tip_outlined,
                 title: 'Политика конфиденциальности',
-                onTap: () => _soon(context),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => const LegalDocumentScreen(
+                      document: LegalDocuments.privacy,
+                    ),
+                  ),
+                ),
               ),
+              _Tile(
+                icon: Icons.description_outlined,
+                title: 'Условия использования',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => const LegalDocumentScreen(
+                      document: LegalDocuments.terms,
+                    ),
+                  ),
+                ),
+              ),
+              _Tile(
+                icon: Icons.shield_outlined,
+                title: 'Безопасность и данные',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => const SecurityDataScreen(),
+                  ),
+                ),
+              ),
+              if (TajGoScope.of(context).featureFlags.diagnostics)
+                _Tile(
+                  icon: Icons.bug_report_outlined,
+                  title: 'Диагностика',
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) => const DiagnosticsScreen(),
+                    ),
+                  ),
+                ),
               _Tile(
                 icon: Icons.logout_rounded,
                 title: 'Выйти',
@@ -245,6 +367,11 @@ class AccountProfileScreen extends StatelessWidget {
     if (confirmed != true || !context.mounted) return;
     final scope = TajGoScope.of(context);
     final uid = scope.authService.currentUser?.uid;
+    if (uid != null) {
+      try {
+        await scope.notificationService.beforeSignOut();
+      } catch (_) {}
+    }
     if (currentMode == AppUserRole.courier && uid != null) {
       try {
         final profile = await scope.userRepository.getUser(uid);
@@ -265,12 +392,6 @@ class AccountProfileScreen extends StatelessWidget {
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute<void>(builder: (_) => screen),
       (_) => false,
-    );
-  }
-
-  void _soon(BuildContext context) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Раздел готовится к пилоту TajGo.')),
     );
   }
 }

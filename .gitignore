@@ -44,3 +44,23 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Local signing and privileged Firebase credentials
+*.jks
+*.keystore
+/android/key.properties
+**/service-account*.json
+**/firebase-adminsdk*.json
+**/.env
+**/.env.*
+!**/.env.example
+
+# Firebase Functions build/emulator output
+/functions/lib/
+/functions/node_modules/
+**/node_modules/
+android/.kotlin/
+/.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log

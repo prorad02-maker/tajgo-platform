@@ -1,4 +1,6 @@
+import '../../../shared/widgets/tajgo_map_attribution.dart';
 import 'dart:async';
+import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -7,17 +9,29 @@ import 'package:latlong2/latlong.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/constants/tajgo_colors.dart';
+import '../../../core/design/tajgo_money.dart';
+import '../../../core/config/map_provider_config.dart';
+import '../../../core/config/service_area_config.dart';
 import '../../../core/models/tajgo_courier.dart';
+import '../../../core/pricing/delivery_pricing.dart';
+import '../../../core/services/authoritative_command_service.dart';
+import '../../../core/services/city_selection_service.dart';
+import '../../../core/services/order_repository.dart';
 import '../../../core/services/pricing.dart' as pricing;
+import '../../../core/services/safe_diagnostics.dart';
 import '../../../shared/widgets/tajgo_scope.dart';
+import '../../../shared/delivery/delivery_widgets.dart';
 import '../../customer/order_tracking_screen.dart';
 import '../models/place_suggestion.dart';
+import '../models/map_session_state.dart';
 import '../models/tajgo_map_location.dart';
 import '../models/tajgo_route.dart';
 import '../services/place_search_service.dart';
 import '../services/tajgo_map_camera.dart';
 import '../services/tajgo_location_service.dart';
 import '../widgets/tajgo_location_widgets.dart';
+import '../widgets/tajgo_map_loading_status.dart';
+import '../widgets/address_details_dialog.dart';
 import '../widgets/tajgo_place_search_sheet.dart';
 import '../widgets/tajgo_route_summary_card.dart';
 import '../utils/map_address_formatter.dart';
@@ -32,14 +46,17 @@ class NewOrderMapScreen extends StatefulWidget {
   State<NewOrderMapScreen> createState() => _NewOrderMapScreenState();
 }
 
-class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
-  static const _center = LatLng(40.2833, 69.6222);
+class _NewOrderMapScreenState extends State<NewOrderMapScreen>
+    with WidgetsBindingObserver {
   static const _types = {'package': 'Посылка'};
   final _map = MapController();
   final _camera = TajGoMapCamera();
   final _price = TextEditingController();
   final _comment = TextEditingController();
   late final PlaceSearchService _placeSearch;
+  final _citySelection = CitySelectionService();
+  ServiceAreaConfig _city = ServiceAreaRegistry.khujand;
+  Stream<List<TajGoCourier>>? _couriersStream;
   _Stage _stage = _Stage.pickFrom;
   late String _type = widget.initialType;
   TajGoMapLocation? _from, _to;
@@ -47,28 +64,58 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
   TajGoRoute? _route;
   double? _directDistanceMeters;
   bool _routeLoading = false;
+  String? _routeError;
   int _routeRequestId = 0;
   int _reverseRequestId = 0;
+  int _quoteRequestId = 0;
+  int _gpsRequestId = 0;
+  int _cityOwnershipGeneration = 0;
+  int _inputGeneration = 0;
+  ServerDeliveryQuote? _serverQuote;
+  bool _quoteLoading = false;
+  String? _quoteError;
   LatLng? _current;
   String _address = 'Определяем адрес...';
   bool _resolving = false, _locating = false, _busy = false;
+  bool _confirming = false;
   bool _cameraMoving = false;
   bool _gestureMoving = false;
+  bool _userMovedCamera = false;
   bool _mapLoading = true;
+  int _mapTileRevision = 0;
   bool _tileReadyScheduled = false;
   bool _showLocateHint = false;
   bool _showYouAreHere = false;
   bool _gpsWeak = false;
+  String? _createOrderKey;
   Timer? _youAreHereTimer;
+  final DeliveryRequestCoordinator _requests = DeliveryRequestCoordinator();
 
   bool get _selectionMoving => _cameraMoving || _gestureMoving;
+
+  void _invalidateQuote() {
+    _requests.beginQuote();
+    _quoteRequestId++;
+    _serverQuote = null;
+    _quoteLoading = false;
+    _quoteError = null;
+  }
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _placeSearch = PlaceSearchService();
     unawaited(_loadLocateHint());
     WidgetsBinding.instance.addPostFrameCallback((_) => _prepareMap());
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _couriersStream ??= TajGoScope.of(
+      context,
+    ).courierRepository.onlineCouriersStream();
   }
 
   Future<void> _loadLocateHint() async {
@@ -78,9 +125,17 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
   }
 
   Future<void> _prepareMap() async {
-    final position = await TajGoScope.of(
-      context,
-    ).locationService.currentPositionIfAuthorized();
+    final ownership = _cityOwnershipGeneration;
+    final locationService = TajGoScope.of(context).locationService;
+    final storedCity = await _citySelection.load();
+    if (mounted &&
+        ownership == _cityOwnershipGeneration &&
+        !_userMovedCamera &&
+        storedCity.id != _city.id) {
+      setState(() => _city = storedCity);
+      _map.move(storedCity.center, storedCity.defaultZoom);
+    }
+    final position = await locationService.currentPositionIfAuthorized();
     if (!mounted) {
       return;
     }
@@ -89,12 +144,64 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
       return;
     }
     final point = LatLng(position.latitude, position.longitude);
+    final detected = ServiceAreaRegistry.detect(point);
+    final canDetectCity =
+        ownership == _cityOwnershipGeneration && !_userMovedCamera;
     setState(() {
       _current = point;
+      if (detected != null && canDetectCity) {
+        _city = detected;
+      }
       _gpsWeak = position.accuracy > 50;
     });
-    await _moveToCurrent(point);
+    if (detected != null && canDetectCity) {
+      unawaited(_citySelection.save(detected));
+    }
+    if (ownership == _cityOwnershipGeneration &&
+        !_userMovedCamera &&
+        _city.contains(point)) {
+      await _moveToCurrent(point);
+    }
     await _resolveCenter();
+    unawaited(_refreshFreshLocation());
+  }
+
+  Future<void> _refreshFreshLocation() async {
+    final coordinatorRequest = _requests.beginGps();
+    final requestId = ++_gpsRequestId;
+    final ownership = _cityOwnershipGeneration;
+    try {
+      final position = await TajGoScope.of(
+        context,
+      ).locationService.determineCurrentPosition();
+      if (!mounted ||
+          requestId != _gpsRequestId ||
+          !_requests.isGpsCurrent(coordinatorRequest)) {
+        return;
+      }
+      final point = LatLng(position.latitude, position.longitude);
+      final detected = ServiceAreaRegistry.detect(point);
+      final canDetectCity =
+          ownership == _cityOwnershipGeneration && !_userMovedCamera;
+      setState(() {
+        _current = point;
+        _gpsWeak = position.accuracy > 50;
+        if (detected != null && canDetectCity) {
+          _city = detected;
+        }
+      });
+      if (detected != null && canDetectCity) {
+        unawaited(_citySelection.save(detected));
+      }
+      if (ownership == _cityOwnershipGeneration &&
+          !_userMovedCamera &&
+          _city.contains(point)) {
+        await _moveToCurrent(point);
+        await _resolveCenter();
+      }
+    } catch (_) {
+      // Last known/city fallback remains usable; explicit GPS tap exposes errors.
+    }
   }
 
   Future<void> _moveToCurrent(LatLng point) async {
@@ -127,6 +234,12 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
         label: 'Открыть настройки',
         onPressed: () => service.openSettingsFor(issue.issue),
       ),
+      TajGoLocationIssue.timeout ||
+      TajGoLocationIssue.poorAccuracy ||
+      TajGoLocationIssue.stale => SnackBarAction(
+        label: 'Повторить',
+        onPressed: _locate,
+      ),
       TajGoLocationIssue.unavailable => null,
     };
     final message = switch (issue.issue) {
@@ -134,6 +247,9 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
         'Включите геолокацию, чтобы показать ваше положение.',
       TajGoLocationIssue.denied => 'Разрешите TajGo доступ к геолокации.',
       TajGoLocationIssue.deniedForever => 'Геолокация запрещена в настройках.',
+      TajGoLocationIssue.timeout ||
+      TajGoLocationIssue.poorAccuracy ||
+      TajGoLocationIssue.stale ||
       TajGoLocationIssue.unavailable => issue.message,
     };
     final panelHeight = _panelHeight(MediaQuery.sizeOf(context));
@@ -149,11 +265,34 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _gpsRequestId++;
+    _reverseRequestId++;
+    _routeRequestId++;
+    _quoteRequestId++;
     _camera.stop();
     _youAreHereTimer?.cancel();
     _price.dispose();
     _comment.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) return;
+    _requests.pause();
+    _gpsRequestId++;
+    _reverseRequestId++;
+    _routeRequestId++;
+    _quoteRequestId++;
+    if (mounted && (_routeLoading || _quoteLoading || _resolving)) {
+      setState(() {
+        _routeLoading = false;
+        _quoteLoading = false;
+        _resolving = false;
+        _quoteError = 'Расчёт остановлен в фоне. Повторите попытку.';
+      });
+    }
   }
 
   Future<void> _showAddressSearch(_Stage stage) async {
@@ -172,7 +311,8 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
       title: stage == _Stage.pickFrom
           ? 'Найти точку забора'
           : 'Найти точку доставки',
-      near: _current,
+      near: _city.center,
+      activeCity: _city,
       recentType: stage == _Stage.pickFrom ? 'pickup' : 'dropoff',
     );
     if (!mounted || selected == null) return;
@@ -196,8 +336,11 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
     });
     final point = _map.camera.center;
     final requestId = ++_reverseRequestId;
+    final coordinatorRequest = _requests.beginReverse();
     final result = await _placeSearch.reverse(point);
-    if (mounted && requestId == _reverseRequestId) {
+    if (mounted &&
+        requestId == _reverseRequestId &&
+        _requests.isReverseCurrent(coordinatorRequest)) {
       setState(() {
         _address = result.address;
         _pendingPlace = result;
@@ -210,6 +353,8 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
     if (_locating) {
       return;
     }
+    final selectionGeneration = _inputGeneration;
+    final selectionCenter = _map.camera.center;
     setState(() {
       _locating = true;
       _showLocateHint = false;
@@ -223,6 +368,15 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
       ).locationService.determineCurrentPosition();
       final point = LatLng(position.latitude, position.longitude);
       if (!mounted) {
+        return;
+      }
+      if (selectionGeneration != _inputGeneration ||
+          const Distance().as(
+                LengthUnit.Meter,
+                selectionCenter,
+                _map.camera.center,
+              ) >
+              1) {
         return;
       }
       setState(() {
@@ -268,10 +422,46 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
   }
 
   Future<void> _confirmPoint() async {
+    if (_confirming || _resolving || _selectionMoving) return;
+    setState(() => _confirming = true);
+    try {
+      await _confirmPointImpl();
+    } finally {
+      if (mounted) setState(() => _confirming = false);
+    }
+  }
+
+  Future<void> _confirmPointImpl() async {
     if (_resolving || _selectionMoving) {
       return;
     }
     final point = _map.camera.center;
+    final generation = _inputGeneration;
+    if (!_city.contains(point)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Эта точка вне зоны доставки ${_city.displayNameRu}. Выберите точку в городе или смените город.',
+          ),
+        ),
+      );
+      return;
+    }
+    if (_address.trim().length < 3 || _address == 'Точка на карте') {
+      final details = await showAddressDetailsDialog(
+        context: context,
+        initialAddress: _address,
+        needsAddress: true,
+      );
+      if (!mounted ||
+          details == null ||
+          generation != _inputGeneration ||
+          const Distance().as(LengthUnit.Meter, point, _map.camera.center) >
+              1) {
+        return;
+      }
+      setState(() => _address = details);
+    }
     final location = TajGoMapLocation(
       latitude: point.latitude,
       longitude: point.longitude,
@@ -288,6 +478,7 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
       source: _pendingPlace?.source ?? 'manual',
       confidence: _pendingPlace?.confidence ?? 0.5,
       category: _pendingPlace?.category ?? 'mapPoint',
+      cityId: _city.id,
     );
     final source =
         _pendingPlace?.source ??
@@ -316,11 +507,15 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
         await _placeSearch.recentPlaces.save(recentPlace, type: 'pickup');
       } catch (_) {}
       setState(() {
+        _inputGeneration++;
+        _requests.inputChanged();
+        _invalidateQuote();
         _from = location;
         _stage = _Stage.pickTo;
         _pendingPlace = null;
         _route = null;
         _routeLoading = false;
+        _routeError = null;
         _directDistanceMeters = null;
         _routeRequestId++;
         _address = 'Определяем адрес...';
@@ -331,10 +526,14 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
         await _placeSearch.recentPlaces.save(recentPlace, type: 'dropoff');
       } catch (_) {}
       setState(() {
+        _inputGeneration++;
+        _requests.inputChanged();
+        _invalidateQuote();
         _to = location;
         _stage = _Stage.details;
         _pendingPlace = null;
         _route = null;
+        _routeError = null;
         _directDistanceMeters =
             pricing.haversineDistanceKm(
               _from!.toLatLng(),
@@ -342,13 +541,17 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
             ) *
             1000;
       });
-      final km = _directDistanceMeters! / 1000;
-      _price.text = pricing.suggestedPrice(km).toString();
+      _price.clear();
       WidgetsBinding.instance.addPostFrameCallback(
         (_) => _map.fitCamera(
           CameraFit.coordinates(
             coordinates: [_from!.toLatLng(), location.toLatLng()],
-            padding: const EdgeInsets.all(60),
+            padding: EdgeInsets.fromLTRB(
+              60,
+              60,
+              60,
+              _panelHeight(MediaQuery.sizeOf(context)) + 32,
+            ),
           ),
         ),
       );
@@ -361,27 +564,117 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
     final to = _to?.toLatLng();
     if (from == null || to == null) return;
     final requestId = ++_routeRequestId;
+    final coordinatorRequest = _requests.beginRoute();
+    final inputGeneration = _inputGeneration;
     setState(() {
+      _invalidateQuote();
       _route = null;
       _routeLoading = true;
+      _routeError = null;
     });
-    final route = await TajGoScope.of(
-      context,
-    ).routeService.buildRoute(from: from, to: to, mode: RouteMode.bicycle);
-    if (!mounted || requestId != _routeRequestId) return;
+    try {
+      final route = await TajGoScope.of(context).routeService.buildRoute(
+        from: from,
+        to: to,
+        mode: routeModeFromString(_city.routingProfile),
+      );
+      if (!mounted ||
+          requestId != _routeRequestId ||
+          !_requests.isRouteCurrent(coordinatorRequest)) {
+        return;
+      }
+      final quote = const DeliveryQuoteEngine().quote(
+        profile: DeliveryPricingProfiles.forCity(_city.id),
+        distanceKm: route.distanceKm,
+        durationMinutes: route.etaMinutes.toDouble(),
+      );
+      setState(() {
+        _route = route;
+        _routeLoading = false;
+        _price.text = quote.priceTjs.toString();
+      });
+      await _requestAuthoritativeQuote(
+        routeRequestId: requestId,
+        inputGeneration: inputGeneration,
+      );
+    } catch (_) {
+      if (!mounted ||
+          requestId != _routeRequestId ||
+          !_requests.isRouteCurrent(coordinatorRequest)) {
+        return;
+      }
+      setState(() {
+        _route = null;
+        _routeLoading = false;
+        _routeError = 'Не удалось построить маршрут. Повторите попытку.';
+        _price.clear();
+        _invalidateQuote();
+      });
+    }
+  }
+
+  Future<void> _requestAuthoritativeQuote({
+    required int routeRequestId,
+    required int inputGeneration,
+  }) async {
+    final from = _from;
+    final to = _to;
+    if (from == null || to == null || _route == null) return;
+    final requestId = ++_quoteRequestId;
+    final coordinatorRequest = _requests.beginQuote();
     setState(() {
-      _route = route;
-      _routeLoading = false;
-      _price.text = pricing.suggestedPrice(route.distanceKm).toString();
+      _quoteLoading = true;
+      _quoteError = null;
+      _serverQuote = null;
     });
+    try {
+      final result = await TajGoScope.of(context).orderRepository
+          .requestDeliveryQuote(
+            pickup: from.toGeoPoint(),
+            dropoff: to.toGeoPoint(),
+            cityId: _city.id,
+            transportMode: _city.routingProfile,
+          );
+      if (!mounted ||
+          requestId != _quoteRequestId ||
+          !_requests.isQuoteCurrent(coordinatorRequest) ||
+          routeRequestId != _routeRequestId ||
+          inputGeneration != _inputGeneration) {
+        return;
+      }
+      setState(() {
+        _quoteLoading = false;
+        if (result.ready) {
+          _serverQuote = result;
+          _route =
+              result.roadRoute(from.toGeoPoint(), to.toGeoPoint()) ?? _route;
+          _price.text = result.priceTjs.toString();
+        } else {
+          _quoteError =
+              'Финальный расчёт пока недоступен. Показана только предварительная цена.';
+        }
+      });
+    } on TajGoCommandException catch (error) {
+      if (!mounted ||
+          requestId != _quoteRequestId ||
+          !_requests.isQuoteCurrent(coordinatorRequest)) {
+        return;
+      }
+      setState(() {
+        _quoteLoading = false;
+        _quoteError = error.message;
+      });
+    }
   }
 
   void _debugConfirmedPoint(TajGoMapLocation location, String source) {
     if (!kDebugMode) return;
-    debugPrint(
-      '[TajGoPoint] activeField=${_stage == _Stage.pickFrom ? 'A' : 'B'} '
-      'lat=${location.latitude} lng=${location.longitude} '
-      'address=${location.address} source=$source',
+    SafeDiagnostics.log(
+      'TAJGO_POINT_CONFIRMED',
+      fields: {
+        'activeField': _stage == _Stage.pickFrom ? 'A' : 'B',
+        'source': source,
+      },
     );
   }
 
@@ -392,7 +685,12 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
     _map.fitCamera(
       CameraFit.coordinates(
         coordinates: points,
-        padding: const EdgeInsets.all(50),
+        padding: EdgeInsets.fromLTRB(
+          50,
+          50,
+          50,
+          _panelHeight(MediaQuery.sizeOf(context)) + 24,
+        ),
       ),
     );
   }
@@ -401,6 +699,7 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
     return NewOrderMapLayout.panelHeight(
       size,
       details: _stage == _Stage.details,
+      textScaler: MediaQuery.textScalerOf(context),
     );
   }
 
@@ -416,10 +715,14 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
 
   void _edit(_Stage stage) {
     setState(() {
+      _inputGeneration++;
+      _requests.inputChanged();
+      _invalidateQuote();
       _stage = stage;
       _pendingPlace = null;
       _route = null;
       _routeLoading = false;
+      _routeError = null;
       _directDistanceMeters = null;
       _routeRequestId++;
       _address = stage == _Stage.pickFrom ? _from!.address : _to!.address;
@@ -429,10 +732,19 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
   }
 
   Future<void> _createOrder() async {
-    final km =
-        _route?.distanceKm ??
-        pricing.distanceKm(_from!.toLatLng(), _to!.toLatLng());
-    final recommended = pricing.suggestedPrice(km);
+    if (_busy) return;
+    if (_route == null || _price.text.isEmpty || _serverQuote?.ready != true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Сначала постройте дорожный маршрут и получите предварительную цену.',
+          ),
+        ),
+      );
+      return;
+    }
+    final km = _route!.distanceKm;
+    final recommended = _serverQuote!.priceTjs!;
     final validation = pricing.validateClientPrice(
       rawValue: _price.text,
       recommendedPrice: recommended,
@@ -449,7 +761,7 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
         builder: (context) => AlertDialog(
           title: const Text('Подтвердить цену?'),
           content: Text(
-            'Вы указали ${validation.value} TJS при рекомендации $recommended TJS.',
+            'Вы указали ${TajGoMoney.format(validation.value ?? 0)} при рекомендации ${TajGoMoney.format(recommended)}.',
           ),
           actions: [
             TextButton(
@@ -470,6 +782,7 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
     setState(() => _busy = true);
     try {
       final scope = TajGoScope.of(context);
+      _createOrderKey ??= TajGoIdempotencyKey.create('create-custom-order');
       final user = scope.authService.currentUser!;
       final profile = await scope.userRepository.getUser(user.uid);
       if (!kDebugMode && profile?.phoneVerified != true) {
@@ -497,11 +810,15 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
         priceNegotiable: true,
         fromLocation: _from!.toGeoPoint(),
         toLocation: _to!.toGeoPoint(),
+        pickup: _from,
+        dropoff: _to,
         distanceKm: km,
         etaMinutes: pricing.etaMinutes(km),
         comment: _comment.text.trim().isEmpty ? null : _comment.text.trim(),
-        isTestOrder: kDebugMode && user.isAnonymous,
+        idempotencyKey: _createOrderKey,
+        quoteId: _serverQuote!.quoteId!,
       );
+      _createOrderKey = null;
       if (mounted) {
         Navigator.pushReplacement(
           context,
@@ -510,11 +827,23 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
           ),
         );
       }
-    } catch (error) {
+    } on TajGoCommandException catch (error) {
+      if (!error.retryable) _createOrderKey = null;
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('$error')));
+        ).showSnackBar(SnackBar(content: Text(error.message)));
+      }
+    } catch (_) {
+      _createOrderKey = null;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Не удалось создать заказ. Проверьте связь и повторите.',
+            ),
+          ),
+        );
       }
     } finally {
       if (mounted) {
@@ -523,13 +852,66 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
     }
   }
 
+  Future<void> _chooseCity() async {
+    final selected = await showModalBottomSheet<ServiceAreaConfig>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const ListTile(
+              title: Text('Город доставки'),
+              subtitle: Text(
+                'Выберите город — точки и маршрут будут сброшены.',
+              ),
+            ),
+            for (final city in ServiceAreaRegistry.values.where(
+              (item) => item.enabled,
+            ))
+              ListTile(
+                leading: Icon(
+                  city.id == _city.id
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_off,
+                ),
+                title: Text(city.displayNameRu),
+                onTap: () => Navigator.pop(context, city),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (selected == null || selected.id == _city.id || !mounted) return;
+    _cityOwnershipGeneration++;
+    _gpsRequestId++;
+    _requests.manualCitySwitch();
+    await _citySelection.save(selected);
+    if (!mounted) return;
+    setState(() {
+      _inputGeneration++;
+      _requests.inputChanged();
+      _invalidateQuote();
+      _city = selected;
+      _from = null;
+      _to = null;
+      _route = null;
+      _routeError = null;
+      _routeLoading = false;
+      _stage = _Stage.pickFrom;
+      _price.clear();
+      _routeRequestId++;
+    });
+    _map.move(selected.center, selected.defaultZoom);
+    await _resolveCenter();
+  }
+
   @override
   Widget build(BuildContext context) {
-    final repo = TajGoScope.of(context).courierRepository;
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAF7),
       body: StreamBuilder<List<TajGoCourier>>(
-        stream: repo.onlineCouriersStream(),
+        stream: _couriersStream,
         builder: (context, snapshot) {
           final couriers = snapshot.data ?? const <TajGoCourier>[];
           return LayoutBuilder(
@@ -540,18 +922,21 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
               return NewOrderMapStack(
                 key: const ValueKey('new-order-map-screen'),
                 children: [
-                  Positioned.fill(
+                  NewOrderMapViewport(
                     key: const ValueKey('new-order-map-viewport'),
+                    panelHeight: panelHeight,
+                    selecting: selecting,
                     child: FlutterMap(
                       mapController: _map,
                       options: MapOptions(
-                        initialCenter: _center,
-                        initialZoom: 13,
-                        minZoom: 3,
+                        initialCenter: _city.center,
+                        initialZoom: _city.defaultZoom,
+                        minZoom: 10,
                         maxZoom: 19,
                         onMapEvent: (event) {
                           if (!selecting || _cameraMoving) return;
                           if (event is MapEventMoveStart && !_gestureMoving) {
+                            _userMovedCamera = true;
                             setState(() => _gestureMoving = true);
                           }
                           if (event is MapEventMoveEnd) {
@@ -564,19 +949,19 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
                       ),
                       children: [
                         TileLayer(
+                          key: ValueKey(_mapTileRevision),
                           urlTemplate:
-                              'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                          userAgentPackageName: 'tj.tajgo.app',
+                              MapProviderConfig.current.tileUrlTemplate,
+                          userAgentPackageName:
+                              MapProviderConfig.current.userAgentPackageName,
                           maxZoom: 19,
                           tileBuilder: _buildMapTile,
                         ),
-                        if (_stage == _Stage.details)
+                        if (_stage == _Stage.details && _route != null)
                           PolylineLayer(
                             polylines: [
                               Polyline(
-                                points:
-                                    _route?.points ??
-                                    [_from!.toLatLng(), _to!.toLatLng()],
+                                points: _route!.points,
                                 color: _route?.routeQuality == RouteQuality.road
                                     ? TajGoColors.green
                                     : TajGoColors.warning,
@@ -637,25 +1022,14 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
                               ),
                           ],
                         ),
-                        RichAttributionWidget(
-                          attributions: const [
-                            TextSourceAttribution('OpenStreetMap contributors'),
-                          ],
-                        ),
+                        const TajGoMapAttribution(),
                       ],
                     ),
                   ),
                   if (selecting)
-                    Positioned.fill(
-                      bottom: panelHeight,
-                      child: IgnorePointer(
-                        child: Center(
-                          child: Transform.translate(
-                            offset: const Offset(0, -24),
-                            child: _SelectionPin(stage: _stage),
-                          ),
-                        ),
-                      ),
+                    NewOrderSelectionPinAnchor(
+                      panelHeight: panelHeight,
+                      child: _SelectionPin(stage: _stage),
                     ),
                   Positioned(
                     top: 0,
@@ -674,6 +1048,8 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
                               onPressed: () => Navigator.maybePop(context),
                             ),
                             const Spacer(),
+                            _CityChip(city: _city, onTap: _chooseCity),
+                            const SizedBox(width: 8),
                             if (selecting && couriers.isNotEmpty)
                               Container(
                                 padding: const EdgeInsets.symmetric(
@@ -697,10 +1073,15 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
                   if (_mapLoading)
                     Positioned(
                       top: MediaQuery.paddingOf(context).top + 70,
-                      left: 0,
-                      right: 0,
-                      child: const Center(
-                        child: _MapStatusChip(text: 'Загружаем карту…'),
+                      left: 16,
+                      right: 16,
+                      child: Center(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 360),
+                          child: TajGoMapLoadingStatus(
+                            onRetry: () => setState(() => _mapTileRevision++),
+                          ),
+                        ),
                       ),
                     ),
                   Positioned(
@@ -758,11 +1139,16 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
                             route: _route,
                             directBaselineMeters: _directDistanceMeters,
                             routeLoading: _routeLoading,
+                            routeError: _routeError,
+                            quoteLoading: _quoteLoading,
+                            quoteError: _quoteError,
+                            quoteReady: _serverQuote?.ready == true,
                             onType: (value) => setState(() => _type = value),
                             onPrice: (_) => setState(() {}),
                             onEdit: _edit,
                             onSubmit: _createOrder,
                             onShowRoute: _showEntireRoute,
+                            onRetryRoute: _buildOrderRoute,
                           )
                         : _PointPanel(
                             stage: _stage,
@@ -771,7 +1157,7 @@ class _NewOrderMapScreenState extends State<NewOrderMapScreen> {
                             address: _address,
                             pendingPlace: _pendingPlace,
                             currentMatchesPickup: _pickupMatchesCurrent,
-                            resolving: _resolving,
+                            resolving: _resolving || _confirming,
                             moving: _selectionMoving,
                             onConfirm: _confirmPoint,
                             onSearchFrom: () =>
@@ -862,50 +1248,59 @@ class _PointPanel extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
           child: Column(
             children: [
-              _AddressField(
-                label: 'Откуда',
-                presentation: fromPresentation,
-                active: stage == _Stage.pickFrom,
-                selected: from != null,
-                marker: 'A',
-                onTap: onSearchFrom,
-              ),
-              const SizedBox(height: 6),
-              _AddressField(
-                label: 'Куда',
-                presentation: toPresentation,
-                active: stage == _Stage.pickTo,
-                selected: to != null,
-                marker: 'B',
-                onTap: onSearchTo,
-              ),
-              const Spacer(),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  hint,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: TajGoColors.muted,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
+              Expanded(
+                child: SingleChildScrollView(
+                  child: Column(
+                    children: [
+                      _AddressField(
+                        label: 'Откуда',
+                        presentation: fromPresentation,
+                        active: stage == _Stage.pickFrom,
+                        selected: from != null,
+                        marker: 'A',
+                        onTap: onSearchFrom,
+                      ),
+                      const SizedBox(height: 6),
+                      _AddressField(
+                        label: 'Куда',
+                        presentation: toPresentation,
+                        active: stage == _Stage.pickTo,
+                        selected: to != null,
+                        marker: 'B',
+                        onTap: onSearchTo,
+                      ),
+                      const SizedBox(height: 8),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          hint,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: TajGoColors.muted,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
               const SizedBox(height: 7),
               SizedBox(
                 width: double.infinity,
-                height: 48,
                 child: FilledButton(
                   key: const ValueKey('new-order-map-confirm'),
                   onPressed: enabled ? onConfirm : null,
                   style: FilledButton.styleFrom(
+                    minimumSize: const Size(0, 48),
                     backgroundColor: TajGoColors.lime,
                     foregroundColor: TajGoColors.ink,
                     disabledBackgroundColor: const Color(0xFFE1EEE5),
                     disabledForegroundColor: TajGoColors.muted,
                     textStyle: const TextStyle(
+                      fontFamily: 'Roboto',
                       fontSize: 15,
                       fontWeight: FontWeight.w900,
                     ),
@@ -945,13 +1340,13 @@ class _AddressField extends StatelessWidget {
   @override
   Widget build(BuildContext context) => InkWell(
     onTap: onTap,
-    borderRadius: BorderRadius.circular(12),
+    borderRadius: BorderRadius.circular(16),
     child: Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
         color: active ? const Color(0xFFEAF4E7) : const Color(0xFFF5F6F5),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: active ? TajGoColors.green : const Color(0xFFE2E5E3),
         ),
@@ -968,16 +1363,16 @@ class _AddressField extends StatelessWidget {
                   label,
                   style: const TextStyle(
                     color: TajGoColors.muted,
-                    fontSize: 10,
+                    fontSize: 12,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
                 Text(
                   presentation.primary,
-                  maxLines: 1,
+                  maxLines: 2,
                   style: const TextStyle(
                     fontWeight: FontWeight.w700,
-                    fontSize: 13,
+                    fontSize: 15,
                   ),
                 ),
                 Text(
@@ -986,7 +1381,7 @@ class _AddressField extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     color: TajGoColors.muted,
-                    fontSize: 10,
+                    fontSize: 12,
                   ),
                 ),
               ],
@@ -1029,6 +1424,7 @@ class _PointBadge extends StatelessWidget {
             )
           : Text(
               label,
+              textScaler: TextScaler.noScaling,
               style: TextStyle(
                 color: active
                     ? label == 'A'
@@ -1061,17 +1457,9 @@ class _SelectionPin extends StatelessWidget {
       child: Stack(
         alignment: Alignment.topCenter,
         children: [
-          Icon(
-            Icons.location_pin,
-            size: 58,
-            color: color,
-            shadows: const [
-              Shadow(
-                color: Color(0x66000000),
-                blurRadius: 8,
-                offset: Offset(0, 4),
-              ),
-            ],
+          CustomPaint(
+            size: const Size.square(NewOrderMapLayout.selectionPinSize),
+            painter: _SelectionPinPainter(color),
           ),
           Positioned(
             top: 11,
@@ -1088,6 +1476,63 @@ class _SelectionPin extends StatelessWidget {
       ),
     );
   }
+}
+
+class _SelectionPinPainter extends CustomPainter {
+  const _SelectionPinPainter(this.color);
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width, h = size.height;
+    // The painted tip is exactly bottomCenter, the coordinate anchor.
+    final path = ui.Path()
+      ..moveTo(w / 2, h)
+      ..cubicTo(w * .40, h * .76, w * .10, h * .52, w * .10, h * .35)
+      ..cubicTo(w * .10, h * .11, w * .28, 0, w / 2, 0)
+      ..cubicTo(w * .72, 0, w * .90, h * .11, w * .90, h * .35)
+      ..cubicTo(w * .90, h * .52, w * .60, h * .76, w / 2, h)
+      ..close();
+    canvas.drawShadow(path, const Color(0x66000000), 4, true);
+    canvas.drawPath(path, Paint()..color = color);
+  }
+
+  @override
+  bool shouldRepaint(_SelectionPinPainter oldDelegate) =>
+      oldDelegate.color != color;
+}
+
+class _CityChip extends StatelessWidget {
+  const _CityChip({required this.city, required this.onTap});
+
+  final ServiceAreaConfig city;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Material(
+    color: Colors.white,
+    borderRadius: BorderRadius.circular(22),
+    child: InkWell(
+      borderRadius: BorderRadius.circular(22),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.location_city_rounded, size: 18),
+            const SizedBox(width: 6),
+            Text(
+              city.displayNameRu,
+              style: const TextStyle(fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(width: 2),
+            const Icon(Icons.expand_more_rounded, size: 18),
+          ],
+        ),
+      ),
+    ),
+  );
 }
 
 class _MapStatusChip extends StatelessWidget {
@@ -1122,11 +1567,16 @@ class _DetailsPanel extends StatelessWidget {
     required this.route,
     required this.directBaselineMeters,
     required this.routeLoading,
+    required this.routeError,
+    required this.quoteLoading,
+    required this.quoteError,
+    required this.quoteReady,
     required this.onType,
     required this.onPrice,
     required this.onEdit,
     required this.onSubmit,
     required this.onShowRoute,
+    required this.onRetryRoute,
   });
   final TajGoMapLocation from, to;
   final String type;
@@ -1137,63 +1587,72 @@ class _DetailsPanel extends StatelessWidget {
   final TajGoRoute? route;
   final double? directBaselineMeters;
   final bool routeLoading;
+  final String? routeError;
+  final bool quoteLoading;
+  final String? quoteError;
+  final bool quoteReady;
   final ValueChanged<String> onType;
   final ValueChanged<String> onPrice;
   final ValueChanged<_Stage> onEdit;
   final VoidCallback onSubmit;
   final VoidCallback onShowRoute;
+  final VoidCallback onRetryRoute;
   @override
   Widget build(BuildContext context) => Material(
     color: Colors.white,
-    borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+    borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+    clipBehavior: Clip.antiAlias,
     child: SafeArea(
       top: false,
       child: Column(
         children: [
           Expanded(
             child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  const Text(
+                    'Ваша доставка',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
+                  ),
+                  const SizedBox(height: 12),
                   _DetailsAddressRow(
                     label: 'Откуда',
                     address: from.address,
                     marker: 'A',
                     onTap: () => onEdit(_Stage.pickFrom),
                   ),
-                  const SizedBox(height: 5),
+                  const SizedBox(height: 8),
                   _DetailsAddressRow(
                     label: 'Куда',
                     address: to.address,
                     marker: 'B',
                     onTap: () => onEdit(_Stage.pickTo),
                   ),
-                  const SizedBox(height: 8),
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
+                  const SizedBox(height: 12),
+                  if (types.length > 1) ...[
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
                       children: types.entries
                           .map(
-                            (entry) => Padding(
-                              padding: const EdgeInsets.only(right: 6),
-                              child: ChoiceChip(
-                                label: Text(entry.value),
-                                selected: type == entry.key,
-                                selectedColor: TajGoColors.darkGreen,
-                                labelStyle: TextStyle(
-                                  color: type == entry.key
-                                      ? Colors.white
-                                      : TajGoColors.ink,
-                                ),
-                                onSelected: (_) => onType(entry.key),
+                            (entry) => ChoiceChip(
+                              label: Text(entry.value),
+                              selected: type == entry.key,
+                              selectedColor: TajGoColors.deepGreen,
+                              labelStyle: TextStyle(
+                                color: type == entry.key
+                                    ? Colors.white
+                                    : TajGoColors.ink,
                               ),
+                              onSelected: (_) => onType(entry.key),
                             ),
                           )
                           .toList(),
                     ),
-                  ),
-                  const SizedBox(height: 8),
+                    const SizedBox(height: 12),
+                  ],
                   TajGoRouteSummaryCard(
                     route: route,
                     loading: routeLoading,
@@ -1201,68 +1660,80 @@ class _DetailsPanel extends StatelessWidget {
                     onShowEntireRoute: onShowRoute,
                     compact: true,
                   ),
-                  const SizedBox(height: 7),
+                  if (routeError != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      routeError!,
+                      style: const TextStyle(color: TajGoColors.muted),
+                    ),
+                    TextButton.icon(
+                      onPressed: onRetryRoute,
+                      icon: const Icon(Icons.refresh_rounded),
+                      label: const Text('Повторить'),
+                    ),
+                  ],
+                  if (quoteLoading) const LinearProgressIndicator(minHeight: 2),
+                  if (quoteError != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        quoteError!,
+                        style: const TextStyle(
+                          color: TajGoColors.error,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                  const SizedBox(height: 12),
                   TextField(
                     controller: comment,
                     maxLength: 200,
-                    maxLines: 1,
+                    minLines: 1,
+                    maxLines: 3,
                     decoration: const InputDecoration(
-                      labelText: 'Подъезд, ориентир или комментарий',
+                      labelText: 'Комментарий курьеру',
+                      hintText: 'Подъезд, этаж, ориентир',
                       counterText: '',
                       isDense: true,
                     ),
                   ),
-                  const SizedBox(height: 7),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Рекомендуем: ${pricing.suggestedPrice(route?.distanceKm ?? 0)} TJS',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                            const Text(
-                              'Курьеры могут принять её или предложить свою.',
-                              style: TextStyle(
-                                color: TajGoColors.muted,
-                                fontSize: 11,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      SizedBox(
-                        width: 105,
-                        child: TextField(
-                          controller: price,
-                          onChanged: onPrice,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'Ваша цена',
-                            suffixText: 'TJS',
-                            isDense: true,
-                          ),
-                        ),
-                      ),
-                    ],
+                  const SizedBox(height: 10),
+                  const Text(
+                    'Предварительная цена. Финальная цена подтверждается сервисом.',
+                    style: TextStyle(color: TajGoColors.muted, fontSize: 12),
                   ),
                 ],
               ),
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
-            child: SizedBox(
-              width: double.infinity,
-              height: 48,
-              child: FilledButton(
-                onPressed: busy ? null : onSubmit,
-                child: Text(busy ? 'Публикуем...' : 'Опубликовать заказ'),
-              ),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+            decoration: const BoxDecoration(
+              border: Border(top: BorderSide(color: Color(0xFFEDF1EE))),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  price.text.isEmpty
+                      ? 'Рассчитываем стоимость…'
+                      : 'Доставка · ${price.text} сомони',
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                    color: TajGoColors.deepGreen,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                DeliveryPrimaryAction(
+                  label: 'Оформить доставку',
+                  busy: busy,
+                  onPressed: route == null || !quoteReady ? null : onSubmit,
+                  icon: Icons.arrow_forward_rounded,
+                ),
+              ],
             ),
           ),
         ],
@@ -1290,34 +1761,48 @@ class _DetailsAddressRow extends StatelessWidget {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(10),
-      child: Row(
-        children: [
-          _PointBadge(label: marker, active: true, selected: false),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '$label: ${presentation.primary}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.w700),
-                ),
-                Text(
-                  presentation.secondary,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: TajGoColors.muted,
-                    fontSize: 12,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(
+          children: [
+            _PointBadge(label: marker, active: true, selected: false),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: const TextStyle(
+                      color: TajGoColors.muted,
+                      fontSize: 12,
+                    ),
                   ),
-                ),
-              ],
+                  Text(
+                    presentation.primary,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 15,
+                      height: 1.3,
+                    ),
+                  ),
+                  Text(
+                    presentation.secondary,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: TajGoColors.muted,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-          const Icon(Icons.edit_rounded, size: 17, color: TajGoColors.muted),
-        ],
+            const Icon(Icons.edit_rounded, size: 17, color: TajGoColors.muted),
+          ],
+        ),
       ),
     );
   }
@@ -1418,15 +1903,23 @@ Widget buildNewOrderPointPanelForTest({bool pickup = true}) => SizedBox(
 );
 
 @visibleForTesting
-Widget buildNewOrderEmergencyMapLayoutForTest() {
-  const size = Size(360, 800);
-  final panelHeight = NewOrderMapLayout.panelHeight(size, details: false);
+Widget buildNewOrderEmergencyMapLayoutForTest({
+  Size size = const Size(360, 800),
+  TextScaler textScaler = TextScaler.noScaling,
+}) {
+  final panelHeight = NewOrderMapLayout.panelHeight(
+    size,
+    details: false,
+    textScaler: textScaler,
+  );
   return SizedBox.fromSize(
     size: size,
     child: NewOrderMapStack(
       children: [
-        Positioned.fill(
+        NewOrderMapViewport(
           key: const ValueKey('new-order-map-viewport'),
+          panelHeight: panelHeight,
+          selecting: true,
           child: FlutterMap(
             options: const MapOptions(
               initialCenter: LatLng(40.2833, 69.6222),
@@ -1434,6 +1927,10 @@ Widget buildNewOrderEmergencyMapLayoutForTest() {
             ),
             children: const [],
           ),
+        ),
+        NewOrderSelectionPinAnchor(
+          panelHeight: panelHeight,
+          child: const _SelectionPin(stage: _Stage.pickFrom),
         ),
         Positioned(
           key: const ValueKey('new-order-map-gps'),
@@ -1485,25 +1982,36 @@ Widget buildNewOrderDetailsPanelForTest() => SizedBox(
       points: const [LatLng(40.2833, 69.6222), LatLng(40.2860, 69.6250)],
       distanceKm: 0.4,
       etaMinutes: 3,
-      isRoadRouteApproximation: true,
-      providerName: 'direct',
-      routeQuality: RouteQuality.directFallback,
+      isRoadRouteApproximation: false,
+      providerName: 'test-road',
+      routeQuality: RouteQuality.road,
       createdAt: DateTime.utc(2026),
     ),
     directBaselineMeters: 400,
     routeLoading: false,
+    routeError: null,
+    quoteLoading: false,
+    quoteError: null,
+    quoteReady: true,
     onType: (_) {},
     onPrice: (_) {},
     onEdit: (_) {},
     onSubmit: () {},
     onShowRoute: () {},
+    onRetryRoute: () {},
   ),
 );
 
 @visibleForTesting
-Widget buildNewOrderDetailsMapLayoutForTest() {
-  const size = Size(360, 800);
-  final panelHeight = NewOrderMapLayout.panelHeight(size, details: true);
+Widget buildNewOrderDetailsMapLayoutForTest({
+  Size size = const Size(360, 800),
+  TextScaler textScaler = TextScaler.noScaling,
+}) {
+  final panelHeight = NewOrderMapLayout.panelHeight(
+    size,
+    details: true,
+    textScaler: textScaler,
+  );
   return SizedBox.fromSize(
     size: size,
     child: NewOrderMapStack(

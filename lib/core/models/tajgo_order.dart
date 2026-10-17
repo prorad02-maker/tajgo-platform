@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 enum OrderStatus {
+  unknown,
   waiting,
   accepted,
   pickedUp,
@@ -47,11 +48,12 @@ OrderStatus orderStatusFromString(String? value) {
     'disputed' => OrderStatus.disputed,
     'cancelled' => OrderStatus.cancelled,
     'draft' || 'waiting' || 'waitingOffers' || null => OrderStatus.waiting,
-    _ => OrderStatus.waiting,
+    _ => OrderStatus.unknown,
   };
 }
 
 String orderStatusToString(OrderStatus status) => switch (status) {
+  OrderStatus.unknown => 'unknown',
   OrderStatus.waiting => 'waiting',
   OrderStatus.accepted => 'accepted',
   OrderStatus.pickedUp => 'pickedUp',
@@ -113,6 +115,7 @@ class TajGoOrder {
     this.subtotal,
     this.deliveryFee,
     this.total,
+    this.commandVersion,
   });
 
   final String id,
@@ -136,6 +139,16 @@ class TajGoOrder {
   final DateTime? offerExpiresAt;
   final String pricingVersion;
   final String? partnerId, partnerName;
+  final String? commandVersion;
+  bool get isActive =>
+      const {
+        OrderStatus.waiting,
+        OrderStatus.accepted,
+        OrderStatus.pickedUp,
+        OrderStatus.delivered,
+        OrderStatus.disputed,
+      }.contains(status) &&
+      completedAt == null;
   final List<CatalogOrderItem> items;
   final num? subtotal, deliveryFee, total;
   final num? distanceKm;
@@ -156,6 +169,9 @@ class TajGoOrder {
       resolvedBy,
       manuallyCompletedBy,
       adminNote;
+
+  num get effectivePrice => finalPrice ?? price;
+  bool get isFinalPriceLocked => finalPrice != null;
 
   factory TajGoOrder.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data() ?? const <String, dynamic>{};
@@ -215,6 +231,7 @@ class TajGoOrder {
       subtotal: data['subtotal'] as num?,
       deliveryFee: data['deliveryFee'] as num?,
       total: data['total'] as num?,
+      commandVersion: data['commandVersion'] as String?,
     );
   }
 

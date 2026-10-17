@@ -171,6 +171,7 @@ class _AdminOrdersScreenState extends State<AdminOrdersScreen> {
 }
 
 String orderStatusLabel(OrderStatus status) => switch (status) {
+  OrderStatus.unknown => 'Статус недоступен',
   OrderStatus.waiting => 'Ожидает',
   OrderStatus.accepted => 'Принят',
   OrderStatus.pickedUp => 'В пути',

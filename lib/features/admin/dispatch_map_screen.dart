@@ -1,13 +1,17 @@
+import '../../core/design/tajgo_money.dart';
+import '../../shared/widgets/tajgo_map_attribution.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../core/constants/tajgo_colors.dart';
+import '../../core/config/map_provider_config.dart';
 import '../../core/models/tajgo_courier.dart';
 import '../../core/models/tajgo_order.dart';
 import '../../shared/widgets/tajgo_scope.dart';
 import '../map/services/tajgo_map_camera.dart';
 import '../map/widgets/tajgo_location_widgets.dart';
+import '../map/widgets/tajgo_road_route_layer.dart';
 import 'admin_couriers_screen.dart';
 import 'admin_order_details_screen.dart';
 import 'admin_orders_screen.dart';
@@ -167,32 +171,9 @@ class _DispatchMapScreenState extends State<DispatchMapScreen> {
                 });
               }
             }
-            final routeLines = <Polyline>[];
             final selectedOrder = _selected is TajGoOrder
                 ? _selected as TajGoOrder
                 : null;
-            for (final order in <TajGoOrder>[?selectedOrder]) {
-              if (order.fromLocation == null || order.toLocation == null) {
-                continue;
-              }
-              final route = TajGoScope.of(context).routeService.directRoute(
-                from: LatLng(
-                  order.fromLocation!.latitude,
-                  order.fromLocation!.longitude,
-                ),
-                to: LatLng(
-                  order.toLocation!.latitude,
-                  order.toLocation!.longitude,
-                ),
-              );
-              routeLines.add(
-                Polyline(
-                  points: route.polylinePoints,
-                  color: TajGoColors.green.withValues(alpha: 0.45),
-                  strokeWidth: 3,
-                ),
-              );
-            }
             return Stack(
               children: [
                 FlutterMap(
@@ -203,11 +184,23 @@ class _DispatchMapScreenState extends State<DispatchMapScreen> {
                   ),
                   children: [
                     TileLayer(
-                      urlTemplate:
-                          'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                      userAgentPackageName: 'tj.tajgo.app',
+                      urlTemplate: MapProviderConfig.current.tileUrlTemplate,
+                      userAgentPackageName:
+                          MapProviderConfig.current.userAgentPackageName,
                     ),
-                    PolylineLayer(polylines: routeLines),
+                    if (selectedOrder?.fromLocation != null &&
+                        selectedOrder?.toLocation != null)
+                      TajGoRoadRouteLayer(
+                        statusBottomPadding: 180,
+                        from: LatLng(
+                          selectedOrder!.fromLocation!.latitude,
+                          selectedOrder.fromLocation!.longitude,
+                        ),
+                        to: LatLng(
+                          selectedOrder.toLocation!.latitude,
+                          selectedOrder.toLocation!.longitude,
+                        ),
+                      ),
                     MarkerLayer(
                       markers: [
                         ...visibleCouriers.map(
@@ -290,6 +283,7 @@ class _DispatchMapScreenState extends State<DispatchMapScreen> {
                           ),
                       ],
                     ),
+                    const TajGoMapAttribution(),
                   ],
                 ),
                 SafeArea(
@@ -420,7 +414,7 @@ class _PeekCard extends StatelessWidget {
         ? ((selected as TajGoCourier).online
               ? 'Курьер на линии'
               : 'Курьер offline')
-        : '${orderStatusLabel((selected as TajGoOrder).status)} · ${(selected as TajGoOrder).price} TJS';
+        : '${orderStatusLabel((selected as TajGoOrder).status)} · ${TajGoMoney.format((selected as TajGoOrder).price)}';
     return SafeArea(
       top: false,
       child: Card(
