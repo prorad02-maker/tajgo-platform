@@ -11,6 +11,17 @@ if ($Device -notmatch '^emulator-\d+$' -or (& $adb -s $Device shell getprop ro.k
 }
 $response = Invoke-WebRequest 'http://127.0.0.1:9099/emulator/v1/projects/demo-tajgo-android/verificationCodes' -TimeoutSec 5
 if ($response.StatusCode -ne 200) { throw 'Start the local Auth emulator first; see docs/ANDROID_NATIVE_QA.md.' }
+# Revoking an already granted permission kills the running app. Prepare a
+# repeated installation before Flutter starts its test process, so the denied
+# gate below only sets flags on permissions that are already denied.
+$installedPackage = (& $adb -s $Device shell pm path tj.tajgo.app) -join ''
+if ($installedPackage -match '^package:') {
+    & $adb -s $Device shell am force-stop tj.tajgo.app
+    foreach ($permission in @('ACCESS_FINE_LOCATION','ACCESS_COARSE_LOCATION')) {
+        & $adb -s $Device shell pm revoke tj.tajgo.app "android.permission.$permission" 2>$null
+        & $adb -s $Device shell pm set-permission-flags tj.tajgo.app "android.permission.$permission" user-set user-fixed
+    }
+}
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 $OutputDirectory = (Resolve-Path $OutputDirectory).Path
 $log = Join-Path $OutputDirectory 'android-native-test.log'
@@ -36,6 +47,14 @@ try {
                 $seen[$phase] = $true
                 if ($phase.StartsWith('capture-')) {
                     $focus = (& $adb -s $Device shell dumpsys window) -join "`n"
+                    # The preceding GPS-off test can leave this Google Play
+                    # services warning over the app even after GPS is restored.
+                    if ($focus -match 'mCurrentFocus=.*com\.google\.android\.gms/.*LocationOffWarningActivity') {
+                        & $adb -s $Device shell input keyevent KEYCODE_BACK
+                        Start-Sleep -Milliseconds 300
+                        $focus = (& $adb -s $Device shell dumpsys window) -join "`n"
+                        Write-Host 'Dismissed the location-off warning created by the GPS test.'
+                    }
                     if ($focus -notmatch 'mCurrentFocus=.*tj\.tajgo\.app/') {
                         throw 'A system window obscures TajGo. Close it on the dedicated emulator and repeat the check.'
                     }
