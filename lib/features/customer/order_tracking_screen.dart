@@ -9,6 +9,7 @@ import 'package:latlong2/latlong.dart';
 import '../../core/constants/tajgo_colors.dart';
 import '../../core/config/map_provider_config.dart';
 import '../../core/models/tajgo_courier.dart';
+import '../../core/models/courier_application.dart';
 import '../../core/models/courier_offer.dart';
 import '../../core/models/tajgo_order.dart';
 import '../../core/services/pricing.dart' as pricing;
@@ -1049,13 +1050,9 @@ class DeliveryCourierOfferCard extends StatelessWidget {
           runSpacing: 6,
           children: [
             DeliveryPill(
-              label: switch (offer.courierTransport) {
-                'bicycle' => 'Велосипед',
-                'scooter' => 'Самокат',
-                'car' => 'Автомобиль',
-                'walking' => 'Пешком',
-                _ => offer.courierTransport,
-              },
+              label: CourierTransport.label(
+                CourierTransport.normalize(offer.courierTransport),
+              ),
               icon: Icons.delivery_dining_outlined,
             ),
             DeliveryPill(

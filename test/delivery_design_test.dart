@@ -61,7 +61,7 @@ const offer = CourierOffer(
   courierId: 'courier',
   courierName: 'Рахим Саидов',
   courierRating: 4.9,
-  courierTransport: 'bicycle',
+  courierTransport: 'electric_bike',
   courierDistanceMeters: 320,
   proposedPrice: 32,
   originalClientPrice: 25,
@@ -297,6 +297,8 @@ void main() {
           await tester.ensureVisible(find.text(label));
           await tester.tap(find.text(label));
         }
+        expect(find.text('Велосипед'), findsOneWidget);
+        expect(find.text('electric_bike'), findsNothing);
         expect(selected && rejected && map, isTrue);
         expect(tester.takeException(), isNull);
         await captureUi(tester, 'courier-offer-${scale.toInt()}x');
@@ -326,6 +328,9 @@ void main() {
             onPrimary: () => presses++,
           ),
         ),
+        width: 320,
+        height: 568,
+        scale: 2,
       );
       final button = tester.widget<FilledButton>(
         find.ancestor(
@@ -334,6 +339,15 @@ void main() {
         ),
       );
       expect(button.onPressed, isNull);
+      if (!scenario.$3) {
+        final reason = find.text(
+          scenario.$1 ? 'Подойдите ближе к точке' : 'Нужна геолокация',
+        );
+        expect(
+          tester.getRect(reason).bottom,
+          lessThan(tester.getRect(find.text('Передал заказ')).top),
+        );
+      }
       expect(find.byType(TajGoConfirmationCode), findsNothing);
       expect(tester.takeException(), isNull);
     }

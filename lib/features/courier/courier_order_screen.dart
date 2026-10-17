@@ -902,6 +902,21 @@ class CourierDeliveryPanel extends StatelessWidget {
                   ),
                   const SizedBox(height: 8),
                 ],
+                if (needsGeo && !primaryEnabled)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Text(
+                      geoAvailable
+                          ? 'Подойдите ближе к точке'
+                          : 'Нужна геолокация',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Color(0xFF805C13),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
                 DeliveryPrimaryAction(
                   label: _primaryLabel!,
                   busy: busy,
